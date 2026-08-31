@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard that the shipped `reg_micro_reg` default is `1`, everywhere it lives.
+r"""Guard that the shipped `reg_micro_reg` default is `1`, everywhere it lives.
 
 `reg_micro_reg` has TEN homes. NINE were enumerated by the 2026-08-30 spec
 (Task 5 of the registration-backend-surface plan); the tenth --
@@ -37,6 +37,51 @@ elsewhere) -- a grep for the literal brief phrase would not have found it.
 Once `reg_micro_reg`'s default is `1` (not `2`, the max of `{0, 1, 2}`),
 every one of those four sentences is false, so this test asserts none of
 them survive, in either word order, case-insensitively.
+
+`MAX_DEFAULT_PATTERN` WAS TOO NARROW AND LET TWO LIVE SENTENCES THROUGH.
+It required the two words to be ADJACENT (`default\s+max|max\s+default`),
+so it matched neither of the two sentences that were actually shipping in
+`docs/figures/pipeline-schematic.html` on 2026-08-30:
+
+    :371  "Micro-registration at maximum depth by default."
+    :849  "...QC on by default and micro-registration at maximum depth..."
+
+Both are the same false claim; neither puts the words side by side. That is
+also the reason the tenth home (`ParamUtils.microRegLevelOf`'s "Default 2
+(max: ...", see `PARAM_UTILS` above) had to be caught by a hand-written
+second check rather than by this one. The pattern now allows up to 60
+non-sentence-ending characters between the two words in either order, which
+matches all three phrasings. `\bmax(?:imum|imal)?\b` keeps the word
+boundary deliberately: `max_memory`, `max_cpus` and `maxRetries` all fail
+it, so the many "`max_*` ... default" co-occurrences in `nextflow.config`
+and the schema do not become false positives. Measured against the five
+`PROSE_HOMES` before the prose was fixed: two hits, both the sentences
+above, zero elsewhere.
+
+`docs/figures/registration-schematic.html:559` carried a THIRD instance
+("the shipped default (depth 2 = maximum)"). This docstring used to say the
+file was deliberately NOT in `PROSE_HOMES` because spec Phase 6 owns
+rewriting that figure. That reasoning is withdrawn, on review: Phase 6 owns
+the REWRITE, not a licence to leave a false shipped default in a published
+figure, and the exclusion is precisely what let `:559` survive the pass that
+widened this pattern. The file is now in `PROSE_HOMES`; adding it was
+watched fail on that exact line before the prose was fixed:
+
+    AssertionError: these still claim the reg_micro_reg default is the
+    maximum value (it is 1, the minimum non-zero value of {0, 1, 2}):
+    ["docs/figures/registration-schematic.html: 'default (depth 2 = maximum'"]
+
+Its step-2b HEADER carried the same claim a second time ("register_micro()
+- micro_reg = 2 - default") and does not match this pattern at all -- it has
+no "max" in it -- so it was fixed by hand alongside. Two copies in one file,
+again; see the ELEVENTH/TWELFTH note below.
+
+Still deferred to Phase 6, and correctly: that figure's description of the
+deleted coarse front-end, and its stale `coarse_max_dim` value. That is a
+genuine rewrite rather than a number, and it is allow-listed with that reason
+stated in `tests/test_no_legacy_frontends.py` -- which is also why this
+docstring does not name the front-end: that guard forbids new references to
+it, and it is right to.
 """
 
 from __future__ import annotations
@@ -75,10 +120,15 @@ PARAM_UTILS = ROOT / "lib" / "ParamUtils.groovy"
 # `2`. A per-home check that matches only one of a file's two copies is not coverage of
 # that file.
 PIPELINE_MD = ROOT / "docs" / "pipeline.md"
-# `docs/figures/registration-schematic.html` carries a THIRD such restatement
-# ("register_micro() - micro_reg = 2 - default", :554). It is deliberately NOT asserted
-# here: spec Phase 6 owns rewriting that figure wholesale, and half-correcting it would
-# be worse than leaving it to its owner. Its parameter-table row IS pinned above.
+# `docs/figures/registration-schematic.html` carried TWO more restatements, and this
+# comment used to say they were deliberately left to spec Phase 6. That deferral was
+# wrong and is withdrawn: Phase 6 owns REWRITING the figure, not a licence to keep a
+# false shipped default in it, and the deferral is what let both stand. Both are fixed
+# (its step-2b header, and the body sentence "the shipped default (depth 2 = maximum)"),
+# the file is now in PROSE_HOMES below, and its parameter-table row stays pinned above.
+# What IS still deferred to Phase 6 is that figure's description of the deleted coarse
+# front-end and its stale `coarse_max_dim` value -- a genuine rewrite, allow-listed with
+# that reason stated in tests/test_no_legacy_frontends.py.
 _MICRO_REG_BADGE_RE = re.compile(r"<span>micro_reg <b>(\S+?)</b></span>")
 
 # Deliberately NOT one of the nine homes -- see module docstring.
@@ -86,8 +136,30 @@ TEST_CONFIG = ROOT / "conf" / "test.config"
 
 # The four prose homes making the now-false "default is the max" claim, and
 # both spellings it can take.
-PROSE_HOMES = [NEXTFLOW_CONFIG, SCHEMA, PARAMETERS_MD, PIPELINE_SCHEMATIC, PARAM_UTILS]
-MAX_DEFAULT_PATTERN = re.compile(r"default\s+max|max\s+default", re.IGNORECASE)
+PROSE_HOMES = [
+    NEXTFLOW_CONFIG,
+    SCHEMA,
+    PARAMETERS_MD,
+    PIPELINE_SCHEMATIC,
+    PARAM_UTILS,
+    # Added 2026-09-01. It had been left out on the grounds that spec Phase 6 owns
+    # rewriting this figure -- but Phase 6 owns the REWRITE, not a licence to keep a
+    # false default in the meantime, and the exclusion was what let `:559` ("the
+    # shipped default (depth 2 = maximum)") stand. Watched fail on that exact line
+    # before the prose was fixed. Phase 6's rewrite now inherits this constraint,
+    # which is the right way round: a figure may be rewritten freely, but not back
+    # into claiming 2 is the shipped depth.
+    REGISTRATION_SCHEMATIC,
+]
+# Not `default\s+max` -- see the module docstring: requiring adjacency let two live
+# sentences through. Up to 60 non-"." characters may sit between the two words, in
+# either order. The `\b` after `max(?:imum|imal)?` is load-bearing: it is what keeps
+# `max_memory` / `max_cpus` / `maxRetries` out of the match.
+MAX_DEFAULT_PATTERN = re.compile(
+    r"\bdefaults?\b[^.]{0,60}?\bmax(?:imum|imal)?\b"
+    r"|\bmax(?:imum|imal)?\b[^.]{0,60}?\bdefaults?\b",
+    re.IGNORECASE,
+)
 
 
 def _read(path: Path) -> str:
@@ -413,8 +485,13 @@ def test_no_prose_home_still_claims_the_default_is_the_maximum():
     offenders = []
     for path in PROSE_HOMES:
         text = _read(path)
-        if MAX_DEFAULT_PATTERN.search(text):
-            offenders.append(str(path.relative_to(ROOT)))
+        for match in MAX_DEFAULT_PATTERN.finditer(text):
+            # Report the matched text, not just the filename: the two words are not
+            # adjacent, so a bare path sends the reader hunting for a phrase that
+            # does not exist as written.
+            quoted = re.sub(r"\s+", " ", match.group(0))
+            offenders.append(f"{path.relative_to(ROOT)}: {quoted!r}")
     assert not offenders, (
-        f"these files still claim the default is the maximum value: {offenders}"
+        "these still claim the reg_micro_reg default is the maximum value "
+        f"(it is 1, the minimum non-zero value of {{0, 1, 2}}): {offenders}"
     )

@@ -214,33 +214,38 @@
   <p class="standfirst">Lazy, region-readable zarr views of an OME-TIFF were never missing from this pipeline:
     <code>bin/utils/tiled_io.py</code> has carried <code>open_lazy</code>, <code>read_decimated</code> and
     <code>decimation_factor</code> since the STARE tiled backend was built, and three tiled scripts were their only
-    consumers. What changed is the blast radius — four further sites now read one channel where they used to read
-    the whole stack, and a fifth eager read, owned by a different library, was later taken through <i>that</i>
-    library's own lazy API. The gain is <b>peak memory</b>, not bytes read: at three of the four, the number of
+    consumers. What changed is the blast radius — five further sites now read one channel, one plane or one band
+    where they used to read the whole stack, and a sixth eager read, owned by a different library, was later taken
+    through <i>that</i> library's own lazy API. The gain is <b>peak memory</b>, not bytes read: at four of the five, the number of
     source pixels decoded is <i>unchanged</i>, because a published full-resolution artifact, an anti-aliased resize,
     or a whole-image statistic still demands every one of them. Each claim below is stated at the confidence it
     earned; every process where laziness buys nothing is named with the reason; and three places where the audit
     that scoped this work was wrong are recorded, because the reason they were wrong generalises.</p>
   <div class="figset" style="margin-top:11px;text-transform:none;letter-spacing:0">
     <span style="border:none;padding-left:0;color:var(--ink-3)">sites moved onto <code>tiled_io</code>'s lazy view:
-    <b>4</b> · eager reads taken in another library: <b>1</b> ·
-    pixel-reading processes where a lazy read cannot help: <b>12</b> · new pipeline parameters: <b>0</b> ·
-    resource requests changed by this work: <b>0</b></span>
+    <b>5</b> · eager reads taken in another library: <b>1</b> ·
+    pixel-reading processes where a lazy read cannot help: <b>14</b> · new pipeline parameters: <b>0</b> ·
+    memory closures lowered as a result: <b>3</b></span>
   </div>
-  <div class="callout" style="margin-top:13px"><span class="wl">this figure was revised: five sites became four</span>
-    An earlier version of this figure described five changed sites and named one remaining opportunity. Both have
-    since moved: the fifth site's process was <b>deleted</b> when illumination correction was handed to nf-core's
-    <code>BASICPY</code>, and the remaining opportunity — the BioIO convert — was <b>taken</b>. Neither is quietly
-    edited out. The deleted site was the only card in the set carrying no measurement, so the surviving four are
-    stronger than the original five (panel <b>c</b>); the taken opportunity brought the figure's only measurement
-    of a real production function, and its own near miss (panels <b>d</b> and <b>g</b>).</div>
+  <div class="callout" style="margin-top:13px"><span class="wl">this figure has been revised twice</span>
+    <b>First revision, five sites to four.</b> The original fifth site's process was <b>deleted</b> when
+    illumination correction was handed to nf-core's <code>BASICPY</code>, and the one remaining opportunity — the
+    BioIO convert — was <b>taken</b>. Neither was quietly edited out: the deleted site was the only card carrying
+    no measurement, and the taken opportunity brought the figure's only measurement of a real production function
+    (panels <b>d</b> and <b>g</b>).<br><br>
+    <b>Second revision, four back to five — and the headline claim reversed.</b> <code>MERGE_AND_PYRAMID</code>
+    reads through <code>open_lazy</code> at two call sites
+    (<code>bin/merge_channels_pyramid.py:553</code> for the channel files, <code>:619</code> for the masks) and was
+    named nowhere in this figure, despite being the <b>largest measured win in the set</b>. It is also the
+    counter-example to the old panel <b>h</b>: this figure used to say that no memory closure had been lowered and
+    that the scheduler saw nothing. <b>Three were lowered</b>, and panel <b>h</b> now names them.</div>
 
   <!-- a — WHAT ALREADY EXISTED -->
   <section class="panel">
     <span class="plabel">a</span>
     <div class="panel-head"><h2>What the pipeline already had, and what a reader assumes it gained</h2>
-      <p>The natural reading of "the pipeline now uses zarr" is that it reads fewer bytes off disk. At three of the
-        four sites it does not. Two independent axes of overread exist, and only one of them was ever available to
+      <p>The natural reading of "the pipeline now uses zarr" is that it reads fewer bytes off disk. At four of the
+        five sites it does not. Two independent axes of overread exist, and only one of them was ever available to
         remove.</p></div>
     <div class="two">
       <div class="bx">
@@ -255,10 +260,16 @@
         <h4>THE SPATIAL AXIS &mdash; not removable here</h4>
         <div class="sub">full resolution decoded to emit a thumbnail</div>
         <p class="x">Reading <code>[::f, ::f]</code> instead of the full plane would be the larger win — and it is
-          available at <b>none</b> of the four sites. <code>decimation_factor(..., max_dim=None)</code> returns
-          <code>1</code> at each of them, deliberately; panels <b>f</b> and <b>g</b> give the three separate
-          reasons.</p>
-        <div class="src">decimation_factor — bin/utils/tiled_io.py:86 (returns 1 when max_dim is None)</div>
+          available at <b>none</b> of the five sites. The conclusion is uniform; the <i>mechanism</i> is not, and
+          this box used to claim it was. Only <b>site 1</b> reaches it through
+          <code>decimation_factor(..., max_dim=None) → 1</code>. <b>Site 2</b> hard-codes
+          <code>read_decimated(..., factor=1)</code> and never calls the resolver. <b>Sites 3, 4 and 5</b>
+          (<code>SPLIT_CHANNELS</code>, <code>SEGMENT</code>, <code>MERGE_AND_PYRAMID</code>) slice regions off the
+          lazy view directly and call neither — they have no decimation path to disable. Panels <b>f</b> and
+          <b>g</b> give the three separate reasons the win is unavailable in each case.</p>
+        <div class="src">bin/utils/qc.py:382 (the one decimation_factor call) ·
+          bin/generate_preprocess_qc.py:211 (factor=1, hard-coded) ·
+          decimation_factor — bin/utils/tiled_io.py:86 (returns 1 when max_dim is None)</div>
       </div>
     </div>
     <div class="callout"><span class="wl">the capability was never missing — only its reach</span>
@@ -316,8 +327,8 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
   <!-- c — THE FIVE SITES -->
   <section class="panel">
     <span class="plabel">c</span>
-    <div class="panel-head"><h2>The four sites that changed, at the confidence each earned</h2>
-      <p>Each card carries the strongest evidence that actually exists for it, and no more. Two were measured; two
+    <div class="panel-head"><h2>The five sites that changed, at the confidence each earned</h2>
+      <p>Each card carries the strongest evidence that actually exists for it, and no more. Two were measured; three
         rest on output equivalence plus a structural argument. Nothing here sits at <i>unverified</i> — the one card
         that did is the one that is gone.</p></div>
     <div class="key">
@@ -380,9 +391,25 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
           bin/utils/segment_io.py:16-29</div>
       </div>
 
+      <div class="site">
+        <span class="num">5</span>
+        <div class="nm">MERGE_AND_PYRAMID <span class="tag-s">structural</span></div>
+        <p class="x">The site this figure missed, and the largest win in the set. <code>_load_channel_stack</code>
+          allocated the whole <code>(C, H, W)</code> stack up front — ~19 GB on an 8-channel 40000&times;30000
+          uint16 slide — handed it to the writer, then derived each pyramid level from the previous with both
+          resident, <i>plus</i> a slide-sized uint32 mask stack at 8 bytes/px. Both reads now go through
+          <code>open_lazy</code> and are consumed one row band at a time, with one handle held open across a
+          channel's bands. <b>No I/O saving</b>: every pixel of every channel is still written into the base
+          resolution.</p>
+        <div class="res">evidence: this is the one site whose memory closure was <b>rewritten</b> as a result —
+          off a flat <code>f&lt;20 ? 200.GB : 300.GB</code> ladder onto a four-term formula with an 8 GB floor
+          (panel <b>h</b>) · bin/merge_channels_pyramid.py:520-560,600-630 · conf/modules.config,
+          <code>MERGE_AND_PYRAMID</code></div>
+      </div>
+
       <div class="site" style="grid-column:1/-1">
         <span class="num">&mdash;</span>
-        <div class="nm">the fifth site, and why its loss makes this panel stronger</div>
+        <div class="nm">the original fifth site, and why its loss makes this panel stronger</div>
         <p class="x">Site 5 was <code>PREPROCESS</code>: per-channel lazy reads with a separate handle per worker
           thread, claimed at about <b>2&times;</b> rather than <i>C</i>&times; because the output planes accumulated
           regardless. It carried <b>no measurement</b> — the only <span class="tag-u">unverified</span> card in the
@@ -566,9 +593,11 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
   <section class="panel">
     <span class="plabel">f</span>
     <div class="panel-head"><h2>Where lazy reads do not help, and why &mdash; three classes</h2>
-      <p>Twelve processes read pixels or masks and are untouched. None of them is an oversight: each falls into one
-        of three classes, and in every class laziness is either impossible or buys nothing. This panel carries the
-        same weight as panel <b>c</b>.</p></div>
+      <p>Fourteen processes read pixels or masks and are untouched. None of them is an oversight: each falls into
+        one of three classes, and in every class laziness is either impossible or buys nothing. This panel carries
+        the same weight as panel <b>c</b>. It said <i>twelve</i> until <code>EXTRACT_MASK_SERIES</code> and
+        <code>SEG_QUALITY_EVAL</code> were found missing from it — a count in a figure is a claim like any
+        other.</p></div>
     <div class="tbl-scroll">
       <table class="own">
         <thead><tr><th style="width:22%">process</th><th style="width:31%">what it actually does</th><th>why a lazy region read cannot help</th></tr></thead>
@@ -586,6 +615,17 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
               <td class="kd">regionprops_table, then per-cell bbox-crop find_contours<br>bin/extract_cell_properties.py:73,167</td>
               <td>Already reads the minimum — one label mask, then crops per cell out of it. The mask is the small
                 input, and every label must be visited.</td></tr>
+          <tr><td class="st">SEG_QUALITY_EVAL</td>
+              <td class="kd">whole-image and whole-mask reads for reference-free scoring<br>bin/seg_quality_eval.py:89,128-129</td>
+              <td>CSE's per-pixel index structures are built over the entire label field at once, so the algorithm
+                holds what a lazy read would defer. <code>--cse_max_pixels</code> bins the input instead — a
+                <i>decimation</i> knob, which is the honest lever here, not laziness.</td></tr>
+
+          <tr class="grp"><td colspan="3">class 1b &mdash; the read is a whole series, not a region</td></tr>
+          <tr><td class="st">EXTRACT_MASK_SERIES</td>
+              <td class="kd"><code>tif.series[1].asarray()</code> on the pyramid's embedded mask series<br>bin/extract_mask_series.py:40</td>
+              <td>Its entire job is to lift a whole series back out of the pyramid and write it as its own file.
+                There is no subset to defer to: the output <i>is</i> the input.</td></tr>
 
           <tr class="grp"><td colspan="3">class 2 &mdash; the input is already one plane, or is not pixels at all</td></tr>
           <tr><td class="st">QUANTIFY</td>
@@ -620,20 +660,29 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
         </tbody>
       </table>
     </div>
-    <div class="callout"><span class="wl">the tiled path is the counter-example that shows the ceiling</span>
-      Where the design was built around bounded windows from the start, the property holds and has been measured:
-      every STARE tiled task's peak RSS is <b>1.3&ndash;2.0 GB on an 8192&sup2; slide, and the same on a larger
-      one</b>, because each task reads a bounded window through lazy zarr regions. That is what a genuinely
-      memory-bounded step looks like — and it required designing the <i>algorithm</i> around windows, not swapping
-      a read call.
-      <span class="src" style="display:block">conf/modules.config, "STARE (tiled) per-task memory" header</span></div>
+    <div class="callout"><span class="wl">the tiled path is the counter-example that shows the ceiling — with one exception</span>
+      Where the design was built around bounded windows, the property holds and has been measured: the
+      <i>per-tile</i> STARE tasks peak at <b>1.3&ndash;2.0 GB on an 8192&sup2; slide, and the same on a larger
+      one</b>, because each reads a bounded window through lazy zarr regions. Peak scales with the
+      <b>parameter</b> (<code>reg_tiled_tile</code> + 2&times;<code>reg_tiled_halo</code>,
+      <code>reg_tiled_out_tile</code>), never with the slide. That is what a genuinely memory-bounded step looks
+      like — and it required designing the <i>algorithm</i> around windows, not swapping a read call.<br><br>
+      <b><code>TILED_COARSE</code> is no longer in that band, and the header this figure cites still says it is.</b>
+      Its coarse anchor became a U-Net (DISK) rather than a cheap feature detector, so its peak is linear in
+      thumbnail <i>area</i>: <code>GB &asymp; 1.1 + 7.3 &times; Mpx</code>. At the shipped
+      <code>reg_tiled_mode high</code> (<code>reg_tiled_coarse_max_dim</code> 2048, 4.19 Mpx) that is
+      <b>&asymp;31.7 GB peak against a 48 GB request</b> — the 1.5&times; headroom the closure applies. The
+      window-bounded property still holds in the sense that matters (the number comes from a parameter, not the
+      slide), but the <i>magnitude</i> is an order of magnitude out from the rest of the path.
+      <span class="src" style="display:block">conf/modules.config, "STARE (tiled) per-task memory" header ·
+      <code>withName: 'TILED_COARSE'</code></span></div>
   </section>
 
   <!-- g — STRUCTURAL BLOCKERS -->
   <section class="panel">
     <span class="plabel">g</span>
     <div class="panel-head"><h2>Four structural blockers, and the one opportunity that was left &mdash; now taken</h2>
-      <p>Beyond the twelve processes of panel <b>f</b>, four specific mechanisms make a <i>spatial</i> saving
+      <p>Beyond the fourteen processes of panel <b>f</b>, four specific mechanisms make a <i>spatial</i> saving
         unavailable even at sites that <i>are</i> now lazy. They are why <code>factor</code> is 1 everywhere
         outside STARE.</p></div>
     <div class="two">
@@ -663,7 +712,7 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
       </div>
       <div class="bx">
         <h4>4 &mdash; the (Y, X, C) fallback, kept and never exercised</h4>
-        <p class="x">Two of the four changed sites keep the old eager whole-stack path for a channel-last on-disk
+        <p class="x">Two of the five changed sites keep the old eager whole-stack path for a channel-last on-disk
           layout, because <code>open_lazy</code> is channel-first only. This pipeline's own writers never produce
           that layout (always <code>axes="CYX"</code>), so the branch is defensive — and correspondingly
           <b>unexercised in production</b>. The newer readers took the <i>other</i> answer to the same problem:
@@ -731,7 +780,7 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
               memory to one band plus the accumulated decimated result when <code>factor &gt; 1</code>; at
               <code>factor == 1</code> (sites 1 and 2 below) striding is a no-op, so this bounds a per-band
               read, not the read's overall peak. <code>bin/utils/tiled_io.py:103</code></td></tr>
-          <tr><td class="k">max_dim</td><td class="v"><span class="nul">None</span> at all four sites</td>
+          <tr><td class="k">max_dim</td><td class="v"><span class="nul">None</span> wherever it is passed</td>
             <td class="d">Passed to <code>decimation_factor</code>. <code>None</code> &rarr; factor 1 &rarr; no
               spatial decimation. STARE passes a real value; nothing else does.</td></tr>
           <tr><td class="k">factor</td><td class="v">1</td>
@@ -746,7 +795,7 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
         </table>
       </div>
       <div class="pcol">
-        <h4>resource requests: all unchanged</h4>
+        <h4>resource requests: unchanged at these five &mdash; three others were lowered</h4>
         <table class="pr">
           <tr><td class="k">GENERATE_REGISTRATION_QC</td><td class="v">100 / 200 / 300 GB</td>
             <td class="d">by <code>(registered + reference).size()</code></td></tr>
@@ -759,10 +808,32 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
           <tr><td class="k">CONVERT_IMAGE</td><td class="v">24 GB &times; attempt, + 0/24/48/64 GB</td>
             <td class="d">tiered on the <b>compressed</b> input</td></tr>
         </table>
-        <p class="outnote"><b>Every one of these is a closure over file size, not over measured peak memory.</b>
-          A lower peak therefore changes nothing the scheduler reserves — the cluster still holds the same nodes
-          for the same time. What a lower peak buys is <i>headroom</i>: fewer OOM kills at the top of the size
-          distribution, and room to lower these closures later, on evidence that does not yet exist.</p>
+        <p class="outnote"><b>Every one of the five above is a closure over file size, not over measured peak
+          memory.</b> A lower peak therefore changes nothing the scheduler reserves at <i>those</i> — the cluster
+          still holds the same nodes for the same time. What a lower peak buys there is <i>headroom</i>: fewer OOM
+          kills at the top of the size distribution.</p>
+        <p class="outnote"><b>Elsewhere the evidence did arrive, and three closures moved.</b> This figure used to
+          end with &ldquo;no closure anywhere was lowered&rdquo; and &ldquo;the scheduler sees nothing&rdquo;. Both
+          are false, and the correction is the most consequential line in the panel — read verbatim from
+          <code>conf/modules.config</code>:</p>
+        <table class="pr">
+          <tr><td class="k">MERGE_AND_PYRAMID</td><td class="v">300 GB &rarr; formula</td>
+            <td class="d">off a flat <code>f&lt;20 ? 200.GB : 300.GB</code> ladder onto four terms with an 8 GB
+              floor. Only <i>one</i> term carries the channel count, and the base term is
+              <code>3.25 &times;</code> the <b>largest single</b> channel file, deliberately not their sum — the
+              O(C) shape the streaming rewrite removed.</td></tr>
+          <tr><td class="k">APPLY_PROFILES</td><td class="v">dropped its <code>&times; 7.GB</code> term</td>
+            <td class="d">no file-size term at all now: the BASIC profile planes
+              (<code>2 &times; 16 &times; preproc_tile_size&sup2; &times; 8</code> bytes) plus write-tile buffers,
+              floored at 8 GB. The old coefficient was applied to the <i>compressed</i> size and under-shot.</td></tr>
+          <tr><td class="k">TILE_FOR_BASIC</td><td class="v">carries an explicit &ldquo;NO FILE-SIZE TERM&rdquo;</td>
+            <td class="d">O(<code>preproc_tile_size&sup2;</code>) buffers only, floored at 6 GB — legitimate only
+              because <code>CONVERT_IMAGE</code> now writes tiled, so a region read decodes a tile rather than a
+              whole plane.</td></tr>
+        </table>
+        <p class="outnote">All three are the <i>same</i> mechanism this figure documents, applied at write time as
+          well as read time, and all three are <b>guarded</b>: a spy over the lazy view fails if the largest single
+          materialisation grows with the channel count.</p>
         <p class="outnote"><code>CONVERT_IMAGE</code> is the sharpest case of that mismatch, and the reason the
           streamed write matters more than its megabytes suggest: the tier is read off the <b>compressed</b> file,
           while the peak was set by the <b>decompressed</b> one. A 6 GB CZI that decompresses to 20 GB is sized at
@@ -770,12 +841,14 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
           The streamed write is what breaks that coupling —
           and the runtime warning of panel <b>g</b> says the same sentence out loud when the reader's chunking
           re-establishes it.</p>
-        <div class="callout" style="margin-top:11px"><span class="wl">one honest exception to &ldquo;nothing changed&rdquo;</span>
-          The preprocessing step's requests <i>did</i> change while this work was going on — <code>PREPROCESS</code>
-          (4 cpus, 7 GB/GB + 8) became <code>TILE_FOR_BASIC</code> (2, 3 GB/GB + 8), <code>BASICPY</code> (1, 32 GB)
-          and <code>APPLY_PROFILES</code> (2, 7 GB/GB + 8). <b>Not because anything got lazier.</b> One process
-          became three when the illumination backend was swapped for nf-core's, and each needed its own request.
-          No closure anywhere was lowered on the strength of a measured peak.</div>
+        <div class="callout" style="margin-top:11px"><span class="wl">the split, which is a separate change</span>
+          <code>PREPROCESS</code> (4 cpus, 7 GB per GB of input + 8) became three processes when illumination
+          correction was handed to nf-core's <code>BASICPY</code>: <code>TILE_FOR_BASIC</code> (2 cpus),
+          <code>BASICPY</code> (1 cpu, 32 GB &times; attempt) and <code>APPLY_PROFILES</code> (2 cpus). That split
+          is <b>not</b> a laziness result — one process became three and each needed its own request. What
+          <i>is</i> a laziness result is that two of the three now carry <b>no file-size term at all</b>, which is
+          the table above. This callout previously gave both of them per-GB coefficients
+          (<code>3 GB/GB + 8</code> and <code>7 GB/GB + 8</code>) that neither has.</div>
       </div>
     </div>
   </section>
@@ -867,13 +940,19 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
       </div>
       <div class="bx mut">
         <h4>no bytes-read reduction is claimed</h4>
-        <p class="x">Three of the four sites read exactly as many source pixels as before, and so does the convert.
+        <p class="x">Four of the five sites read exactly as many source pixels as before, and so does the convert.
           Only SEGMENT genuinely decodes less, and only on the channel axis.</p>
       </div>
       <div class="bx mut">
-        <h4>the scheduler sees nothing</h4>
-        <p class="x">Every affected process still requests memory as a function of input file size (panel
-          <b>h</b>). No run got cheaper in reserved GB&middot;h, and no closure was lowered.</p>
+        <h4>the scheduler sees less, but only at three processes</h4>
+        <p class="x">This box used to read &ldquo;the scheduler sees nothing &mdash; no run got cheaper in reserved
+          GB&middot;h, and no closure was lowered&rdquo;. Panel <b>h</b> now quotes that sentence by name as false.
+          <b>Three closures were lowered</b>: <code>MERGE_AND_PYRAMID</code> off a flat 300&nbsp;GB reservation,
+          <code>APPLY_PROFILES</code> minus its <code>&times; 7.GB</code> term, <code>TILE_FOR_BASIC</code> onto an
+          explicit &ldquo;NO FILE-SIZE TERM&rdquo;. The two latter now request <i>no</i> function of input file size
+          at all, so the first half of the old sentence was independently false as well. The limit that survives is
+          narrower: at the five processes listed in panel <b>h</b> the request is still a closure over file size, so
+          a lower peak there buys headroom rather than cost.</p>
       </div>
       <div class="bx mut">
         <h4>the channel-last branches stay untested in production</h4>
@@ -907,18 +986,22 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
     load-bearing results are the scaling shape — doubling the channel count grew the old peak 31% and the new one
     1.3% — and the convert's 435 &rarr; 168 MB. <b>(e)</b> The comment both segmentation
     backends carried was false: <code>asarray(out="memmap")</code> decodes the entire compressed image into a new
-    full-size uncompressed temporary file and maps that instead of the source. <b>(f)</b> Twelve processes are
+    full-size uncompressed temporary file and maps that instead of the source. <b>(f)</b> Fourteen processes are
     untouched, in three classes — whole-array algorithms whose objects cross block boundaries, consumers whose
     input is already one plane or is a table, and reads owned by another library (VALIS, and now the vendored
-    nf-core BASICPY container) — while the STARE tiled path shows the
-    ceiling a window-bounded <i>design</i> reaches, as opposed to a swapped read call. <b>(g)</b> Four mechanisms
+    nf-core BASICPY container) — while the STARE per-tile path shows the
+    ceiling a window-bounded <i>design</i> reaches, as opposed to a swapped read call; <code>TILED_COARSE</code>
+    is the exception, at ~31.7 GB against a 48 GB request since its anchor became a U-Net. <b>(g)</b> Four mechanisms
     block a spatial saving even where the read is now lazy, and the opportunity this figure once listed as the only
     one left (<code>convert_image.py</code>'s BioIO <code>img.data</code>) has been taken, through that library's
     own API: lazy read plus streamed chunk-slab write, with the naive per-plane iterator measured to be a
     regression and <code>.rechunk()</code> measured not to defend against it.
-    <b>(h)</b> No parameter was added and no resource closure was lowered: every affected process still reserves
-    memory as a function of input file size — the convert from the <i>compressed</i> input, while its peak was set
-    by the decompressed one — so a lower peak buys headroom, not cost. <b>(i)</b> Three claims in the audit
+    <b>(h)</b> No parameter was added, and five of the affected processes still reserve memory as a function of
+    input file size — the convert from the <i>compressed</i> input, while its peak was set by the decompressed one
+    — so at those five a lower peak buys headroom, not cost. At three it bought cost:
+    <code>MERGE_AND_PYRAMID</code> came off a 300 GB reservation, <code>APPLY_PROFILES</code> dropped its
+    <code>&times; 7.GB</code> term, and <code>TILE_FOR_BASIC</code> now carries an explicit
+    &ldquo;NO FILE-SIZE TERM&rdquo;. This panel asserted the opposite until 2026-08-30. <b>(i)</b> Three claims in the audit
     that scoped this work were wrong, all for one reason — a read site cannot tell you what the pixels are for,
     what filter consumes them, which library owns the read, or how coarsely that library chunks it. <b>(j)</b> The
     limits.

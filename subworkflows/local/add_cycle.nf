@@ -11,7 +11,11 @@
 
     Assumes true cyclic IF: the same physical section re-imaged, so the prior
     masks' cell labels align with the newly registered cycle. Registration-drift
-    QC surfaces misalignment; it is non-gating:
+    QC surfaces misalignment. It is non-gating in the SCHEDULING sense only --
+    every consumer is a collect()/join(), so a missing artifact never deadlocks
+    the DAG -- but all three processes below sit under conf/modules.config's
+    retry-then-fail selector, so a broken one FAILS THE RUN. See the header above
+    that selector; the terminal branch stopped being 'ignore' on 2026-08-25.
       - reg_qc >= 1: DAPI-overlay image QC (GENERATE_REGISTRATION_QC)
       - reg_qc >= 2: + staged seg-overlap QC (SEG_QC_GEOJSON -> WARP_SEG_QC) — per-pair
         IoU and centroid residual at each registration stage, on a correspondence fixed
@@ -195,7 +199,7 @@ workflow ADD_CYCLE {
     ch_new_registered = ch_adapter_registered.filter { meta, _f -> !meta.is_reference }
 
     // ------------------------------------------------------------------ //
-    // 3. REGISTRATION-DRIFT QC (non-gating)
+    // 3. REGISTRATION-DRIFT QC (non-gating for scheduling; retry-then-fail on error)
     // ------------------------------------------------------------------ //
     ch_qc            = Channel.empty()
     ch_seg_qc        = Channel.empty()

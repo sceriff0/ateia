@@ -88,8 +88,10 @@ displacement field at the only moment it exists — after `register()` returns, 
 `register_micro()` is called — into `reg_stage_checkpoint/`. Fields are at non-rigid
 registration resolution (a few thousand pixels a side), not slide resolution: tens of MB.
 
-Writing it can never fail a registration; it is QC input, and QC here is non-gating. When it is
-missing, the QC still runs and reports `native`, `rigid` and `micro`, sets
+Writing it can never fail a registration; it is QC input, and REGISTER's own success does not
+depend on it. The QC process that *reads* it is gating, though — `GENERATE_REGISTRATION_QC`
+carries `retry-then-fail`, so if that process itself dies the run fails. When the checkpoint is
+merely missing, the QC still runs and reports `native`, `rigid` and `micro`, sets
 `stages_separable: false`, and records a `note` saying why `non_rigid` is absent. When
 micro-registration did not run (skipped, or it raised and was caught), the checkpoint records
 that and the QC omits the `micro` stage rather than reporting a byte-for-byte duplicate of

@@ -1,6 +1,9 @@
 # Parameters
 
-<p class="standfirst">The complete parameter surface — all 75 parameters, grouped by pipeline
+<p class="standfirst">The complete parameter surface — all 90 operator-settable parameters of the
+92 that <code>nextflow.config</code> declares (the two omitted are the nf-core
+<code>config_profile_name</code> / <code>config_profile_description</code> identity strings, which
+a site profile sets, not a run), grouped by pipeline
 stage, each with the default that ships in <code>nextflow.config</code>. That file is the single
 source of truth: <code>tests/test_no_duplicate_param_defaults.py</code> forbids a second
 declaration of any default in the pipeline code it scans (<code>main.nf</code>,
@@ -70,8 +73,19 @@ laptop-sized at its shipped tier — see the memory note under [Tiled / STARE](#
 | Parameter | Default | Description |
 |---|---|---|
 | `registration_method` | `valis` | Registration backend: `valis` (VALIS whole-slide) or `tiled` (STARE — see [Tiled / STARE](#tiled-stare-registration_methodtiled)). |
-| `allow_auto_reference` | `false` | If no `is_reference=true` row, use the first samplesheet row as reference. **`--start preprocessing` only** — later entry points read a checkpoint that already names the reference, and will error rather than infer one. |
 | `nuclear_markers` | `['DAPI','CELLTOX']` | Ordered preference of nuclear/fiducial marker names. The first present (resolved from channel metadata, never the filename) is moved to channel 0 and drives both cell segmentation and the registration fiducial. Fails fast if none present (single-channel images excepted). Accepts a **list** (config or `-params-file`) or a **comma/space-separated string**, which is the only shape a command line can produce: `--nuclear_markers CELLTOX` and `--nuclear_markers DAPI,CELLTOX` both work. Matching is case-insensitive **substring**, so `DAPI_nuclear` counts as nuclear. |
+
+!!! warning "The reference is declared, never inferred"
+    There is **no parameter** that picks a registration reference for you. Every
+    patient must declare exactly one `is_reference=true` row; a patient with none
+    is a **hard error at launch**, at every entry point, and two `true` rows are
+    the same error. `allow_auto_reference`, which promoted a patient's first
+    samplesheet row, was **removed** — two sheets differing only in row order
+    produced two different alignments and nothing recorded that the pipeline had
+    chosen. Passing the flag now **fails the launch** as an unrecognised parameter
+    (`validation.logging.unrecognisedParams = 'error'`).
+    The one exception is `--mode add_cycle`, whose sheet carries no reference at
+    all because it reuses the prior run's.
 
 ### VALIS
 
@@ -113,6 +127,8 @@ older "≤8 GB / laptop-friendly" wording gets a clamp and then a deterministic 
 | `reg_tiled_tile` | tier (`high`: 2048) | Tile core size (px); also the mesh-grid resolution. **Tier-owned** — only settable under `--reg_tiled_mode custom`. |
 | `reg_tiled_halo` | tier (`high`: 256) | Per-tile read halo (px) for registration context. **Tier-owned.** |
 | `reg_tiled_gate_tre` | `1.0` | Refine only tiles whose rigid-stage TRE (px) exceeds this. Not tier-owned: it decides which control points are acceptable, which is a correctness question rather than a cost trade. |
+| `reg_tiled_max_error` | `0.99` | **Confidence gate.** Drop a mesh control point whose phase-correlation error exceeds this (`0` = perfect match, `~1` = no shared structure). This, and *not* displacement magnitude, is what keeps background and section-edge tiles out of the deformation mesh — those produce plausibly *small* displacements. Measured on the synthetic tiles in `tests/test_tile_residual_confidence.py`: real tissue `0.041`, background `0.9995`, section edge `0.99996`, empty crop `NaN`. Not tier-owned. |
+| `reg_tiled_max_disp` | `null` | **Range gate.** Drop a mesh control point whose displacement magnitude (px) is at or beyond this — the match was never inside the read window, so the peak is an artefact. `null` uses `reg_tiled_halo`, the physically-motivated bound. A cheap secondary net only; `reg_tiled_max_error` is the load-bearing gate. Not tier-owned. |
 | `reg_tiled_upsample` | tier (`high`: 10) | Phase-correlation sub-pixel upsample factor (per tile). **Tier-owned.** |
 | `reg_tiled_out_tile` | tier (`high`: 1024) | Streaming stitch write-tile size (px) — gigapixel-safe. **Tier-owned.** |
 | `reg_tiled_coarse_max_dim` | tier (`high`: 2048) | Longest side (px) of the thumbnail the coarse anchor (M0) is estimated on. **This is what bounds COARSE memory**, not tile size: the anchor's matcher is DISK, a U-Net, so its peak is linear in thumbnail AREA — `GB ~= 1.1 + 7.3 * Mpx` (3.03 GB at 512 px, 8.78 GB at 1024 px, measured on the pinned stack). `TILED_COARSE`'s memory request in `conf/modules.config` is derived from this value, so raising it raises the reservation too. Lower = cheaper and coarser; the M0 residual grows with the decimation factor and must stay well inside `reg_tiled_halo`. **A 256 px floor is enforced at launch** by `ParamUtils.validateRegPresets` — anything below it (including `0`, which used to disable decimation and would now hand a full-resolution plane to a U-Net) aborts before any process is instantiated. Use 512 (the `low` tier) or higher. **Tier-owned.** |
@@ -159,7 +175,7 @@ build the whole-cell mask differently, and have different prerequisites.
 | **Precondition** | A writable model cache | Channel 0 **must** be a nuclear marker — otherwise the task exits 1 | A nuclear channel must exist — a negative index exits 1 |
 | **Weights** | Apache-2.0, auto-downloaded from BioImage.IO | **None ship with the repo** | **Gated** — needs `DEEPCELL_ACCESS_TOKEN` |
 | **Runs on a fresh clone?** | **Yes** | No — set `segmentation_model_dir` | No — set `cellsam_model_path` or export a token |
-| **Container tag** | `…:instant_seg` | `…:segmentation_gpu` | `…:cellsam` |
+| **Container image** | `bolt3x/mirage-instanseg:1.0.0` | `bolt3x/mirage-stardist:1.0.0` | `bolt3x/mirage-cellsam:1.0.0` |
 | **Entry point** | `segment_instantseg.py` | `segment.py` | `segment_cellsam.py` |
 
 !!! tip "Why InstanSeg is the default"

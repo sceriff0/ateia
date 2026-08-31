@@ -17,7 +17,7 @@ process, default and path below is read from the pipeline source —
     - **S2 · registration** — [figure](figures/registration-schematic.html){ target=_blank } ·
       the two backends, step by step
     - **S3 · quality control** — [figure](figures/qc-schematic.html){ target=_blank } ·
-      the tagged artifact stream, the kind vocabulary, and the non-gating contract
+      the tagged artifact stream, the kind vocabulary, and the retry-then-fail contract
     - **S4 · lazy reads** — [figure](figures/zarr-schematic.html){ target=_blank } ·
       where lazy zarr reads cut peak memory, and every place they cannot help
 
@@ -120,9 +120,12 @@ Chips give real defaults. Every process runs in a pinned container and emits
     <h3><span>REGISTRATION</span><span>step 2</span></h3>
     <div class="body">
       <div class="mod"><div class="n">group by patient · resolve reference</div>
-        <div class="x">Patients whose only slide is the reference bypass the backend entirely —
+        <div class="x">The reference is <b>declared, never inferred</b>: exactly one
+          <code>is_reference=true</code> row per patient, resolved once at samplesheet read.
+          None is a hard error at launch, at every entry point; there is no promotion rule.
+          Patients whose only slide is the reference bypass the backend entirely —
           a lone image has no transform to solve — and pass through unregistered.</div>
-        <div class="pp"><span>allow_auto_reference <b>false</b></span></div></div>
+        <div class="pp"><span>is_reference <b>exactly one</b></span></div></div>
       <div class="grp">
         <div class="bh">◇ registration_method</div>
         <div class="opt"><div class="oh"><span>valis → REGISTER</span><span class="tag-def">default</span></div>
@@ -290,8 +293,9 @@ resource `label` or a `withName:` block in `conf/modules.config`, never both.
 Memory and time scale with `task.attempt`, so a retry climbs the ramp, and every
 request is clamped to `params.max_cpus` / `max_memory` / `max_time`.
 
-Per-process figures, the retry policy, and the QC non-gating rule:
-[Resources](resources.md).
+Per-process figures, the retry policy, and the QC `retry-then-fail` rule (the
+seven QC processes fail the run; only the two opt-in segmentation evaluators are
+dropped): [Resources](resources.md).
 
 ---
 

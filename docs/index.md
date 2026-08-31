@@ -120,7 +120,7 @@ tours every file it produces.
 
     ---
 
-    All 75 parameters, grouped by stage, with defaults and guidance.
+    All 90 operator-settable parameters, grouped by stage, with defaults and guidance.
 
     [:octicons-arrow-right-24: Parameters](parameters.md)
 
