@@ -178,7 +178,8 @@ def _dockerfile_pip_tokens(text):
                     # requirement token at all -- the bare "/" skip below would otherwise drop
                     # it entirely, silently treating a real (pinned-by-commit) install as if the
                     # package were never installed. Recover the package name from the repo path
-                    # segment: two containers do this (cellsam's cellSAM, regqc's cudipy).
+                    # segment. cellsam's cellSAM is the live example (regqc's cudipy was
+                    # removed 2026-08-31 -- its upstream repository no longer exists).
                     m = re.search(r"/([A-Za-z0-9_.\-]+?)(?:\.git)?(?:@.*)?$", tok)
                     if m:
                         tokens.append(m.group(1))

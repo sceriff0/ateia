@@ -60,8 +60,12 @@ RUN pip install --no-cache-dir \
     stardist==0.9.1 \
     csbdeep==0.8.2
 
-# Optional GPU image segmentation tools
-RUN pip install git+https://github.com/sceriff0/cudipy.git -v --no-deps
+# NOTE: a `pip install git+https://github.com/sceriff0/cudipy.git` used to sit here, described
+# as "optional GPU image segmentation tools". It was removed 2026-08-31: the repository no
+# longer exists (git clone exits 128, "could not resolve to a Repository"), so this image could
+# not be built AT ALL -- and nothing in bin/, lib/ or modules/ imports cudipy or dipy. It was
+# installed --no-deps, used by nothing, and its absence had gone unnoticed because
+# build-images.yml only runs on a push to main touching containers/**.
 
 # Copy requirements if needed (optional)
 COPY requirements.txt /app/requirements.txt
