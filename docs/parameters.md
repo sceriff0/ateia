@@ -81,7 +81,7 @@ whole-slide alignment) and **STARE tiled** (JVM-free, fully parallel, laptop-fri
 | `reg_valis_max_non_rigid_dim` | tier (`high`: 4096) | Non-rigid registration size (px). **Tier-owned.** Requesting more than the smallest slide's full resolution makes VALIS clamp it to that slide's largest dimension; lower it below that on small-format input such as TMA cores. |
 | `reg_micro_reg_fraction` | `0.125` | Image fraction used for micro-registration. |
 | `reg_max_image_dim` | `4000` | Max cached image dimension during registration. |
-| `reg_micro_reg` | `2` | Micro-registration depth (nested, default MAX): `0` = none, `1` = micro-rigid only (refines `slide.M`), `2` = + micro non-rigid (`register_micro`). At `>=1` the QC `rigid` stage means affine ∘ micro-rigid. |
+| `reg_micro_reg` | `1` | Micro-registration depth (nested, default `1`): `0` = none, `1` = micro-rigid only (refines `slide.M`) — default, `2` = + micro non-rigid (`register_micro`). At `>=1` the QC `rigid` stage means affine ∘ micro-rigid. |
 | `reg_jvm_heap_gb` | `null` | Explicit JVM heap (GB) for VALIS. `null` auto-estimates from input size. |
 | `reg_qc` | `2` | Registration QC depth: `0` = none, `1` = DAPI overlay only, `2` = DAPI overlay + [staged segmentation-overlap metrics](registration_qc.md). |
 

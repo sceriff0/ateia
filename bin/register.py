@@ -238,8 +238,8 @@ def valis_registration(
     micro_reg : int, optional
         Micro-registration depth (nested ordinal). 0 = neither micro pass;
         1 = micro-rigid only (``MicroRigidRegistrar`` refines ``slide.M`` inside
-        ``register()``); 2 = also the micro non-rigid pass (``register_micro()``, the
-        default — matches the pipeline's ``reg_micro_reg`` default). VALIS
+        ``register()``, the default — matches the pipeline's ``reg_micro_reg``
+        default); 2 = also the micro non-rigid pass (``register_micro()``). VALIS
         controls the two independently, so this ordinal is the single knob that gates both.
     stage_checkpoint_dir : str, optional
         Where to snapshot each slide's forward displacement field after the non-rigid stage
