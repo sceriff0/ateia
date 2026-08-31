@@ -31,6 +31,17 @@ hardcoded `ci.yml`. The hardcoded version of this guard passed green while
 `pip install pytest pytest-cov tifffile numpy pandas scikit-image` in its
 release gate. Do not reintroduce a filename list here.
 
+But glob scope is not the same as per-file scope, and the *presence* check
+below (`test_guarded_packages_appear_in_ci_workflow`) asks only whether a
+package appears SOMEWHERE across that glob — a union, which one workflow can
+satisfy on another's behalf. That masked a measured break: deleting both torch
+and kornia from `ci.yml` alone left `release.yml`'s copies standing and this
+whole file passed. `test_every_pytest_workflow_installs_the_importorskip_
+guarded_packages` closes it PER FILE, for the packages whose absence produces a
+silent skip rather than a loud ImportError. The workflow set it iterates is
+still discovered — by looking for a `pytest ... tests/` invocation — never
+named.
+
 Plain pytest, no pipeline-runtime imports, all paths derived from
 `__file__` per this repo's other guard tests (see test_layout.py,
 test_no_duplicate_param_defaults.py).
@@ -203,6 +214,54 @@ def test_guarded_packages_appear_in_ci_workflow():
         "line was deleted/reworded and needs restoring."
     )
 
+
+# The packages whose absence turns a test into a SILENT SKIP rather than a failure.
+# tests/test_coarse_frontend.py's DISK+LightGlue cases call
+# pytest.importorskip("torch")/importorskip("kornia"); every other guarded package is
+# imported unconditionally somewhere, so its absence fails the job loudly.
+IMPORTORSKIP_GUARDED = frozenset({"torch", "kornia"})
+
+# `pytest ... tests/` -- the DIRECTORY form, i.e. a job that runs the whole suite.
+# Discovered, never a filename list (see workflow_files()'s docstring for why).
+_RUNS_THE_PYTEST_SUITE_RE = re.compile(r"pytest\b[^\n]*\btests/(?=\s|$)")
+
+
+def workflows_running_the_pytest_suite() -> list[Path]:
+    """Every workflow whose `run:` block invokes pytest over `tests/`."""
+    hits = [wf for wf in workflow_files() if _RUNS_THE_PYTEST_SUITE_RE.search(wf.read_text())]
+    assert hits, (
+        f"no workflow under {WORKFLOWS_DIR.relative_to(ROOT)} runs `pytest ... tests/`; "
+        "the per-file check below would pass over an empty set"
+    )
+    return hits
+
+
+def test_every_pytest_workflow_installs_the_importorskip_guarded_packages():
+    """PER-FILE, because a union presence check is a mask for these two.
+
+    `test_guarded_packages_appear_in_ci_workflow` above asks only whether a guarded
+    package appears SOMEWHERE under `.github/workflows/`. Measured blind spot: deleting
+    both `pip install torch==2.3.1 --index-url ...` and `pip install kornia==0.7.3` from
+    `.github/workflows/ci.yml` -- the workflow whose `python-tests` job is CI's blocking
+    gate -- left `release.yml`'s copies standing, and this whole file passed. In that
+    state ci.yml still runs the suite, tests/test_coarse_frontend.py's DISK cases
+    importorskip away, and the gate is green having exercised no front-end at all.
+
+    That mask matters for exactly the importorskip-guarded packages: for every other
+    guarded package, a workflow that fails to install it fails loudly on an ImportError
+    and needs no static guard to notice. See tests/test_disk_test_actually_runs.py for
+    the companion check that the DISK case is not merely installable but actually runs.
+    """
+    missing: list[str] = []
+    for wf in workflows_running_the_pytest_suite():
+        installed = {name for name, _ in find_guarded_pins(wf.read_text())}
+        for pkg in sorted(IMPORTORSKIP_GUARDED - installed):
+            missing.append(f"{wf.relative_to(ROOT)}: no `pip install` of {pkg}")
+    assert not missing, (
+        "workflow(s) run the pytest suite without installing a package that the suite "
+        "guards with pytest.importorskip, so the tests needing it SKIP there instead of "
+        "failing:\n" + "\n".join(missing)
+    )
 
 def test_ci_guarded_packages_are_pinned_with_double_equals():
     """Every guarded-package token in any `pip install` line, in every job of
