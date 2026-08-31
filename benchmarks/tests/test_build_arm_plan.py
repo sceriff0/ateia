@@ -75,6 +75,36 @@ def test_arms_baseline_params_all_exist_in_the_pipeline(cfg):
         f"arms.yaml baseline pins params absent from nextflow.config: {unknown}")
 
 
+def test_arms_baseline_values_match_the_pipeline_defaults(cfg):
+    """The baseline must BE the shipped config, not merely name real params.
+
+    test_arms_baseline_params_all_exist_in_the_pipeline above checks NAMES only, and that
+    is not enough: a value that silently diverges from nextflow.config makes the segmentation
+    and compute-profile arms measure the cost and quality of a configuration nobody ships,
+    while the arms.csv column still says it was the baseline. This is the same guard
+    sweep.yaml has had (test_project_sweep_baseline_matches_pipeline_defaults) and arms.yaml
+    did not -- and the hole was live: dev moved reg_micro_reg 2 -> 1 (:wrench: 25a232e) and
+    nothing here noticed.
+
+    A DELIBERATE divergence is legitimate, but it has to be declared here with its reason,
+    not left to look like drift.
+    """
+    defaults = _param_checker().extract_config_defaults(
+        (REPO_ROOT / "nextflow.config").read_text())
+    # param -> why arms.yaml deliberately pins something other than the shipped default.
+    DELIBERATE = {}
+    drift = []
+    for k, v in cfg["baseline"].items():
+        if k in DELIBERATE or k not in defaults:
+            continue
+        if str(defaults[k]) != str(v):
+            drift.append(f"{k}: arms.yaml={v!r} but nextflow.config={defaults[k]!r}")
+    assert not drift, (
+        "arms.yaml baseline has drifted from the shipped config:\n  "
+        + "\n  ".join(drift)
+        + "\nEither track the pipeline, or add the param to DELIBERATE with its reason.")
+
+
 def test_every_flag_run_arms_passes_is_a_real_pipeline_param():
     """The flags run_arms.sh actually passes must all exist in nextflow.config.
 
