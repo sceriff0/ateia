@@ -55,6 +55,24 @@ importorskip_guarded_packages`, which checked only `IMPORTORSKIP_GUARDED` per
 file; that set survives as the annotation that tells a reader WHICH missing
 package fails loudly and which one silently deletes tests from the gate.
 
+TWO MORE HOLES, closed 2026-08-31. Per-FILE scope was still a union one level
+down, and `pip install` is not the only way to install a package:
+
+  * PER-JOB, not per-file. Deleting `numpy==1.26.4` and `tifffile==2025.5.10`
+    from ci.yml's BLOCKING imaging line -- the one in `python-tests`, the job
+    that runs the suite -- left every check here green, because five sibling
+    jobs in the SAME FILE carry those two pins to generate test data. A job runs
+    on its own runner. `jobs_running_the_pytest_suite()` walks the parsed
+    `jobs:` block so the presence check reads only the offending job's own
+    `run:` scripts.
+  * `-r` IS AN INSTALL LINE. `parse_pip_install_tokens("pip install -r
+    requirements.txt || true")` yields no package names at all, so the
+    "==-pinned" rule passed while the blocking gate installed an unpinned numpy,
+    scipy, tifffile, scikit-image and dask from a file. See
+    `test_no_pip_install_r_of_a_file_declaring_a_guarded_package`, and
+    `test_the_pip_install_r_detector_actually_detects` for its non-vacuity
+    (the offending line is gone, so the rule now passes over an empty set).
+
 Plain pytest, no pipeline-runtime imports, all paths derived from
 `__file__` per this repo's other guard tests (see test_layout.py,
 test_no_duplicate_param_defaults.py).
@@ -64,6 +82,8 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS_DIR = ROOT / ".github" / "workflows"
@@ -261,6 +281,74 @@ def workflows_running_the_pytest_suite() -> list[Path]:
     return hits
 
 
+# --------------------------------------------------------------------------
+# PER-JOB scope. A workflow file is not the unit of installation -- a JOB is.
+#
+# Measured 2026-08-31, before this existed: deleting `numpy==1.26.4` and
+# `tifffile==2025.5.10` from `.github/workflows/ci.yml`'s BLOCKING imaging-stack
+# line (the one in `python-tests`, the job that runs the suite) left every check
+# in this file GREEN, because five OTHER jobs in the same file -- nextflow-stub,
+# nf-test-stub, nf-test-real, nf-test-integration and security-tests -- each
+# carry `pip install numpy==1.26.4 tifffile==2025.5.10` to generate test data.
+# `find_guarded_pins()` reads the whole FILE, so a sibling job's install line
+# satisfied the check on behalf of the job that actually needed it. That is the
+# same union defect the per-FILE fix closed one level up, one level down.
+#
+# The fix has to be structural, not textual: only `yaml.safe_load` can say which
+# `run:` block belongs to which job. PyYAML is imported through
+# `pytest.importorskip` per this repo's precedent
+# (tests/test_ci_job_hygiene.py:38) -- but LAZILY, inside the helper, so a
+# missing PyYAML skips only the two checks that need it rather than deleting
+# this whole file. `test_every_pytest_workflow_installs_pyyaml` below is what
+# stops that skip from being reachable in CI.
+# --------------------------------------------------------------------------
+
+
+def _job_run_text(job: dict) -> str:
+    """Every `run:` script in a job's steps, concatenated."""
+    return "\n".join(
+        str(step.get("run", "")) for step in (job.get("steps") or []) if "run" in step
+    )
+
+
+def jobs_running_the_pytest_suite() -> list[tuple[Path, str, str]]:
+    """(workflow, job id, that job's `run:` text) for every JOB running the suite."""
+    yaml = pytest.importorskip("yaml")
+
+    hits: list[tuple[Path, str, str]] = []
+    files_with_a_hit: set[Path] = set()
+    for wf in workflow_files():
+        jobs = (yaml.safe_load(wf.read_text()) or {}).get("jobs") or {}
+        for job_id, job in jobs.items():
+            if not isinstance(job, dict):
+                continue
+            run_text = _job_run_text(job)
+            if _RUNS_THE_PYTEST_SUITE_RE.search(run_text):
+                hits.append((wf, job_id, run_text))
+                files_with_a_hit.add(wf)
+
+    assert hits, (
+        f"no JOB under {WORKFLOWS_DIR.relative_to(ROOT)} runs `pytest ... tests/`; "
+        "the per-job check below would pass over an empty set"
+    )
+    # Non-vacuity, the other way round: the file-level detector and the job-level
+    # one must agree on WHICH FILES run the suite. If a file matches the raw-text
+    # scan but no job in it matches the structural scan, the YAML walk lost the
+    # step (a `run:` nested somewhere this helper does not look), and every
+    # per-job assertion below would silently stop covering that file.
+    lost = sorted(
+        str(wf.relative_to(ROOT))
+        for wf in workflows_running_the_pytest_suite()
+        if wf not in files_with_a_hit
+    )
+    assert not lost, (
+        "these workflow files contain a `pytest ... tests/` invocation in their raw "
+        f"text but no JOB of theirs does: {lost}. The structural walk lost it, so the "
+        "per-job checks below no longer cover those files."
+    )
+    return hits
+
+
 def test_importorskip_set_is_a_subset_of_the_guarded_set():
     """IMPORTORSKIP_GUARDED only annotates the check below; a name in it that is not
     in GUARDED_PACKAGES would be annotating a package nothing checks, and would read as
@@ -300,10 +388,16 @@ def test_every_pytest_workflow_installs_every_guarded_package():
 
     Nothing here says a workflow that does NOT run the suite must install anything;
     build-images.yml installs no Python at all and is correctly out of scope.
+
+    SCOPE IS NOW PER-JOB, not per-file. See `jobs_running_the_pytest_suite()` for the
+    measured break: deleting numpy and tifffile from ci.yml's blocking imaging line left
+    this green, because five sibling jobs in the same FILE carry those two pins to
+    generate test data. A job runs on its own runner; another job's `pip install` does
+    nothing for it, exactly as another file's does not.
     """
     missing: list[str] = []
-    for wf in workflows_running_the_pytest_suite():
-        installed = {name for name, _ in find_guarded_pins(wf.read_text())}
+    for wf, job_id, run_text in jobs_running_the_pytest_suite():
+        installed = {name for name, _ in find_guarded_pins(run_text)}
         for pkg in sorted(GUARDED_PACKAGES - installed):
             how = (
                 "SILENTLY -- the suite guards it with pytest.importorskip, so the tests "
@@ -312,14 +406,135 @@ def test_every_pytest_workflow_installs_every_guarded_package():
                 else "loudly, on an ImportError"
             )
             missing.append(
-                f"{wf.relative_to(ROOT)}: no `pip install` of {pkg} -- absent, it fails {how}"
+                f"{wf.relative_to(ROOT)}: job `{job_id}`: no `pip install` of {pkg} -- "
+                f"absent, it fails {how}"
             )
     assert not missing, (
-        "workflow(s) run the pytest suite without installing a guarded package. A union "
-        "across workflows is not enough here: each of these files runs the suite on its "
-        "own runner, so a sibling workflow's install line does nothing for it.\n"
+        "job(s) run the pytest suite without installing a guarded package. A union "
+        "across workflows -- or across the JOBS of one workflow -- is not enough here: "
+        "each of these jobs runs the suite on its own runner, so a sibling job's or "
+        "file's install line does nothing for it.\n"
         + "\n".join(missing)
     )
+
+
+# Two guard modules call `pytest.importorskip("yaml")` at MODULE scope --
+# tests/test_ci_job_hygiene.py:38 and this file's own `jobs_running_the_pytest_suite()`
+# -- so PyYAML's absence deletes them rather than failing anything. It was declared in
+# NO workflow at all until 2026-08-31: `requirements.txt` listed it, ci.yml installed
+# that file with `pip install -r requirements.txt || true`, and that command resolves
+# NOTHING on the 3.10 leg (deepcell-types declares requires-python >=3.11). PyYAML
+# reached the runner only as a transitive dependency of dask.
+#
+# It is not in GUARDED_PACKAGES because no container pins it, so it has no version
+# authority and the `==` rule cannot apply. This check covers the only property that
+# matters for it: that the job running the suite installs it BY NAME.
+_PYYAML_RE = re.compile(r"pip install\b[^\n]*\bpyyaml\b", re.I)
+
+
+def test_every_pytest_workflow_installs_pyyaml():
+    """A guard that silently importorskips away is not a guard."""
+    missing = [
+        f"{wf.relative_to(ROOT)}: job `{job_id}`"
+        for wf, job_id, run_text in jobs_running_the_pytest_suite()
+        if not _PYYAML_RE.search(run_text)
+    ]
+    assert not missing, (
+        "job(s) run the pytest suite without a `pip install ... pyyaml`. Two guard "
+        "modules `importorskip('yaml')` at module scope, so in those jobs they are "
+        "deselected with nothing in the output to show for it:\n" + "\n".join(missing)
+    )
+
+
+# `pip install -r <file>` -- the form `parse_pip_install_tokens` is blind to. It
+# tokenises the text after `pip install`, so `-r` and `requirements.txt` come back as
+# two tokens that match no package name, `find_guarded_pins` returns nothing, and the
+# "must be ==-pinned" rule passes while the file being installed drags in an UNPINNED
+# numpy, scipy, tifffile, scikit-image and dask. That is not hypothetical: it is
+# verbatim what `.github/workflows/ci.yml` ran in its blocking gate until 2026-08-31.
+_PIP_INSTALL_R_RE = re.compile(r"pip install\b[^\n]*?\s(?:-r|--requirement)[=\s]+(\S+)")
+
+
+def pip_install_r_targets(text: str) -> list[str]:
+    """Requirements-file paths named by any `pip install -r <file>` in `text`."""
+    return [
+        m.group(1).strip("'\"")
+        for raw_line in text.splitlines()
+        for m in [_PIP_INSTALL_R_RE.search(_strip_comment(raw_line))]
+        if m
+    ]
+
+
+def declared_packages(requirements_text: str) -> set[str]:
+    """Distribution names a requirements file declares, pinned or not.
+
+    Deliberately looser than `parse_tiled_requirements`, which keeps only `==`-pinned
+    lines: an UNPINNED declaration is precisely what this rule exists to catch.
+    """
+    names: set[str] = set()
+    for raw_line in requirements_text.splitlines():
+        line = _strip_comment(raw_line).strip()
+        if not line or line.startswith("-"):
+            continue
+        # Strip any version specifier -- ==, >=, <, ~=, ! -- and keep the name.
+        m = re.match(r"^([A-Za-z0-9][A-Za-z0-9_.-]*)(?:\[[A-Za-z0-9_,.-]+\])?", line)
+        if m:
+            names.add(m.group(1))
+    return names
+
+
+def test_the_pip_install_r_detector_actually_detects():
+    """Non-vacuity for the rule below, whose "good" answer is an absence.
+
+    After the offending line was deleted from ci.yml, `test_no_pip_install_r_of_a_file_
+    declaring_a_guarded_package` passes over an empty set and would keep passing if the
+    detector were broken. These two assertions prove it is not: it parses the exact
+    line that used to be there, and the exact file that line named still declares
+    guarded packages -- so reinstating the line WOULD fail the rule.
+    """
+    assert pip_install_r_targets("            pip install -r requirements.txt || true") == [
+        "requirements.txt"
+    ]
+    declared = declared_packages((ROOT / "requirements.txt").read_text())
+    assert declared & GUARDED_PACKAGES, (
+        "requirements.txt no longer declares any guarded package, so the rule below has "
+        "nothing to bite on and this file's -r coverage is vacuous. Point this check at "
+        "whatever file took its place, or drop both."
+    )
+
+
+def test_no_pip_install_r_of_a_file_declaring_a_guarded_package():
+    """A requirements FILE is an install line the `==` rule cannot see.
+
+    `parse_pip_install_tokens("pip install -r requirements.txt || true")` yields no
+    package names at all, so every pin check in this file passed while the blocking gate
+    installed an unpinned numpy/scipy/tifffile/scikit-image/dask ahead of the pinned
+    line that was supposed to hold them. Guarded packages must be named and `==`-pinned
+    ON the install line, never delegated to a file this guard cannot read.
+    """
+    offenders: list[str] = []
+    for wf in workflow_files():
+        for target in pip_install_r_targets(wf.read_text()):
+            path = ROOT / target
+            if not path.is_file():
+                offenders.append(
+                    f"{wf.relative_to(ROOT)}: `pip install -r {target}`, which does not "
+                    "resolve to a file in this repo -- this guard cannot read what it "
+                    "installs, so it cannot rule out an unpinned guarded package"
+                )
+                continue
+            guarded = sorted(declared_packages(path.read_text()) & GUARDED_PACKAGES)
+            if guarded:
+                offenders.append(
+                    f"{wf.relative_to(ROOT)}: `pip install -r {target}` installs guarded "
+                    f"package(s) {guarded} that this guard's `==` rule cannot see"
+                )
+    assert not offenders, (
+        "workflow(s) install a guarded package through a requirements FILE:\n"
+        + "\n".join(sorted(set(offenders)))
+        + "\nName and `==`-pin every guarded package on the `pip install` line itself."
+    )
+
 
 def test_ci_guarded_packages_are_pinned_with_double_equals():
     """Every guarded-package token in any `pip install` line, in every job of

@@ -66,9 +66,35 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt || true
-          fi
+          # There is deliberately NO `pip install -r requirements.txt` here.
+          # requirements.txt is an UNPINNED developer-convenience superset --
+          # stardist, csbdeep, basicpy, aicsimageio, dask[distributed] and a
+          # `git+https://github.com/vanvalenlab/deepcell-types@master` clone --
+          # and it was installed in this BLOCKING gate with `|| true`, so total
+          # failure was swallowed. It does fail: deepcell-types declares
+          # `requires-python >=3.11`, so on the 3.10 leg pip resolves nothing and
+          # installs NOTHING (measured, 2026-08-31: `ERROR: Package
+          # 'deepcell-types' requires a different Python: 3.10.13 not in
+          # '>=3.11'`), while on the 3.11 leg it would resolve numpy 2.x BEFORE
+          # the pinned line below downgrades it -- an unpinned imaging stack
+          # entering the gate ahead of the pins that exist to hold it.
+          #
+          # Nothing in the suite needs those packages. Every MODULE-SCOPE
+          # `pytest.importorskip` under tests/ targets anndata, cv2, kornia,
+          # numpy, pandas, scipy, skimage, tifffile, torch, yaml or zarr, and the
+          # pinned lines below install all of them. The single test that touches
+          # stardist/csbdeep does so through a per-test `skipif`
+          # (tests/test_segment_lazy_dapi_read.py:422) whose own docstring calls
+          # it "deliberately additive", alongside a structural counterpart that
+          # always runs. Measured in a venv built from the lines below alone:
+          # 1116 passed / 10 skipped, identical to the suite's baseline.
+          #
+          # `pyyaml` is on the next line EXPLICITLY because of this: it used to
+          # be declared ONLY in requirements.txt, and tests/test_ci_job_hygiene.py
+          # `importorskip`s it at MODULE scope -- so a swallowed `-r` failure
+          # silently deleted both of that file's guards. It survived only
+          # transitively, as a dependency of dask.
+          #
           # scikit-learn is PINNED, not floating. The vendored CSE subset in bin/utils/cse/
           # builds its PCA model by ASSIGNING fitted attributes by hand
           # (functions.py:650 getPCAmodel), so it is only valid against the sklearn internal
@@ -80,7 +106,7 @@ jobs:
           # NOTE: nothing currently ENFORCES that they stay equal --
           # tests/test_container_harmonisation.py reads only containers/*/requirements.txt
           # and does not parse this workflow. Keep them in step by hand until it does.
-          pip install pytest pytest-cov pandas scikit-learn==1.5.2 xmltodict
+          pip install pytest pytest-cov pandas scikit-learn==1.5.2 xmltodict pyyaml
           # The imaging stack (numpy/scipy/scikit-image/tifffile/zarr/numcodecs) is
           # pinned to containers/tiled/requirements.txt — the production image that
           # actually runs the tiled path — and installed together in one command so
@@ -422,14 +448,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
-    # ADVISORY. Registration, segmentation model-loading, and most test-staging
-    # bugs are fixed (suite went 26 -> ~20 failing); the remaining failures are
-    # the synthetic-data segmentation wall: StarDist's built-in 2D_versatile_fluo
-    # detects 0 nuclei in the smooth synthetic test blobs even at a low
-    # prob_thresh, so cell/quant/geojson assertions can't pass on this fixture
-    # data. Tracked for a follow-up (bundle a tiny real nuclei crop, or switch
-    # those assertions to "runs without error"). Flip to blocking once green.
-    continue-on-error: true
+    # ADVISORY, and advisory by ONE mechanism only: this job is absent from the
+    # `all-tests` gate's `needs:` list. Registration, segmentation model-loading,
+    # and most test-staging bugs are fixed (suite went 26 -> ~20 failing); the
+    # remaining failures are the synthetic-data segmentation wall: StarDist's
+    # built-in 2D_versatile_fluo detects 0 nuclei in the smooth synthetic test
+    # blobs even at a low prob_thresh, so cell/quant/geojson assertions can't
+    # pass on this fixture data. Tracked for a follow-up (bundle a tiny real
+    # nuclei crop, or switch those assertions to "runs without error"). Add this
+    # job to `all-tests`'s `needs:` once green.
+    #
+    # `continue-on-error: true` used to sit here as a SECOND advisory mechanism,
+    # and it was the dishonest one: it made 129 real cases show a green tick
+    # whatever they did, so the run summary said nothing about whether the suite
+    # got better or worse. Without it the job reports its true colour and stays
+    # non-blocking, because nothing needs it.
 
     steps:
       - name: Checkout repository
@@ -738,25 +771,31 @@ jobs:
     if: always()
     steps:
       - name: Check all jobs passed
+        # `skipped` is NOT a pass. Every branch here used to read
+        # `!= "success" && != "skipped"`, which was harmless only because
+        # nothing in the needs list can skip today -- the moment anyone adds a
+        # `paths:` or `if:` filter to one of those five jobs, this gate goes
+        # decorative for it and reports green having verified nothing. A needed
+        # job that stops running must block the merge, not be waved through.
         run: |
-          if [ "${{ needs.python-tests.result }}" != "success" ] && [ "${{ needs.python-tests.result }}" != "skipped" ]; then
-            echo "Python tests failed"
+          if [ "${{ needs.python-tests.result }}" != "success" ]; then
+            echo "Python tests did not pass (result: ${{ needs.python-tests.result }})"
             exit 1
           fi
-          if [ "${{ needs.nextflow-stub.result }}" != "success" ] && [ "${{ needs.nextflow-stub.result }}" != "skipped" ]; then
-            echo "Nextflow stub tests failed"
+          if [ "${{ needs.nextflow-stub.result }}" != "success" ]; then
+            echo "Nextflow stub tests did not pass (result: ${{ needs.nextflow-stub.result }})"
             exit 1
           fi
-          if [ "${{ needs.nf-test-stub.result }}" != "success" ] && [ "${{ needs.nf-test-stub.result }}" != "skipped" ]; then
-            echo "nf-test stub failed"
+          if [ "${{ needs.nf-test-stub.result }}" != "success" ]; then
+            echo "nf-test stub did not pass (result: ${{ needs.nf-test-stub.result }})"
             exit 1
           fi
-          if [ "${{ needs.security-tests.result }}" != "success" ] && [ "${{ needs.security-tests.result }}" != "skipped" ]; then
-            echo "Security tests failed"
+          if [ "${{ needs.security-tests.result }}" != "success" ]; then
+            echo "Security tests did not pass (result: ${{ needs.security-tests.result }})"
             exit 1
           fi
-          if [ "${{ needs.ruff.result }}" != "success" ] && [ "${{ needs.ruff.result }}" != "skipped" ]; then
-            echo "Ruff lint failed"
+          if [ "${{ needs.ruff.result }}" != "success" ]; then
+            echo "Ruff lint did not pass (result: ${{ needs.ruff.result }})"
             exit 1
           fi
           echo "All required tests passed!"
