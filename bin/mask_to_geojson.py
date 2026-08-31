@@ -33,11 +33,14 @@ def mask_to_feature_collection(mask, simplify_tolerance: float = 1.0) -> dict:
             continue
         contour = max(contours, key=len)
         simp = approximate_polygon(contour, tolerance=simplify_tolerance)
-        # NOTE: no +0.5 corner offset here — intentionally kept in skimage's
-        # center-of-pixel convention because these contours feed VALIS's
-        # warp_geojson reg-QC path. This diverges on purpose from
-        # extract_cell_properties.py's +0.5 QuPath corner-of-pixel contours;
-        # each serves a different consumer's pixel convention.
+        # NOTE: no corner offset here. These rings stay in skimage's
+        # centre-of-pixel convention on purpose, because they feed VALIS's
+        # warp_geojson reg-QC path rather than QuPath, and VALIS addresses the
+        # raster the way skimage does. This is the ONE deliberate opt-out from
+        # bin/utils/pixel_convention.py, which records the reason; do not "fix"
+        # it to match extract_cell_properties.py's corner-of-pixel contours.
+        # (No import: this script runs in the segmentation container and stays
+        # dependency-free beyond numpy/scipy/skimage.)
         ring = [[float(c - 1 + minc), float(r - 1 + minr)] for r, c in simp]
         if len(ring) < 3:
             continue

@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
 from measurements import MORPHOLOGY_COLS, identify_marker_columns
+from pixel_convention import centre_to_corner  # noqa: E402
 from pixel_size import resolve_pixel_size  # noqa: E402
 
 logger = get_logger(__name__)
@@ -173,9 +174,10 @@ def build_measurements(
     if pd.notna(label):
         measurements.append({"name": "label", "value": int(label)})
 
-    # Centroid in micrometers (apply +0.5 for corner-of-pixel convention consistency)
-    x_px = float(row.get("x", 0)) + 0.5
-    y_px = float(row.get("y", 0)) + 0.5
+    # Centroid in micrometres. Corner-of-pixel, matching the polygon this cell
+    # is drawn as; the rule lives in bin/utils/pixel_convention.py.
+    x_px = centre_to_corner(float(row.get("x", 0)))
+    y_px = centre_to_corner(float(row.get("y", 0)))
     measurements.append({"name": "Centroid X µm", "value": round(x_px * pixel_size, 3)})
     measurements.append({"name": "Centroid Y µm", "value": round(y_px * pixel_size, 3)})
 
@@ -300,11 +302,12 @@ def export_geojson(
                 skipped[0] += 1
                 continue
 
-            # Apply 0.5px offset to match corner-of-pixel convention used by polygon contours
-            # (regionprops centroids are center-of-pixel; contours in extract_cell_properties
-            # are shifted by +0.5 for QuPath/ImageJ compatibility)
-            x_px_corner = float(x_px) + 0.5
-            y_px_corner = float(y_px) + 0.5
+            # regionprops centroids are centre-of-pixel; the contours this Point
+            # falls back from are corner-of-pixel. Convert, so the Point fallback
+            # and the Polygon land in the same place
+            # (bin/utils/pixel_convention.py).
+            x_px_corner = centre_to_corner(float(x_px))
+            y_px_corner = centre_to_corner(float(y_px))
 
             cell_id = row.get("label", idx)
             cell_label_str = str(int(cell_id)) if pd.notna(cell_id) else str(idx)
@@ -399,8 +402,10 @@ def export_combined_geojson(
         if pd.isna(x_px) or pd.isna(y_px):
             skipped += 1
             continue
-        x_corner = float(x_px) + 0.5
-        y_corner = float(y_px) + 0.5
+        # Corner-of-pixel, like the cell and nucleus contours below
+        # (bin/utils/pixel_convention.py).
+        x_corner = centre_to_corner(float(x_px))
+        y_corner = centre_to_corner(float(y_px))
 
         cell_id = row.get("label", idx)
         label_str = str(int(cell_id)) if pd.notna(cell_id) else str(idx)
