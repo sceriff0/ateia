@@ -35,12 +35,17 @@ shared preprocessing run**. No arm axis touches a `preproc_*` param, so running
 preprocessing nine times would repeat the expensive half of a real-WSI run to
 vary something it does not affect — the same factoring the segmentation arms use.
 Segmentation and export are not run either: nothing downstream of registration
-changes the staged registration QC. **9 arms**:
+changes the staged registration QC. **12 arms**:
 
-- **VALIS preset × micro-depth = 6.** `memory_mode` (`low` = BRISK/RANSAC,
+- **VALIS preset × micro-depth = 9.** `memory_mode` (`low` = BRISK/RANSAC,
   `high` = SuperPoint/SuperGlue — *different feature matchers*, not one matcher at
   two resolutions) crossed with `reg_micro_reg` (a **depth**: 0 none, 1
-  micro-rigid, 2 + micro non-rigid). A depth is why this is 2 × 3, not 2 × 2.
+  micro-rigid, 2 + micro non-rigid). A depth is why this is 3 × 3, not 3 × 2.
+  `medium` was added alongside STARE's three tiers so both backends span three
+  cost/accuracy presets and neither is the tuned one; it is the third value the
+  synthetic sweep has always carried. Read it as a **point on the curve** rather
+  than a third comparison — `low` and `high` differ in *which matcher runs*, so
+  `medium` interpolates cost between them rather than introducing a new matcher.
 - **STARE (`registration_method = tiled`) × tier = 3.** A different *backend*, not
   three more cells of the grid: `memory_mode` and `reg_micro_reg` do not exist
   there, so these arms carry neither. It fans out over `reg_tiled_mode`
@@ -82,8 +87,8 @@ measured on. Varying it leaves the registration byte-identical, which makes this
 registration. The same category `seg_qc_pairing` occupies in the synthetic sweep.
 
 `cross: reference` (the default) runs the extra segmenters against one arm:
-**11 registration runs** (9 arms + 2 extra segmenters on the reference arm).
-`cross: all` crosses all nine and costs **27**. `arms.yaml`'s cost gate and
+**14 registration runs** (12 arms + 2 extra segmenters on the reference arm).
+`cross: all` crosses all twelve and costs **36**. `arms.yaml`'s cost gate and
 `test_cross_all_crosses_every_arm` carry the same two numbers. Start at
 `reference` — if the number is stable there, crossing everything buys a denser
 null result.

@@ -257,13 +257,23 @@ def test_the_ashlar_comparator_still_has_a_driver():
         "metric family")
 
 
-def test_valis_arms_are_preset_x_depth_not_a_2x2(plan):
-    """reg_micro_reg is a DEPTH (0/1/2), so 2 presets x 3 depths = 6 arms."""
+def test_valis_arms_are_preset_x_depth_not_a_grid_of_equals(plan):
+    """reg_micro_reg is a DEPTH (0/1/2), so 3 presets x 3 depths = 9 arms.
+
+    Was 6 (two presets). `medium` was added alongside STARE's three tiers so both backends
+    span three cost/accuracy presets and neither is the tuned one -- the arms-side answer to
+    the same fairness question test_project_stare_resolution_axis_mirrors_the_valis_one asks
+    of the sweep. Asserting the PRODUCT, not just the count, is the point: the failure this
+    catches is someone reading preset x depth as a 2x2 and quietly dropping a depth.
+    """
     valis = [r for r in plan
              if r["arm_kind"] == "registration" and r.get("backend") == "valis"
              and "_seg" not in r["arm"]]
-    assert len(valis) == 6, [r["arm"] for r in valis]
-    assert {r["reg_micro_reg"] for r in valis} == {0, 1, 2}
+    depths = {r["reg_micro_reg"] for r in valis}
+    presets = {r["memory_mode"] for r in valis}
+    assert depths == {0, 1, 2}, sorted(depths)
+    assert presets == {"low", "medium", "high"}, sorted(presets)
+    assert len(valis) == len(presets) * len(depths) == 9, [r["arm"] for r in valis]
 
 
 # ---------------------------------------------------------------------------
@@ -345,14 +355,15 @@ def test_cross_all_crosses_every_arm(cfg):
         cfg["qc_segmenter_cross"], cross="all")))
     reg = [r for r in full if r["arm_kind"] == "registration"]
     n_methods = len(cfg["qc_segmenter_cross"]["seg_method"])
-    # 9 = 6 VALIS (preset x micro-depth) + 3 STARE (tier). History: 7 originally, 9 when
-    # ashlar was a third backend, back to 7 when :fire: 6a54479 removed it, and 9 again now
-    # that STARE fans out over its three shipped tiers instead of running as one arm at
-    # defaults. This number is quoted in docs/benchmarks_real.md and in arms.yaml's cost
-    # gate, which is why it is asserted rather than derived: the point is that the prose and
-    # the code agree, and deriving it from the plan would make the assertion vacuous.
-    assert len(reg) == 9 * n_methods, (
-        "cross: all should be 9 arms x every segmenter; docs/benchmarks_real.md quotes 27 "
+    # 12 = 9 VALIS (3 presets x 3 micro-depths) + 3 STARE (tier). History: 7 originally,
+    # 9 when ashlar was a third backend, back to 7 when :fire: 6a54479 removed it, 9 when
+    # STARE gained its three tiers, and 12 now that VALIS gained memory_mode=medium so both
+    # backends span three presets. This number is quoted in docs/benchmarks_real.md and in
+    # arms.yaml's cost gate, which is why it is asserted rather than derived: the point is
+    # that the prose and the code agree, and deriving it from the plan would make the
+    # assertion vacuous.
+    assert len(reg) == 12 * n_methods, (
+        "cross: all should be 12 arms x every segmenter; docs/benchmarks_real.md quotes 36 "
         "and the cost gate in arms.yaml depends on that number being right")
 
 

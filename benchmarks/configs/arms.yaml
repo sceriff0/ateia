@@ -64,15 +64,22 @@ baseline:
 # QC. reg_qc=2 still segments the native slides for scoring, but that is inside
 # the registration step, not the segmentation step.
 #
-# THE TWO VALIS KNOBS ARE NOT A 2x2. reg_micro_reg is a DEPTH (0 none, 1
-# micro-rigid only, 2 + micro non-rigid), so preset x depth is 2 x 3 = 6 arms.
+# THE TWO VALIS KNOBS ARE NOT A GRID OF EQUALS. reg_micro_reg is a DEPTH (0 none,
+# 1 micro-rigid only, 2 + micro non-rigid), so preset x depth is 3 x 3 = 9 arms.
 # memory_mode low/high are DIFFERENT FEATURE MATCHERS (BRISK/RANSAC vs
 # SuperPoint/SuperGlue), not one matcher at two resolutions.
+#
+# `medium` was added alongside STARE's three tiers, so both backends now span three
+# cost/accuracy presets and neither is the tuned one. It is the third value sweep.yaml
+# has always carried (registration_param_grid.memory_mode), so this closes a gap between
+# the two blocks rather than inventing an axis. Read it as a POINT ON THE CURVE, not a
+# third comparison: low and high differ in WHICH matcher runs, so medium interpolates
+# cost between them rather than introducing a new matcher.
 # -----------------------------------------------------------------------------
 registration_arms:
   valis:
-    memory_mode:   [low, high]
-    reg_micro_reg: [0, 1, 2]              # 6 arms
+    memory_mode:   [low, medium, high]
+    reg_micro_reg: [0, 1, 2]              # 9 arms
   # STARE — the other BACKEND, at its defaults. Not a seventh cell of the grid
   # above: memory_mode and reg_micro_reg are VALIS-only params, so a tiled arm
   # has neither and carries NA for both in arms.csv. It is one point of
@@ -123,14 +130,16 @@ registration_arms:
 # sweep.yaml.
 #
 # COST GATE. `cross: reference` runs the extra segmenters against ONE arm
-# (`reference_arm` below): 9 + 2 = 11 registration runs per patient. `cross: all`
-# crosses every arm and costs 9 x 3 = 27. Start at `reference` — if the headline
-# number is stable there, crossing all 9 buys a denser version of a null result.
+# (`reference_arm` below): 12 + 2 = 14 registration runs per patient. `cross: all`
+# crosses every arm and costs 12 x 3 = 36. Start at `reference` — if the headline
+# number is stable there, crossing all 12 buys a denser version of a null result.
 #
-# The 9 is 6 VALIS + 3 STARE. It was 7 while STARE ran as a single defaults arm;
-# giving STARE its three tiers costs +2 real runs per patient and is what stops the
-# ranking comparing a tuned VALIS against an untuned STARE. Guarded by
-# test_cross_all_crosses_every_arm and test_tiled_arms_are_the_three_shipped_tiers.
+# The 12 is 9 VALIS (3 presets x 3 micro-depths) + 3 STARE (tier). It was 7 while
+# STARE ran as a single defaults arm and VALIS had two presets. Both backends now
+# span three cost/accuracy presets, which is what stops the ranking comparing a
+# tuned method against an untuned one — in either direction. Guarded by
+# test_cross_all_crosses_every_arm, test_tiled_arms_are_the_three_shipped_tiers and
+# test_valis_arms_are_preset_x_depth_not_a_grid_of_equals.
 qc_segmenter_cross:
   cross: reference                         # reference | all | none
   reference_arm: valis_high_micro2         # must name an arm the grid above produces
