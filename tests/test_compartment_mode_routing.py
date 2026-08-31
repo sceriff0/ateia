@@ -291,7 +291,15 @@ ALLOWED_LINES = {
         # `wc -l conf/modules.config` fell 1394 -> 1338, the same 56. Re-pinned directly
         # from the file, not computed:
         #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1251
-        1251: (
+        # 1251 -> 1253 in the final whole-branch review: +2 lines in TILED_COARSE's memory
+        # closure comment. The old text was a CAUTION telling the operator not to pass
+        # `reg_tiled_coarse_max_dim` 0; commit 9073f14 had already made anything below 256
+        # a hard launch abort in ParamUtils.validateRegPresets, so the caution described a
+        # state the operator can no longer reach and was rewritten to say the floor is
+        # enforced. Composition check: 1251 + 2 = 1253, and `wc -l conf/modules.config`
+        # rose 1338 -> 1340, the same 2. Re-pinned directly from the file, not computed:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1253
+        1253: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

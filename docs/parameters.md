@@ -62,7 +62,8 @@ owned outright by `conf/modules.config`. See `docs/basic_illumination.md`.
 ## Registration
 
 Two backends, selected by `--registration_method`: **VALIS** (default, graph-based
-whole-slide alignment) and **STARE tiled** (JVM-free, fully parallel, laptop-friendly).
+whole-slide alignment) and **STARE tiled** (JVM-free, fully parallel). STARE is **not**
+laptop-sized at its shipped tier — see the memory note under [Tiled / STARE](#tiled--stare-registration_methodtiled).
 
 ### Common
 
@@ -94,8 +95,16 @@ and how to read it.
 ### Tiled / STARE (`registration_method=tiled`)
 
 STARE is an alternative registration backend that is **JVM-free** (no Bio-Formats/Java
-heap), tiles the slide internally, and runs fully in parallel — usable on a laptop. These
-params apply only when `--registration_method tiled`.
+heap), tiles the slide internally, and runs fully in parallel. These params apply only when
+`--registration_method tiled`.
+
+**Sizing warning.** STARE is *not* a laptop backend at the shipped `high` tier. Every step
+except the coarse anchor is region-streamed and stays under a few GB, but `TILED_COARSE`
+matches with DISK — a U-Net whose peak is linear in thumbnail **area** — and asks **~48 GB**
+at `reg_tiled_coarse_max_dim` 2048. `--reg_tiled_mode low` (512 px, ~5 GB) is the
+workstation-viable tier. Because `max_memory` is a required parameter, a site sized from the
+older "≤8 GB / laptop-friendly" wording gets a clamp and then a deterministic OOM on
+`TILED_COARSE`, not a slow run.
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -106,13 +115,17 @@ params apply only when `--registration_method tiled`.
 | `reg_tiled_gate_tre` | `1.0` | Refine only tiles whose rigid-stage TRE (px) exceeds this. Not tier-owned: it decides which control points are acceptable, which is a correctness question rather than a cost trade. |
 | `reg_tiled_upsample` | tier (`high`: 10) | Phase-correlation sub-pixel upsample factor (per tile). **Tier-owned.** |
 | `reg_tiled_out_tile` | tier (`high`: 1024) | Streaming stitch write-tile size (px) — gigapixel-safe. **Tier-owned.** |
-| `reg_tiled_coarse_max_dim` | tier (`high`: 2048) | Longest side (px) of the thumbnail the coarse anchor (M0) is estimated on. **This is what bounds COARSE memory**, not tile size: the anchor's matcher is DISK, a U-Net, so its peak is linear in thumbnail AREA — `GB ~= 1.1 + 7.3 * Mpx` (3.03 GB at 512 px, 8.78 GB at 1024 px, measured on the pinned stack). `TILED_COARSE`'s memory request in `conf/modules.config` is derived from this value, so raising it raises the reservation too. Lower = cheaper and coarser; the M0 residual grows with the decimation factor and must stay well inside `reg_tiled_halo`. `0` disables decimation — which now means a full-resolution plane through a U-Net, so do not use it on a real slide. **Tier-owned.** |
+| `reg_tiled_coarse_max_dim` | tier (`high`: 2048) | Longest side (px) of the thumbnail the coarse anchor (M0) is estimated on. **This is what bounds COARSE memory**, not tile size: the anchor's matcher is DISK, a U-Net, so its peak is linear in thumbnail AREA — `GB ~= 1.1 + 7.3 * Mpx` (3.03 GB at 512 px, 8.78 GB at 1024 px, measured on the pinned stack). `TILED_COARSE`'s memory request in `conf/modules.config` is derived from this value, so raising it raises the reservation too. Lower = cheaper and coarser; the M0 residual grows with the decimation factor and must stay well inside `reg_tiled_halo`. **A 256 px floor is enforced at launch** by `ParamUtils.validateRegPresets` — anything below it (including `0`, which used to disable decimation and would now hand a full-resolution plane to a U-Net) aborts before any process is instantiated. Use 512 (the `low` tier) or higher. **Tier-owned.** |
 
 ### Tiers
 
-Both registration backends take the same four values. `high` is the shipped default and is
-byte-for-byte the behaviour that shipped before tiers existed; `medium` and `low` trade accuracy
-for memory and wall-clock; `custom` starts from `high` and applies only the knobs you set.
+Both registration backends take the same four values. `high` is the shipped default and, with
+**one exception**, is the behaviour that shipped before tiers existed; `medium` and `low` trade
+accuracy for memory and wall-clock; `custom` starts from `high` and applies only the knobs you
+set. The exception is `reg_tiled_coarse_max_dim`, which the whole column moved down one tier for
+v1.0.0 — `high` is **2048**, not the 4096 that used to ship — because COARSE's matcher became a
+U-Net and 4096 px extrapolates to ~123 GB of need (~185 GB of request). See
+`lib/RegPresets.groovy`.
 
 ```bash
 --reg_tiled_mode low                                   # every STARE knob from the low row

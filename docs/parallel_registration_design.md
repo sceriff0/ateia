@@ -4,10 +4,20 @@
 > `feat/tiled-registration`, when COARSE's anchor was a classical corner detector. For
 > v1.0.0 that front-end was replaced by the learned DISK + LightGlue matcher and the three
 > classical alternatives were deleted outright, which changes COARSE's memory model from
-> nearly-flat to linear in thumbnail AREA. §"Memory, per step" below has been corrected;
-> the rest of the design — the M0 → per-tile → solve → stitch decomposition, the halo
-> contract, the streaming reads — is unchanged and still authoritative. `bin/tiled_coarse.py`
-> cites this file for the thumbnail rationale, which still holds.
+> nearly-flat to linear in thumbnail AREA.
+>
+> **What that invalidated, and has been corrected in place:** §5's memory table and
+> paragraph, §5's COARSE row and primitive-split sentence, §1's constraint 2, and every
+> "≤8 GB / laptop" claim that rested on the old front-end. STARE is **not** laptop-sized at
+> the shipped `high` tier — COARSE alone asks ~48 GB. Anything in this file still phrased in
+> the past tense about a corner detector (§5's OOM anecdote, the §"Implementation status"
+> phase list, §11's sparse-tissue note) is a record of what the method USED to be and is
+> left as written.
+>
+> **What is unchanged and still authoritative:** the M0 → per-tile → solve → stitch
+> decomposition, the halo contract, the streaming reads, and everything downstream of
+> COARSE. `bin/tiled_coarse.py` cites this file for the thumbnail rationale, which still
+> holds — and holds harder now that the thumbnail bound is the memory knob.
 
 **Status:** implemented on branch `feat/tiled-registration` (Phases 1–2 + Nextflow wiring, 56
 Python tests, JVM-free stub run green). Remaining: reg_qc=2 seg-QC Nextflow dispatch, the slim
@@ -29,17 +39,23 @@ status box after §10.
 A second `registration_method` alongside `valis` that is:
 
 1. **Fully parallel at the Nextflow level** — every expensive unit is an independent process
-   (per slide *and per tile*), so a cluster runs them all at once and a laptop runs a few at a
-   time. No monolithic per-patient task.
-2. **The default choice for laptops / low-end machines** — **every process fits in ≤8 GB.**
-   The per-tile fan-out is the *only* STARE shape, and it holds this property unconditionally:
-   measured peaks on a 16384² 2-channel slide are COARSE 0.91 GB, REG_TILE 1.31 GB,
-   SOLVE <1.31 GB, STITCH 1.35 GB. (A single-task `TILED_REGISTER` alternative existed behind a
-   flag; it could not hold the bound — both whole slides plus an all-channel float32 copy and the
-   full warped output live at once — so the flag and the process were removed rather than left as
-   an unbounded opt-out.) No
-   JVM, no BioFormats, no whole-slide-in-RAM step. The tiling and stitching processes are
-   themselves low-memory and stream.
+   (per slide *and per tile*), so a cluster runs them all at once and a smaller machine runs a
+   few at a time. No monolithic per-patient task. (This is a statement about task GRANULARITY,
+   not about fitting on a laptop — see constraint 2, corrected.)
+2. **Bounded per-process memory, with one costly step.** *(Corrected for v1.0.0 — this
+   constraint originally read "the default choice for laptops / low-end machines — every
+   process fits in ≤8 GB", on measured peaks of COARSE 0.91 GB, REG_TILE 1.31 GB,
+   SOLVE <1.31 GB, STITCH 1.35 GB on a 16384² 2-channel slide.)* Everything downstream of the
+   anchor still holds that bound and is region-streamed: REG_TILE, SOLVE and STITCH are all
+   well under 8 GB regardless of slide size. **COARSE is not**: its matcher is now DISK, a
+   U-Net whose activations scale with thumbnail area, so it asks **~48 GB at the shipped
+   `high` tier** (`reg_tiled_coarse_max_dim` 2048) and ~5 GB at `low` (512). STARE is
+   therefore a *cluster* backend at its default tier; `--reg_tiled_mode low` is what makes it
+   workstation-viable. (A single-task `TILED_REGISTER` alternative existed behind a flag; it
+   could not hold even the old bound — both whole slides plus an all-channel float32 copy and
+   the full warped output live at once — so the flag and the process were removed rather than
+   left as an unbounded opt-out.) No JVM, no BioFormats, no whole-slide-in-RAM step. The
+   tiling and stitching processes are themselves low-memory and stream.
 3. **Native TRE** — emits a VALIS-style Target Registration Error per slide *and* a spatial TRE
    heatmap, as a free byproduct of registration.
 4. **reg_qc=2 compatible** — same staged segmentation-overlap QC (`native → rigid → refined`),
@@ -125,13 +141,14 @@ shape for free.
 
 ---
 
-## 5. Architecture — all processes ≤8 GB, all Nextflow-parallel
+## 5. Architecture — Nextflow-parallel throughout, ≤8 GB everywhere but COARSE
 
 ```
 per patient  (patients already parallel)
  └─ per moving slide  (STAR: each slide → the fixed reference, independent)
-     COARSE    thumbnail feature-align (ORB + RANSAC) → global rigid M₀      ~1–2 GB
-               # features absorb inter-cycle ROTATION/scale; cheap, per slide
+     COARSE    thumbnail match (DISK + LightGlue) → global rigid M₀    ~48 GB @ high
+               # learned features absorb inter-cycle ROTATION/scale; per slide.
+               # NOT cheap: peak is linear in thumbnail AREA -- see the table below
      TILE      stream tiles from the tiled OME-TIFF (region reads, halo)      ~1 GB
                # low-mem split; no whole-slide load
      REG_TILE  per tile ∥: moving DAPI tile + reference region (placed by M₀) ≤8 GB
@@ -145,12 +162,14 @@ per patient  (patients already parallel)
  └─ emit: registered slide + intrinsic TRE (per-slide table + spatial heatmap)
 ```
 
-**Primitive split (falls out of the architecture):** COARSE uses feature matching (ORB/RANSAC)
-because inter-cycle repositioning can carry rotation and small scale; after M₀ the per-tile
-residual is near-pure-translation, so REG_TILE uses **phase-correlation** (ASHLAR's whitened,
-Hann-windowed `phase_cross_correlation`) — cheapest possible, no keypoints needed.
+**Primitive split (falls out of the architecture):** COARSE uses feature matching — learned
+keypoints and a learned matcher (DISK + LightGlue) as of v1.0.0 — because inter-cycle
+repositioning can carry rotation and small scale; after M₀ the per-tile residual is
+near-pure-translation, so REG_TILE uses **phase-correlation** (ASHLAR's whitened, Hann-windowed
+`phase_cross_correlation`) — cheapest possible, no keypoints needed.
 
-**Memory sanity-check (8 GB is generous) — and the knob that controls each step.** This table
+**Memory, per step — and the knob that controls each.** *(This heading used to read "memory
+sanity-check (8 GB is generous)"; COARSE broke that premise, see below.)* This table
 covers *every* step, which the original version of this paragraph did not: it analysed REG_TILE,
 WARP_TILE and STITCH and took COARSE on trust from the word "thumbnail" above. COARSE was in fact
 implemented with a full-resolution ORB over an eagerly decoded slide, and OOM-killed at 32 GB on a
@@ -308,8 +327,10 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   patched VALIS container) was removed 2026-07-24 — appears to be scope/publication cleanup, not a
   viability failure. STARE differs fundamentally (JVM-free, per-*tile registration*, mesh-warp
   continuity). Confirm with the author whether any removal reason must be designed around.
-- **Sparse-fluorescence COARSE.** ORB on DAPI needs enough keypoints; phase-correlation on the
-  thumbnail is the M₀ fallback for very sparse tissue.
+- **Sparse-fluorescence COARSE.** *(Written against the classical detector: ORB on DAPI needed
+  enough keypoints.)* DISK is a learned detector and finds keypoints on far sparser tissue, but
+  the concern is not retired — phase-correlation on the thumbnail remains the M₀ fallback if a
+  slide is sparse enough that even DISK under-matches.
 - **Output frame.** Anchor to the reference slide's native grid (identity for the reference), so
   registered pixel coordinates match what postprocessing/segmentation expects.
 - **OME channel manifest.** STITCH must still emit `channels_manifest.json` (filename → OME

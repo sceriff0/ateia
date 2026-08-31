@@ -20,8 +20,9 @@ there. A coarse fit residual of ``r`` thumbnail px becomes ``r * factor`` full-r
 Raising it costs MEMORY, linearly in area, and that is the thing to know before tuning: DISK's
 activation memory measures at ``GB ~= 1.1 + 7.3 * Mpx`` on the pinned stack (3.03 GB at 512 px,
 8.78 GB at 1024 px), and TILED_COARSE's `memory` request in conf/modules.config is derived from
-this same bound. So ``--max-dim`` is not free: 4096 px would ask for ~123 GB, which is why the
-STARE tier column tops out at 2048. Lower ``--max-dim`` when the step OOMs; raise it only if the
+this same bound. So ``--max-dim`` is not free: 4096 px NEEDS ~123 GB by that fit, and the
+request conf/modules.config derives carries a 1.5x headroom factor, so it would ASK for ~185 GB
+-- which is why the STARE tier column tops out at 2048. Lower ``--max-dim`` when the step OOMs; raise it only if the
 logged residual approaches ``--halo``.
 
 ``--max-dim`` is REQUIRED and has no default. The pipeline always passes it explicitly, resolved

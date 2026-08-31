@@ -47,11 +47,29 @@ ALLOW_FILES = {
     # Design/research records. NOT merely "historical" -- both are PUBLISHED (mkdocs.yml
     # :18-19) and bin/tiled_coarse.py cites the design doc for the thumbnail rationale, so
     # an uncorrected memory model in it is a live, operator-facing claim rather than an
-    # archived one. The design doc's COARSE row and memory paragraph were corrected to the
-    # DISK fit and it carries a "superseded in part" banner; its remaining ORB mentions are
-    # in that banner and in prose describing what the method USED to be, which is exactly
-    # what an exemption is for. The research doc is a genuine survey of prior art -- ORB and
-    # SIFT are the names of the algorithms it surveys, and renaming them would be a lie.
+    # archived one.
+    #
+    # The stated reason here USED to be "its remaining ORB mentions are in that banner and
+    # in prose describing what the method USED to be". That was false when written: the
+    # design doc's §5 ASCII block ("COARSE thumbnail feature-align (ORB + RANSAC) ... ~1-2
+    # GB"), its primitive-split sentence ("COARSE **uses** feature matching (ORB/RANSAC)")
+    # and its §11 sparse-tissue note ("ORB on DAPI needs enough keypoints") were all in the
+    # PRESENT tense about the live method. An allow-list entry whose stated reason has
+    # counterexamples is the pattern CLAUDE.md names by hand, so those three were rewritten
+    # to DISK/LightGlue rather than the reason being softened around them.
+    #
+    # The reason now holds. What remains in the design doc is: the "superseded in part"
+    # banner, one past-tense OOM anecdote in §5 ("COARSE was in fact implemented with a
+    # full-resolution ORB ... before it was made to match this design"), one parenthetical
+    # in the §11 note recording what that note was written against, and the
+    # "Implementation status" phase list, which records what landed on
+    # `feat/tiled-registration` and names deleted files (`bin/tiled_register.py`,
+    # `modules/local/tiled_register.nf`) alongside it. All four are records of the past,
+    # which is exactly what an exemption is for. If a NEW present-tense mention appears,
+    # fix the doc -- do not widen this reason again.
+    #
+    # The research doc is a genuine survey of prior art -- ORB and SIFT are the names of
+    # the algorithms it surveys, and renaming them would be a lie.
     "docs/parallel_registration_design.md",
     "docs/parallel_registration_research.md",
     # A published supplementary figure. It is now factually wrong about the method, but

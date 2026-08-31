@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Guard that the shipped `reg_micro_reg` default is `1`, everywhere it lives.
 
-`reg_micro_reg` has NINE homes (2026-08-30 spec, Task 5 of the
-registration-backend-surface plan): `nextflow.config` (the single source of
+`reg_micro_reg` has TEN homes. NINE were enumerated by the 2026-08-30 spec
+(Task 5 of the registration-backend-surface plan); the tenth --
+`ParamUtils.microRegLevelOf`'s javadoc -- was found by the final whole-branch
+review, and is documented at `PARAM_UTILS` below. The nine: `nextflow.config`
+(the single source of
 truth for the shipped default -- see `test_no_duplicate_param_defaults.py`),
 `nextflow_schema.json` (the schema's own copy of that default, which
 `validateParameters()` uses), `docs/parameters.md`'s parameter table, three
@@ -57,13 +60,33 @@ REGISTRATION_SCHEMATIC = ROOT / "docs" / "figures" / "registration-schematic.htm
 FULL_PIPELINE_PARAMS = ROOT / "params" / "full_pipeline.json"
 REGISTRATION_ONLY_PARAMS = ROOT / "params" / "registration_only.json"
 REGISTER_PY = ROOT / "bin" / "register.py"
+# The TENTH home, found by the final whole-branch review after this file was
+# written: `ParamUtils.microRegLevelOf`'s javadoc said "Default 2 (max:
+# micro-rigid + micro non-rigid), matching nextflow.config" -- a sentence THIS
+# BRANCH made false. It escaped every check here twice over: it is not in the
+# nine-home list, and `MAX_DEFAULT_PATTERN` could not reach it either, because
+# the phrasing is "Default 2 (max: ...", which neither "default max" nor "max
+# default" matches. A prose home needs a check shaped like its own prose.
+PARAM_UTILS = ROOT / "lib" / "ParamUtils.groovy"
+# ELEVENTH and TWELFTH, same review, same pattern: two published figures carry the
+# value TWICE -- once in a `<td class="k">reg_micro_reg</td>` parameter row (which the
+# checks above already pin) and once again in a `<span>micro_reg <b>N</b></span>`
+# summary badge on the registration step, which nothing reached. Both badges still read
+# `2`. A per-home check that matches only one of a file's two copies is not coverage of
+# that file.
+PIPELINE_MD = ROOT / "docs" / "pipeline.md"
+# `docs/figures/registration-schematic.html` carries a THIRD such restatement
+# ("register_micro() - micro_reg = 2 - default", :554). It is deliberately NOT asserted
+# here: spec Phase 6 owns rewriting that figure wholesale, and half-correcting it would
+# be worse than leaving it to its owner. Its parameter-table row IS pinned above.
+_MICRO_REG_BADGE_RE = re.compile(r"<span>micro_reg <b>(\S+?)</b></span>")
 
 # Deliberately NOT one of the nine homes -- see module docstring.
 TEST_CONFIG = ROOT / "conf" / "test.config"
 
 # The four prose homes making the now-false "default is the max" claim, and
 # both spellings it can take.
-PROSE_HOMES = [NEXTFLOW_CONFIG, SCHEMA, PARAMETERS_MD, PIPELINE_SCHEMATIC]
+PROSE_HOMES = [NEXTFLOW_CONFIG, SCHEMA, PARAMETERS_MD, PIPELINE_SCHEMATIC, PARAM_UTILS]
 MAX_DEFAULT_PATTERN = re.compile(r"default\s+max|max\s+default", re.IGNORECASE)
 
 
@@ -148,6 +171,35 @@ def test_pipeline_schematic_value_is_one():
     assert match, "reg_micro_reg row not found in docs/figures/pipeline-schematic.html"
     assert match.group(1) == "1", (
         f"pipeline-schematic.html's reg_micro_reg value is {match.group(1)!r}, expected '1'"
+    )
+
+
+def test_pipeline_schematic_badge_is_one():
+    """The step-summary badge, not the parameter row -- a SECOND copy in the
+    same file, which `test_pipeline_schematic_value_is_one` above does not
+    reach. It read `2` for the whole of this branch."""
+    text = _read(PIPELINE_SCHEMATIC)
+    match = _MICRO_REG_BADGE_RE.search(text)
+    assert match, (
+        "micro_reg summary badge not found in docs/figures/pipeline-schematic.html "
+        "-- this check would pass vacuously"
+    )
+    assert match.group(1) == "1", (
+        f"pipeline-schematic.html's micro_reg BADGE reads {match.group(1)!r}, expected "
+        "'1' (its parameter-table row is checked separately -- both are homes)"
+    )
+
+
+def test_pipeline_md_badge_is_one():
+    """docs/pipeline.md embeds the same step-summary badge."""
+    text = _read(PIPELINE_MD)
+    match = _MICRO_REG_BADGE_RE.search(text)
+    assert match, (
+        "micro_reg summary badge not found in docs/pipeline.md -- this check would "
+        "pass vacuously"
+    )
+    assert match.group(1) == "1", (
+        f"docs/pipeline.md's micro_reg badge reads {match.group(1)!r}, expected '1'"
     )
 
 
@@ -276,6 +328,81 @@ def test_conf_test_config_pin_is_untouched():
     assert declared["reg_micro_reg"] == "0", (
         f"conf/test.config's reg_micro_reg pin is {declared['reg_micro_reg']!r}, expected '0' "
         "(this file is deliberately NOT one of the nine homes -- see module docstring)"
+    )
+
+
+def _doc_comment_above(text: str, signature_fragment: str) -> str:
+    """The contiguous comment block immediately above the line containing
+    `signature_fragment`, returned as normalised prose.
+
+    Deliberately NOT a hand-rolled `/* ... */` regex. `tests/test_nfmodel.py::
+    test_no_guard_parses_nextflow_source_privately` forbids one, and rightly:
+    the measured case is `path(reference, stageAs: 'ref/*')` in
+    `modules/local/register.nf`, whose `/*` opened a FAKE block comment that
+    swallowed 64 lines from a naive DOTALL parse. The first draft of this
+    helper WAS that regex and that guard caught it.
+
+    So the location comes from the model instead. `tests.nfmodel.strip_comments`
+    blanks comments to spaces while preserving line structure, so a line that
+    is whitespace in the blanked view but non-empty in the raw file IS a comment
+    line -- that difference is the extraction, and the model owns the hard part
+    (knowing where a comment really starts and ends).
+    """
+    blanked = _strip_comments(text)
+    raw_lines = text.splitlines()
+    blank_lines = blanked.splitlines()
+    assert len(raw_lines) == len(blank_lines), (
+        "strip_comments changed the line count; the raw/blanked line pairing below "
+        "would be meaningless"
+    )
+    idx = next(
+        (i for i, line in enumerate(blank_lines) if signature_fragment in line), None
+    )
+    assert idx is not None, (
+        f"{signature_fragment!r} not found in the code (comment-blanked) view -- "
+        "either it was renamed, or it exists only inside a comment"
+    )
+    out: list[str] = []
+    j = idx - 1
+    while j >= 0 and raw_lines[j].strip() and not blank_lines[j].strip():
+        out.append(raw_lines[j].strip().lstrip("*/ ").rstrip("*/ "))
+        j -= 1
+    assert out, f"no comment block sits immediately above {signature_fragment!r}"
+    return re.sub(r"\s+", " ", " ".join(reversed(out)))
+
+
+def test_param_utils_doc_comment_does_not_call_two_the_default():
+    """`microRegLevelOf`'s javadoc is a tenth home, and this branch falsified it.
+
+    It read "Default 2 (max: micro-rigid + micro non-rigid), matching
+    nextflow.config" while nextflow.config had moved to 1. Two separate reasons
+    nothing here caught it: the file was not in the nine-home list, and
+    `MAX_DEFAULT_PATTERN` ("default max" / "max default") does not match
+    "Default 2 (max: ...".
+
+    The `regMicroReg == null ? 2 : ...` fallback VALUE is deliberately left
+    alone -- it is unreachable on the pipeline path, since the schema declares
+    `reg_micro_reg` non-nullable with `default: 1` and `validateParameters()`
+    fills it in first -- so this asserts on the PROSE only, and requires the
+    prose to say which of the two numbers ships.
+    """
+    # Prose re-wraps whenever the surrounding text is edited, so the helper
+    # normalises whitespace before matching, as the bin/register.py checks above do.
+    doc = _doc_comment_above(_read(PARAM_UTILS), "static int microRegLevelOf(")
+
+    offender = re.search(r"[Dd]efault\s+(?:is\s+|of\s+)?2\b", doc)
+    assert offender is None, (
+        "lib/ParamUtils.groovy's microRegLevelOf javadoc still calls 2 the "
+        f"default: {offender.group(0)!r} -- nextflow.config ships 1"
+    )
+    assert re.search(r"[Dd]efault\s+(?:is\s+)?1\b", doc), (
+        "lib/ParamUtils.groovy's microRegLevelOf javadoc no longer names the "
+        "shipped default at all -- expected it reworded onto 1, not deleted"
+    )
+    assert "nextflow.config" in doc, (
+        "microRegLevelOf's javadoc dropped its cross-reference to the single "
+        "source of truth; the whole point of naming the default here is to point "
+        "a reader at where it is declared"
     )
 
 

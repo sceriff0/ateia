@@ -5,8 +5,11 @@
  *
  *     high | medium | low | custom
  *
- * `high` is the shipped default and the historical behaviour: every value in the `high` row
- * below is exactly what `nextflow.config` used to declare as that param's literal default.
+ * `high` is the shipped default and, with one exception, the historical behaviour: every value
+ * in the `high` row below is what `nextflow.config` used to declare as that param's literal
+ * default -- EXCEPT `coarse_max_dim`, whose whole column moved down one tier for v1.0.0 (`high`
+ * is 2048, not the 4096 that used to ship). The long note on STARE below gives the measurement
+ * that forced it. Do not restate this row as "unchanged".
  * `medium` and `low` trade accuracy for memory and wall-clock. `custom` starts from `high` and
  * applies whichever individual knobs the user set; anything left unset stays at the `high` value.
  *

@@ -120,9 +120,13 @@ strategy — see [Retry policy](#retry-policy) and
 
 ### Registration — tiled / STARE
 
-Deliberately small: the tiled backend is JVM-free and tile-streamed, so a few GB
-suffices even for large slides. This is what makes `--registration_method tiled`
-laptop-viable.
+Small everywhere **except the coarse anchor**: the tiled backend is JVM-free and
+tile-streamed, so `TILED_REG_TILE`, `TILED_SOLVE` and `TILED_STITCH` need a few GB even for
+large slides. `TILED_COARSE` does not — its DISK matcher is a U-Net whose peak is linear in
+thumbnail **area**, so the row below asks **48 GB at the shipped `high` tier**
+(`reg_tiled_coarse_max_dim` 2048) and ~5 GB at `low` (512). Size `--max_memory` for that
+number, or the clamp turns it into an OOM; `--reg_tiled_mode low` is what makes
+`--registration_method tiled` workstation-viable.
 
 | Process | `cpus` | `memory` (attempt 1) | `time` | Owner | `maxForks` |
 |---|---|---|---|---|---|

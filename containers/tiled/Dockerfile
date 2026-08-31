@@ -1,10 +1,13 @@
 # STARE tiled registration image — bolt3x/mirage-tiled:1.0.0
 #
 # Runs the fully-parallel, JVM-free registration method (registration_method='tiled'):
-# TILED_COARSE, TILED_REGISTER and WARP_SEG_QC's tiled backend (lib/WarpBackends.groovy).
-# NO Java/BioFormats, NO libvips, NO GPU — that is still what makes the method a laptop /
-# low-end-node option and keeps this image an order of magnitude smaller than the VALIS
-# image.
+# TILED_COARSE, TILED_REG_TILE, TILED_SOLVE, TILED_STITCH and WARP_SEG_QC's tiled backend
+# (lib/WarpBackends.groovy). (The single-task TILED_REGISTER this comment used to name was
+# removed with the reg_tiled_fanout flag — see CHANGELOG.)
+# NO Java/BioFormats, NO libvips, NO GPU — that is what keeps this image an order of
+# magnitude smaller than the VALIS image. It no longer makes the METHOD laptop-sized:
+# TILED_COARSE's DISK matcher asks ~48 GB at the shipped reg_tiled_mode=high tier
+# (~5 GB at low), so STARE is a cluster backend at its default.
 #
 # THIS IMAGE NOW CARRIES torch + kornia (CPU wheels), and the earlier "lean, pure-CPU
 # scientific-Python, torch-free" claim is deliberately RETIRED. They power the DISK +
