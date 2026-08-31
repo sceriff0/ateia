@@ -889,7 +889,14 @@ jobs:
           VERSION="${{ needs.validate.outputs.version }}"
           ARCHIVE_NAME="mirage-${VERSION}.tar.gz"
 
-          # Create archive excluding development files.
+          # Write the archive OUTSIDE the tree being archived, then move it back.
+          #
+          # `tar -czf "$ARCHIVE_NAME" .` writes the archive INTO the directory it is
+          # reading, so the directory grows while tar walks it and GNU tar exits 1 with
+          # "tar: .: file changed as we read it". That is not cosmetic: it failed the
+          # v1.0.0 release's Create Artifacts job while every other job passed. tar's
+          # own --exclude cannot help, because the exclusion is evaluated against the
+          # walk, not against the write.
           tar --exclude='.git' \
               --exclude='.github' \
               --exclude='.nf-test' \
@@ -898,7 +905,8 @@ jobs:
               --exclude='*.log' \
               --exclude='__pycache__' \
               --exclude='.pytest_cache' \
-              -czvf "$ARCHIVE_NAME" .
+              -czvf "${RUNNER_TEMP}/${ARCHIVE_NAME}" .
+          mv "${RUNNER_TEMP}/${ARCHIVE_NAME}" "./${ARCHIVE_NAME}"
 
           echo "Created archive: $ARCHIVE_NAME"
           ls -lh "$ARCHIVE_NAME"
