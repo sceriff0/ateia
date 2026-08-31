@@ -14,11 +14,22 @@
 # publish overwrote one mutable name and there was no prior image to roll back to.
 #
 # Triggers:
-#   * release:published    -> build + push, using each image's descriptive tag
-#   * workflow_dispatch     -> build + push
+#   * workflow_dispatch     -> build + push, version supplied by the operator. The
+#                              manual path, and the one that validates an image
+#                              (e.g. :tiled) BEFORE a version is tagged.
 #   * push to main (when    -> build ONLY (no push) so PRs/merges validate the
 #     containers/** change)     Dockerfiles without publishing
 #   * workflow_call         -> reusable; release.yml calls this with a version
+#
+# THERE IS DELIBERATELY NO `release: [published]` TRIGGER. This workflow used to carry
+# one, so a published release started TWO publishing runs: this one directly, and
+# release.yml's `publish-images` job via workflow_call. Only the second is gated --
+# `publish-images` has `needs: [validate, test]` -- so the direct run pushed ten images
+# to Docker Hub even when the release test gate was RED, contradicting release.yml's own
+# header claim that nothing downstream happens unless `test` passes. Publishing on a
+# release now flows through release.yml alone, behind that gate. If you re-add the
+# trigger, restore the `github.event_name == "release"` branch of the version resolver
+# below with it, and understand that you are restoring the ungated push along with it.
 #
 # Auth: docker/login-action -> Docker Hub using DOCKERHUB_USERNAME / DOCKERHUB_TOKEN
 #       repository secrets (Settings -> Secrets and variables -> Actions).
@@ -27,10 +38,6 @@
 name: Build Images
 
 on:
-  # Published GitHub release -> build & push, version taken from the tag.
-  release:
-    types: [published]
-
   # Manual trigger -> build & push, version supplied by the operator.
   workflow_dispatch:
     inputs:
@@ -95,11 +102,11 @@ jobs:
       - name: Resolve version and push flag
         id: resolve
         run: |
-          # Determine the version string from whichever trigger fired.
-          if [ "${{ github.event_name }}" == "release" ]; then
-            VERSION="${{ github.event.release.tag_name }}"
-            PUSH="true"
-          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          # Determine the version string from whichever trigger fired. There is no
+          # `release` branch here because there is no `release` trigger -- see the header:
+          # a published release reaches this workflow only through release.yml's gated
+          # workflow_call, which arrives as event_name == "workflow_call".
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             VERSION="${{ github.event.inputs.version }}"
             PUSH="true"
           elif [ "${{ github.event_name }}" == "workflow_call" ]; then
