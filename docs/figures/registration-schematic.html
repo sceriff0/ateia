@@ -292,7 +292,7 @@
       <div class="r"><div class="t">step 1 · group</div><div class="v">groupTuple(by patient)</div>
         <div class="d">Streaming group keyed on <code>patient_id</code>, sized by <code>images_count</code> from meta — a patient emits the moment its slides arrive, without waiting for the cohort.</div></div>
       <div class="r"><div class="t">step 2 · reference</div><div class="v">is_reference == true</div>
-        <div class="d">Exactly one reference per patient. None found → hard error, unless <code>allow_auto_reference</code> promotes the first slide (and marks it, so downstream filters see one reference).</div></div>
+        <div class="d">Exactly one reference per patient, <b>declared and never inferred</b>. None found → hard error at launch, at every entry point; two found is the same error. There is no promotion rule: <code>allow_auto_reference</code> was removed, because two sheets differing only in row order chose two different references and nothing downstream recorded that a choice had been made.</div></div>
       <div class="r"><div class="t">step 2b · single-slide</div><div class="v">items.size()==1 → passthrough</div>
         <div class="d">A lone reference skips the adapter entirely (VALIS crashes on one image); the reference <i>is</i> its own registered output, flagged <code>is_passthrough</code>.</div></div>
       <div class="r"><div class="t">step 3 · dispatch</div><div class="v">registration_method</div>
@@ -944,7 +944,7 @@
         <table class="pr">
           <tr><td class="k">registration_method</td><td class="val">valis</td><td class="d">valis | tiled (STARE)</td></tr>
           <tr><td class="k">nuclear_markers</td><td class="val">[DAPI, CELLTOX]</td><td class="d">ordered preference → channel 0</td></tr>
-          <tr><td class="k">allow_auto_reference</td><td class="val">false</td><td class="d">error if no is_reference</td></tr>
+          <tr><td class="k">is_reference</td><td class="val">declared</td><td class="d">a samplesheet column, not a parameter — exactly one true row per patient, else a launch error</td></tr>
           <tr><td class="k">reg_qc</td><td class="val">2</td><td class="d">0 none · 1 overlay · 2 +cell overlap</td></tr>
           <tr><td class="k">skip_registration_qc</td><td class="val">false</td><td class="d">legacy; true forces reg_qc=0</td></tr>
           <tr><td class="k">qc_scale_factor</td><td class="val">0.25</td><td class="d">QC PNG downsample</td></tr>

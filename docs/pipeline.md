@@ -120,9 +120,12 @@ Chips give real defaults. Every process runs in a pinned container and emits
     <h3><span>REGISTRATION</span><span>step 2</span></h3>
     <div class="body">
       <div class="mod"><div class="n">group by patient · resolve reference</div>
-        <div class="x">Patients whose only slide is the reference bypass the backend entirely —
+        <div class="x">The reference is <b>declared, never inferred</b>: exactly one
+          <code>is_reference=true</code> row per patient, resolved once at samplesheet read.
+          None is a hard error at launch, at every entry point; there is no promotion rule.
+          Patients whose only slide is the reference bypass the backend entirely —
           a lone image has no transform to solve — and pass through unregistered.</div>
-        <div class="pp"><span>allow_auto_reference <b>false</b></span></div></div>
+        <div class="pp"><span>is_reference <b>exactly one</b></span></div></div>
       <div class="grp">
         <div class="bh">◇ registration_method</div>
         <div class="opt"><div class="oh"><span>valis → REGISTER</span><span class="tag-def">default</span></div>

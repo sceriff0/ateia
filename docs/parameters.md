@@ -70,8 +70,19 @@ laptop-sized at its shipped tier — see the memory note under [Tiled / STARE](#
 | Parameter | Default | Description |
 |---|---|---|
 | `registration_method` | `valis` | Registration backend: `valis` (VALIS whole-slide) or `tiled` (STARE — see [Tiled / STARE](#tiled-stare-registration_methodtiled)). |
-| `allow_auto_reference` | `false` | If no `is_reference=true` row, use the first samplesheet row as reference. **`--start preprocessing` only** — later entry points read a checkpoint that already names the reference, and will error rather than infer one. |
 | `nuclear_markers` | `['DAPI','CELLTOX']` | Ordered preference of nuclear/fiducial marker names. The first present (resolved from channel metadata, never the filename) is moved to channel 0 and drives both cell segmentation and the registration fiducial. Fails fast if none present (single-channel images excepted). Accepts a **list** (config or `-params-file`) or a **comma/space-separated string**, which is the only shape a command line can produce: `--nuclear_markers CELLTOX` and `--nuclear_markers DAPI,CELLTOX` both work. Matching is case-insensitive **substring**, so `DAPI_nuclear` counts as nuclear. |
+
+!!! warning "The reference is declared, never inferred"
+    There is **no parameter** that picks a registration reference for you. Every
+    patient must declare exactly one `is_reference=true` row; a patient with none
+    is a **hard error at launch**, at every entry point, and two `true` rows are
+    the same error. `allow_auto_reference`, which promoted a patient's first
+    samplesheet row, was **removed** — two sheets differing only in row order
+    produced two different alignments and nothing recorded that the pipeline had
+    chosen. Passing the flag now **fails the launch** as an unrecognised parameter
+    (`validation.logging.unrecognisedParams = 'error'`).
+    The one exception is `--mode add_cycle`, whose sheet carries no reference at
+    all because it reuses the prior run's.
 
 ### VALIS
 
