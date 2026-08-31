@@ -124,8 +124,9 @@ docker run --rm -v "$PWD":/data -w /data \
 
     The script joins on `label` when FlowPath exports it, and otherwise falls
     back to a **mutual-nearest centroid** join. That fallback is exact because
-    FlowPath re-exports the `Centroid X µm` measurement MIRAGE itself wrote, so
-    `x_px = x_um / pixel_size - 0.5` inverts it cleanly. If fewer than
+    FlowPath re-exports the `Centroid X µm` measurement MIRAGE itself wrote, and
+    both it and `obsm["spatial"]` are corner-of-pixel, so `x_px = x_um /
+    pixel_size` inverts it cleanly — no half-pixel correction. If fewer than
     `--min-match-fraction` (default 50%) of cells match, the script fails rather
     than writing a mostly-unlabelled dataset.
 
