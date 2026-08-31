@@ -2,9 +2,21 @@ name: CI
 
 on:
   push:
-    branches: [ main, dev ]
+    # `benchmarking` is here because it carries the WHOLE pipeline (it is dev plus
+    # benchmarks/), and until 2026-09-01 none of the pipeline's guards ran on it --
+    # only the stare-bench workflow did. Four pipeline guards broke there during the
+    # dev reconciliation (CI job timeouts, an unpinned imaging stack, references to
+    # deleted COARSE front-ends, fixture producers) and CI caught none of them; they
+    # were found by running pytest by hand. A branch that carries the pipeline needs
+    # the pipeline's gate.
+    #
+    # This does NOT pull in the expensive leg: nf-test-real is separately gated by
+    # its own `if:` on refs/heads/{main,dev} (:450), so benchmarking gets the
+    # blocking `all-tests` gate -- python-tests, nextflow-stub, nf-test-stub,
+    # security-tests, ruff -- and not the real suite.
+    branches: [ main, dev, benchmarking ]
   pull_request:
-    branches: [ main, dev ]
+    branches: [ main, dev, benchmarking ]
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
 # Least-privilege default token: read-only. Hardens against a compromised

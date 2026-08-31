@@ -81,6 +81,18 @@ CONFIG="${4:-$REPO_ROOT/benchmarks/configs/synthetic_gt.yaml}"
 # Override for another site: NF_PROFILE=singularity,slurm ./run_mid.sh ...
 NF_PROFILE="${NF_PROFILE:-singularity,slurm,ieo}"
 
+# ASHLAR's settings, read from CONFIG rather than hardcoded here -- the same rule the
+# crop source follows in Step 1. Read ONCE: a per-row read would let a mid-run edit to
+# the config change what half the plan was measured with, invisibly.
+read -r ASHLAR_TILE ASHLAR_OVERLAP ASHLAR_MAXSHIFT <<EOF
+$(python3 -c '
+import sys, yaml
+c = (yaml.safe_load(open(sys.argv[1])) or {}).get("ashlar") or {}
+print(c.get("tile_size", 2048), c.get("overlap", 0.1), c.get("maximum_shift_um", 60))
+' "$CONFIG")
+EOF
+
+
 mkdir -p "$PAIRS_ROOT" "$RESULTS_ROOT"
 
 # --- Step 1: generate every distinct pair ONCE ------------------------------
@@ -234,7 +246,11 @@ find_tre() {
 find_transform() {
   local outdir="$1" pair_id="$2" method="$3" hit
   case "$method" in
-    tiled|ashlar)
+    tiled)
+      # NOT `tiled|ashlar` any more. ashlar returns from its own branch in Step 2 before
+      # reaching this function, so an ashlar case here is unreachable -- and an unreachable
+      # case that LOOKS like it handles ashlar is what let the dead leg go unnoticed: it
+      # read as wired while globbing a tree no ashlar run ever writes.
       hit="$(find "$outdir/$pair_id/registered/manifest" -maxdepth 1 \
              -name '*_manifest.json' 2>/dev/null | sort | head -n1)"
       ;;
@@ -279,6 +295,56 @@ while IFS=, read -r run_id pair_id method rest; do
       --work-dir "$outdir/cli_work" \
       --run-id "$run_id" \
       --method identity \
+      --tile 2048 \
+      --halo 256 \
+      --out "$scored"
+    continue
+  fi
+
+  # ASHLAR is the EXTERNAL comparator and is NOT a pipeline backend, so there is no
+  # --registration_method for it: :fire: 6a54479 removed that backend for v1.0.0 and the
+  # schema enum is ['valis', 'tiled']. Passing "ashlar" to the nextflow run below would be
+  # rejected at launch. Drive it directly instead.
+  #
+  # THIS LEG WAS DEAD until now. find_transform() globbed <outdir>/<pair>/registered/manifest
+  # for method=ashlar -- a tree only a pipeline run writes -- so the ashlar rows of the plan
+  # could never produce a transform and the run aborted on the "no ashlar transform found"
+  # guard below. That guard was right to refuse; what was missing was the producer.
+  #
+  # retile.py cuts each cycle into the grid ashlar's FilePatternReader expects (it reads a
+  # tile GRID, not a stitched slide); solve.py runs EdgeAligner on the reference then
+  # LayerAligner on the moving cycle and rewrites the placements into STARE's manifest
+  # shape, so the scorer below reads it with --method ashlar and no special case.
+  if [[ "$method" == "ashlar" ]]; then
+    ash="$outdir/ashlar"
+    mkdir -p "$ash"
+    ref_img="$PAIRS_ROOT/$pair_id/ref.ome.tiff"
+    mov_img="$PAIRS_ROOT/$pair_id/mov.ome.tiff"
+    # Slide names are DERIVED from the filenames, never hardcoded to "ref"/"mov":
+    # predict_from_manifest looks the moving slide up BY NAME, and a name that does not
+    # match what the manifest carries yields an empty transform that scores as identity.
+    ref_name="$(basename "$ref_img")"; ref_name="${ref_name%%.*}"
+    mov_name="$(basename "$mov_img")"; mov_name="${mov_name%%.*}"
+
+    python3 -m benchmarks.ashlar.retile --image "$ref_img" --outdir "$ash/ref" \
+      --cycle 0 --tile-size "$ASHLAR_TILE" --overlap "$ASHLAR_OVERLAP"
+    python3 -m benchmarks.ashlar.retile --image "$mov_img" --outdir "$ash/mov" \
+      --cycle 1 --tile-size "$ASHLAR_TILE" --overlap "$ASHLAR_OVERLAP"
+    python3 -m benchmarks.ashlar.solve \
+      --ref-tiles "$ash/ref" --moving-tiles "$ash/mov" \
+      --reference-name "$ref_name" --moving-name "$mov_name" \
+      --maximum-shift "$ASHLAR_MAXSHIFT" \
+      --out-manifest "$ash/manifest.json" --out-tre "$ash/tre.json"
+
+    # No --controls and no --intrinsic-tre: ashlar has no STARE gate and no per-tile
+    # *_ctrl.json, so the gate-ROC columns stay None (unmeasured) rather than being
+    # computed from an empty set. score_pair REFUSES controls for method != tiled anyway.
+    python3 -m benchmarks.stare_bench.cli \
+      --pair-dir "$PAIRS_ROOT/$pair_id" \
+      --work-dir "$outdir/cli_work" \
+      --run-id "$run_id" \
+      --method ashlar \
+      --transform "$ash/manifest.json" \
       --tile 2048 \
       --halo 256 \
       --out "$scored"

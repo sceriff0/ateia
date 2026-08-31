@@ -87,3 +87,33 @@ physics:
     seam_px: 1024
     seam_amplitude: 0.03
     focus_sigma_px: 0.4
+
+# ASHLAR — the EXTERNAL comparator, listed in `methods` above.
+#
+# It is NOT a Mirage registration backend (:fire: 6a54479 removed that for v1.0.0), so
+# run_mid.sh cannot reach it with --registration_method the way it reaches tiled and valis.
+# It is driven directly instead: benchmarks/ashlar/retile.py cuts each cycle into the tile
+# grid ashlar's FilePatternReader expects, and benchmarks/ashlar/solve.py runs
+# EdgeAligner -> LayerAligner and rewrites the per-tile placements into the same M0 + mesh
+# manifest STARE emits, so one predict_from_manifest scores all three methods.
+#
+# THESE ARE THIS RUNG'S OWN SETTINGS, not a copy of arms.yaml's external_baseline block.
+# That one configures ashlar against REAL slides; this one against 10240^2 synthetic pairs.
+# Two experiments, so two settings -- deliberately not shared, because a single value
+# forced to serve both would be wrong for at least one.
+ashlar:
+  tile_size: 2048            # matches reg_tiled_tile at reg_tiled_mode=high, which is what
+                             # run_mid.sh registers STARE at. ashlar takes one independent
+                             # shift per tile, so an unequal grid would hand one method more
+                             # local freedom than the other and bias the comparison silently.
+  overlap: 0.1               # synthesized tile overlap fraction; ashlar needs overlap to
+                             # correlate neighbours at all.
+  maximum_shift_um: 60       # MICRONS. The pairs carry no PhysicalSizeX, so retile.py falls
+                             # back to DEFAULT_PIXEL_SIZE_UM = 0.325 um/px -- making this a
+                             # ~185 px budget. synthetic_gt.yaml's amplitude_px axis tops out
+                             # at 48 px, so 60 um clears the largest injected displacement
+                             # with room to spare. That margin is the point: ashlar does NOT
+                             # error when the budget binds, it silently substitutes a model
+                             # prediction (reg.py: `self.positions[discard] = predictions
+                             # [discard] + self.offset`), which would land in the table as a
+                             # genuine loss for ashlar rather than as a starved run.
