@@ -122,7 +122,7 @@ a historical record of what was run, not an instruction.
 
 | File | Line(s) | Flag | Executed by CI? |
 |---|---|---|---|
-| `tests/run_validation_tests.sh` | ~~63~~ **FIXED** | ~~`--dry_run true`~~ → `-params-file` | **Yes, and on Nextflow 26 today** — `.github/workflows/ci.yml:185` runs it in the `nextflow-stub` job, whose matrix includes `latest-everything`; `.github/workflows/release.yml`'s gate carries the same two-version matrix since 2026-08-31 (it was `latest-everything` only) |
+| `tests/run_validation_tests.sh` | ~~63~~ **FIXED** | ~~`--dry_run true`~~ → `-params-file` | **Yes, and on Nextflow 26 today** — `.github/workflows/ci.yml:303` runs it in the `nextflow-stub` job, whose matrix includes `latest-everything`; `.github/workflows/release.yml`'s gate carries the same two-version matrix since 2026-08-31 (it was `latest-everything` only) |
 | `README.md` | ~~90~~ **FIXED** | ~~`--dry_run true`~~ → `-params-file params/dry_run.json` | copy-paste example only |
 | `docs/usage.md` | ~~82, 132~~ **FIXED** | ~~`--dry_run true`~~ → `-params-file`; new "Boolean parameters" section explains the rule | copy-paste examples only |
 | `tests/test_validation.md` | ~~365~~ **FIXED** | ~~`--dry_run true`~~ → `-params-file` | doc mirror of the script above |
@@ -141,7 +141,7 @@ describing it as one was wrong. `.github/workflows/ci.yml`'s `nextflow-stub`
 job runs a matrix of `['25.04.0', 'latest-everything']`, and (as noted in
 section 2) `latest-everything` **already tracks whatever Nextflow is current**
 — which is Nextflow 26 today, on every push and every PR. That job runs
-`bash tests/run_validation_tests.sh` at `ci.yml:185`, and it is in the
+`bash tests/run_validation_tests.sh` at `ci.yml:303`, and it is in the
 `all-tests` blocking gate. `.github/workflows/release.yml`'s gate used to pin
 `version: 'latest-everything'` outright, so the job blocking a version tag was
 26-only and never exercised the `>=25.04.0` minimum `manifest.nextflowVersion`

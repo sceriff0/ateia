@@ -123,6 +123,16 @@ jobs:
             # not whatever branch the dispatch was fired from — testing the
             # dispatch branch and tagging main is the defect this replaces.
             GATE_REF="main"
+            # ...which means firing this from a feature branch releases MAIN and
+            # silently ignores the branch you fired from. That is the correct
+            # behaviour, but it is not the obvious one, so say it out loud. A
+            # ::notice:: rather than a hard failure: refusing here would add a new
+            # way for the release path to fail, days before v1.0.0, on a path that
+            # cannot be rehearsed against Actions -- and the run is not wrong, only
+            # the operator's expectation might be.
+            if [ "${{ github.ref_name }}" != "main" ]; then
+              echo "::notice::Dispatched from '${{ github.ref_name }}', but a release always gates and tags MAIN. Nothing on '${{ github.ref_name }}' is released unless it is already merged to main."
+            fi
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "version_no_v=${VERSION#v}" >> "$GITHUB_OUTPUT"
@@ -803,18 +813,31 @@ jobs:
   # still says the previous version. A reusable workflow does its OWN checkout
   # and sees the CALLER's github.ref, so the tag has to be passed in explicitly;
   # build-images.yml takes it as its `ref` input.
+  #
+  # `needs: verify-config` is the third load-bearing one, and it covers the
+  # `release: published` trigger, where nothing bumps anything: the operator
+  # tagged the tree by hand, so nextflow.config can simply DISAGREE with the tag.
+  # `verify-config` is what catches that, and `artifacts` re-checks it inline
+  # before tarring -- but this job has no steps of its own to check anything in,
+  # and it used to carry no dependency on `verify-config` either. A v1.0.0
+  # release of a tree still saying 0.9.0 therefore went: verify-config RED,
+  # artifacts RED, and ten images tagged 1.0.0 built from the 0.9.0 tree and
+  # PUSHED. `verify-config` only runs on the release trigger, so it is skipped
+  # on a dispatch and the clause has to tolerate that, exactly like bump-and-tag.
   # ===========================================================================
   publish-images:
     name: Publish Images
-    needs: [validate, test, bump-and-tag]
+    needs: [validate, test, bump-and-tag, verify-config]
     # `always()` is what lets a SKIPPED bump-and-tag (the release: published
-    # path, where the tag already exists) through; the explicit result checks
-    # are what stop a FAILED gate coming through with it.
+    # path, where the tag already exists) or a SKIPPED verify-config (the
+    # workflow_dispatch path, where bump-and-tag writes the version) through; the
+    # explicit result checks are what stop a FAILED gate coming through with it.
     if: >-
       always()
       && needs.validate.result == 'success'
       && needs.test.result == 'success'
       && (needs.bump-and-tag.result == 'success' || needs.bump-and-tag.result == 'skipped')
+      && (needs.verify-config.result == 'success' || needs.verify-config.result == 'skipped')
     uses: ./.github/workflows/build-images.yml
     with:
       version: ${{ needs.validate.outputs.version }}

@@ -43,6 +43,7 @@ directory (test_ci_stack_pinned.py, test_ci_job_hygiene.py).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -96,6 +97,36 @@ def checkout_steps(job: dict) -> list[dict]:
         for step in (job.get("steps") or [])
         if "actions/checkout" in str(step.get("uses", ""))
     ]
+
+
+def workflow_files() -> list[Path]:
+    """Every workflow, DISCOVERED BY GLOB, never a filename list.
+
+    The hardcoded form of this scope is exactly how the `skipped`-as-a-pass check
+    below came to be checking one of the two files that carry a result aggregator:
+    it read `release.yml`'s `test` job and nothing else, so re-adding
+    `&& [ "${{ needs.ruff.result }}" != "skipped" ]` to ci.yml's `all-tests` left
+    the whole suite green (62 passed).
+    """
+    files = sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml"))
+    assert files, f"no workflow files found under {WORKFLOWS.relative_to(ROOT)}"
+    return files
+
+
+# A `run:` step reading `needs.<job>.result` is what a gate aggregator IS. Both
+# ci.yml's `all-tests` and release.yml's `test` are nothing but a list of these.
+RESULT_READ = re.compile(r"needs\.[A-Za-z0-9_.-]+\.result")
+
+
+def result_aggregator_jobs(path: Path) -> dict:
+    """Jobs that decide pass/fail by comparing `needs.<job>.result` in a `run:`
+    step — DISCOVERED, never named, so a renamed or a THIRD aggregator is covered
+    the day it is added."""
+    return {
+        job_id: job
+        for job_id, job in jobs_of(path).items()
+        if isinstance(job, dict) and RESULT_READ.search(run_text(job))
+    }
 
 
 def release_jobs() -> dict:
@@ -183,7 +214,15 @@ def test_no_job_in_release_yml_does_a_bare_checkout():
     whatever branch the operator happened to fire from and on a `release: published`
     is the tag. Mixing the two is how the gate, the tag and the tarball came from
     three different commits. Every checkout here must say which commit it means."""
-    allowed = (PINNED_SHA, RELEASE_TAG, GATE_REF, "main")
+    # Two different kinds of allowed value, and they need two different tests.
+    # An EXPRESSION is matched as a substring because it is embedded in `${{ ... }}`.
+    # A LITERAL branch name must match EXACTLY: `"main" in ref` also accepts
+    # `refs/heads/maintenance`, `mainline`, `not-main` and anything else with those
+    # four characters in it, so the substring form let a checkout of an entirely
+    # different branch through while reporting that it had checked the ref.
+    expressions = (PINNED_SHA, RELEASE_TAG, GATE_REF)
+    literals = ("main",)
+    allowed = expressions + literals
 
     seen = 0
     offenders = []
@@ -195,10 +234,10 @@ def test_no_job_in_release_yml_does_a_bare_checkout():
             ref = str((step.get("with") or {}).get("ref", "")).strip()
             if not ref:
                 offenders.append(f"{job_id}: `{step.get('name', '<unnamed>')}` has no `ref:`")
-            elif not any(token in ref for token in allowed):
+            elif ref not in literals and not any(token in ref for token in expressions):
                 offenders.append(
                     f"{job_id}: `{step.get('name', '<unnamed>')}` checks out {ref!r}, which "
-                    f"is none of {allowed}"
+                    f"is none of {allowed} (literal branch names must match exactly)"
                 )
 
     # Non-vacuity: an empty `offenders` also means "found no checkout steps at all",
@@ -394,6 +433,85 @@ def test_jobs_needing_bump_and_tag_tolerate_it_being_skipped():
     assert not offenders, "\n".join(offenders)
 
 
+def test_no_release_artifact_is_produced_from_a_tree_that_disagrees_with_the_tag():
+    """`verify-config` failing must stop the release SHIPPING, not merely go red.
+
+    It compares `nextflow.config`'s `manifest.version` against the released tag,
+    and it runs only on the `release` trigger (on a dispatch, `bump-and-tag`
+    writes that version, so there is nothing to disagree with). `artifacts`
+    protects itself with an equivalent step of its own. `publish-images` had
+    neither: on a `release: published` of a tag whose tree still said 0.9.0,
+    `verify-config` went red, `artifacts` went red, and ten images tagged 1.0.0
+    were built from the 0.9.0 tree and PUSHED.
+
+    So the invariant is per-producer and satisfiable two ways — depend on
+    `verify-config`, or carry the check inline. A job that `uses:` a reusable
+    workflow has no steps of its own, so for it only the first way exists.
+    """
+    producers = artifact_producing_jobs()
+    assert len(producers) >= 2, (
+        f"discovered only {sorted(producers)} as release-artifact producers; the "
+        "discovery predicates no longer match what release.yml does."
+    )
+    assert "verify-config" in release_jobs(), (
+        "release.yml has no `verify-config` job, so the `needs:` half of this "
+        "invariant names a job that does not exist."
+    )
+
+    offenders = []
+    for job_id, job in producers.items():
+        if "verify-config" in needs_of(job):
+            continue
+        text = run_text(job)
+        if "nextflow.config" in text and "version_no_v" in text:
+            continue
+        offenders.append(
+            f"{job_id}: neither `needs: verify-config` nor an inline check of "
+            "nextflow.config's version against the released tag"
+        )
+    assert not offenders, (
+        "release-artifact job(s) can ship from a tree whose nextflow.config "
+        "disagrees with the tag:\n" + "\n".join(offenders)
+    )
+
+
+def test_jobs_needing_verify_config_tolerate_it_being_skipped():
+    """The same trap `bump-and-tag` sets, from the other trigger.
+
+    `verify-config` carries `if: github.event_name == 'release'`, so on a
+    workflow_dispatch it is SKIPPED — and GitHub skips any job whose dependency
+    was skipped. Adding `needs: verify-config` without allowing 'skipped'
+    therefore DELETES the image publish from the dispatch path entirely, silently,
+    and the release still reports green.
+    """
+    checked = 0
+    offenders = []
+    for job_id, job in release_jobs().items():
+        if not isinstance(job, dict) or "verify-config" not in needs_of(job):
+            continue
+        checked += 1
+        cond = str(job.get("if", "")).replace('"', "'")
+        if "always()" not in cond:
+            offenders.append(f"{job_id}: needs `verify-config` but its `if:` has no always()")
+        elif "needs.verify-config.result == 'skipped'" not in cond:
+            offenders.append(
+                f"{job_id}: needs `verify-config` but never allows it to be 'skipped', so "
+                "the workflow_dispatch path loses this job entirely"
+            )
+        elif "needs.verify-config.result == 'success'" not in cond:
+            offenders.append(
+                f"{job_id}: never requires `verify-config` to have SUCCEEDED, so a red "
+                "config check no longer blocks it -- always() bypasses the needs-failure "
+                "rule too"
+            )
+    assert checked >= 1, (
+        "no job in release.yml depends on `verify-config`; "
+        "test_no_release_artifact_is_produced_from_a_tree_that_disagrees_with_the_tag "
+        "should have caught that first."
+    )
+    assert not offenders, "\n".join(offenders)
+
+
 # ---------------------------------------------------------------------------
 # Invariant 5: the gate runs what CI blocks on.
 # ---------------------------------------------------------------------------
@@ -446,17 +564,130 @@ def test_the_release_gate_runs_every_check_ci_blocks_on(label, needle):
     )
 
 
-def test_the_release_gate_does_not_treat_skipped_as_a_pass():
-    """`skipped` is not `success`. A gate job that stops running must block the
-    release rather than being waved through — the same defect ci.yml's `all-tests`
-    carried until 2026-08-31."""
-    text = run_text(release_jobs()["test"])
-    assert "!= \"success\"" in text, (
-        "release.yml's `test` aggregator does not compare gate results against "
-        "\"success\"; it is not checking anything."
+def test_both_workflows_carry_a_gate_aggregator_this_file_can_find():
+    """Non-vacuity for the two scans below, which are "must not find anything"
+    checks over a DISCOVERED set. ci.yml (`all-tests`) and release.yml (`test`)
+    each carry exactly the one aggregator; if the discovery predicate stops
+    matching, the `skipped` scan passes having read nothing."""
+    found = {path.name: sorted(result_aggregator_jobs(path)) for path in workflow_files()}
+    for name in ("ci.yml", "release.yml"):
+        assert found.get(name), (
+            f"no job in {name} reads `needs.<job>.result` in a `run:` step, so this "
+            "file cannot see its gate aggregator. Either the gate was rewritten in a "
+            "form this predicate does not match, or the file lost its gate."
+        )
+
+
+@pytest.mark.parametrize("path", workflow_files(), ids=lambda p: p.name)
+def test_no_gate_aggregator_treats_skipped_as_a_pass(path):
+    """`skipped` is not `success`, in EITHER workflow.
+
+    ci.yml's `all-tests` and release.yml's `test` are the same gate written twice,
+    and both used to read `!= "success" && != "skipped"` — harmless only while
+    nothing in the needs list can skip. The moment one of those jobs gains a
+    `paths:`/`if:` filter the gate goes decorative for it and reports green having
+    verified nothing.
+
+    This scan is over EVERY workflow, not the two named files: the previous
+    version read release.yml's `test` job only, so the reviewer put the
+    `skipped` clause straight back into ci.yml and the whole suite stayed green.
+    """
+    for job_id, job in result_aggregator_jobs(path).items():
+        text = run_text(job)
+        assert '!= "success"' in text, (
+            f"{path.name}: job `{job_id}` reads `needs.<job>.result` but never compares "
+            'it against "success"; it is not checking anything.'
+        )
+        assert "skipped" not in text, (
+            f"{path.name}: job `{job_id}` allows a `skipped` needed job to count as a "
+            "pass. A needed job that stops running must block, not be waved through."
+        )
+
+
+def test_no_workflow_job_sets_continue_on_error():
+    """`continue-on-error: true` makes a job or step report a green tick whatever
+    it did, so the run summary stops saying whether the suite got better or worse.
+
+    ci.yml's `nf-test-real` carried it as a SECOND advisory mechanism on top of
+    simply being absent from `all-tests`' `needs:` — 129 real cases showing green
+    unconditionally. It was removed; nothing forbade it coming back.
+
+    If a legitimate use ever appears, allow-list it BY JOB ID here with the reason
+    written down, rather than deleting the scan.
+    """
+    allowed: dict[tuple[str, str], str] = {}  # (workflow file name, job id) -> reason
+
+    scanned = 0
+    offenders = []
+    for path in workflow_files():
+        for job_id, job in jobs_of(path).items():
+            if not isinstance(job, dict):
+                continue
+            scanned += 1
+            where = f"{path.name}:{job_id}"
+            if job.get("continue-on-error") and (path.name, job_id) not in allowed:
+                offenders.append(f"{where}: job-level `continue-on-error`")
+            for step in job.get("steps") or []:
+                if not isinstance(step, dict):
+                    continue
+                if step.get("continue-on-error") and (path.name, job_id) not in allowed:
+                    offenders.append(
+                        f"{where}: step `{step.get('name', '<unnamed>')}` sets "
+                        "`continue-on-error`"
+                    )
+
+    # Non-vacuity: an empty `offenders` must mean "read the jobs and found none",
+    # not "read no jobs".
+    assert scanned >= 15, (
+        f"scanned only {scanned} job(s) across {[p.name for p in workflow_files()]}; the "
+        "three workflows here declare far more than that, so this scan did not read what "
+        "it thinks it read."
     )
-    assert "skipped" not in text, (
-        "release.yml's `test` aggregator allows a `skipped` gate job to count as a pass. "
-        "The moment any gate job gains a `paths:`/`if:` filter the gate goes decorative "
-        "for it."
+    assert not offenders, (
+        "`continue-on-error` makes a failing job report green. Make it advisory by "
+        "LEAVING IT OUT of the gate's `needs:`, which reports its true colour:\n"
+        + "\n".join(offenders)
+    )
+
+
+def test_no_workflow_branches_on_the_workflow_call_event_name():
+    """A condition that can never be true, in the one place it costs a release.
+
+    Inside a REUSABLE workflow the event payload is the CALLER's — GitHub's own
+    words: "the event payload in the called workflow is the same event payload
+    from the calling workflow". So `github.event_name` is never `workflow_call`;
+    on a published release reaching build-images.yml through release.yml's
+    `publish-images`, it is `release`.
+
+    build-images.yml's version resolver branched on exactly that, could not match,
+    fell through to its `push`-trigger default of `PUSH="false"`, and gave the
+    operator a fully green "Publish Images" job with ZERO images on Docker Hub —
+    while `modules/local/*.nf` pull `bolt3x/mirage-<component>:<manifest.version>`
+    by name, so every process then fails to pull.
+
+    A called workflow tells its two entry points apart by its `inputs`, which are
+    populated for `workflow_dispatch` and `workflow_call` alike and absent on a
+    plain `push`.
+    """
+    hits = []
+    saw_event_name = 0
+    for path in workflow_files():
+        for lineno, line in enumerate(path.read_text().splitlines(), start=1):
+            code = line.split("#", 1)[0]
+            if "github.event_name" not in code:
+                continue
+            saw_event_name += 1
+            if "workflow_call" in code:
+                hits.append(f"{path.name}:{lineno}: {line.strip()}")
+
+    # Non-vacuity: the scan has to have found real `github.event_name` uses, or a
+    # clean result only means the files were not read.
+    assert saw_event_name >= 4, (
+        f"found only {saw_event_name} non-comment use(s) of `github.event_name` across "
+        "the workflows; several jobs gate on it, so this scan missed them."
+    )
+    assert not hits, (
+        "workflow(s) branch on `github.event_name` being 'workflow_call', which it "
+        "never is — inside a called workflow the event name is the CALLER's:\n"
+        + "\n".join(hits)
     )

@@ -462,7 +462,8 @@ jobs:
     # and it was the dishonest one: it made 129 real cases show a green tick
     # whatever they did, so the run summary said nothing about whether the suite
     # got better or worse. Without it the job reports its true colour and stays
-    # non-blocking, because nothing needs it.
+    # non-blocking, because nothing needs it. Nothing stopped it coming back until
+    # tests/test_release_workflow_graph.py grew a scan for it across every workflow.
 
     steps:
       - name: Checkout repository
@@ -777,6 +778,9 @@ jobs:
         # `paths:` or `if:` filter to one of those five jobs, this gate goes
         # decorative for it and reports green having verified nothing. A needed
         # job that stops running must block the merge, not be waved through.
+        # Guarded by tests/test_release_workflow_graph.py, which scans EVERY
+        # workflow -- it read release.yml's copy of this gate only, so this one
+        # could be (and was) reverted with the whole suite still green.
         run: |
           if [ "${{ needs.python-tests.result }}" != "success" ]; then
             echo "Python tests did not pass (result: ${{ needs.python-tests.result }})"

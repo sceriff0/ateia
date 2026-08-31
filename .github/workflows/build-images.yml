@@ -28,8 +28,9 @@
 # to Docker Hub even when the release test gate was RED, contradicting release.yml's own
 # header claim that nothing downstream happens unless `test` passes. Publishing on a
 # release now flows through release.yml alone, behind that gate. If you re-add the
-# trigger, restore the `github.event_name == "release"` branch of the version resolver
-# below with it, and understand that you are restoring the ungated push along with it.
+# trigger, give the version resolver below an explicit `release` branch with it (a
+# `release` trigger carries no inputs, so it would otherwise resolve to a build-only
+# ci-<sha>), and understand that you are restoring the ungated push along with it.
 #
 # Auth: docker/login-action -> Docker Hub using DOCKERHUB_USERNAME / DOCKERHUB_TOKEN
 #       repository secrets (Settings -> Secrets and variables -> Actions).
@@ -115,14 +116,27 @@ jobs:
       - name: Resolve version and push flag
         id: resolve
         run: |
-          # Determine the version string from whichever trigger fired. There is no
-          # `release` branch here because there is no `release` trigger -- see the header:
-          # a published release reaches this workflow only through release.yml's gated
-          # workflow_call, which arrives as event_name == "workflow_call".
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-            PUSH="true"
-          elif [ "${{ github.event_name }}" == "workflow_call" ]; then
+          # Determine the version string from whichever trigger fired -- WITHOUT
+          # looking at github.event_name, which cannot tell them apart here.
+          #
+          # Inside a called workflow the event payload is the CALLER's ("the event
+          # payload in the called workflow is the same event payload from the calling
+          # workflow" -- GitHub's own docs), so github.event_name is NEVER
+          # "workflow_call": when release.yml's `publish-images` calls this on a
+          # published release it is "release". This resolver used to branch on
+          # event_name == "workflow_call", so on the one path that matters the elif
+          # could not match, execution fell through to the push-trigger default, and a
+          # release produced a fully green "Publish Images" job with PUSH="false" and
+          # ZERO images on Docker Hub -- while modules/local/*.nf pull
+          # bolt3x/mirage-<component>:<manifest.version> by name and every process then
+          # failed to pull. Guarded by tests/test_release_workflow_graph.py.
+          #
+          # `inputs` separates all three triggers on its own, and needs no event name:
+          # workflow_dispatch and workflow_call BOTH declare a required `version` input
+          # (the inputs context is populated for a manually triggered workflow as well
+          # as a reusable one), and the `push` trigger declares none -- so an empty
+          # inputs.version is exactly the build-only case.
+          if [ -n "${{ inputs.version }}" ]; then
             VERSION="${{ inputs.version }}"
             PUSH="true"
           else
