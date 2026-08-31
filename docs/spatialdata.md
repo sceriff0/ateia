@@ -32,7 +32,7 @@ transcripts to store.
 | `var` | parsed `marker` / `compartment` / `statistic` |
 | `layers["zscore"]` | per-slide z-scores |
 | `obs` | `label`, `patient_id`, `fov`, morphology (`qc_area`, `qc_solidity`, …) |
-| `obsm["spatial"]` | centroids, **in pixels** |
+| `obsm["spatial"]` | centroids, **in pixels**, corner-of-pixel (QuPath/ImageJ) — the same convention as the `shapes` polygons, so a cell's point lies inside its own polygon |
 | `obsm["qc_reg_residual_px"]` | per-cell registration residual, one column per cycle |
 | `uns["qc"]` / `uns["qc_json"]` | registration + segmentation QC, flattened and verbatim |
 | `uns["provenance"]` | pipeline version, params, `versions.yml` |
