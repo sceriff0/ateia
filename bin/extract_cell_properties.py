@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from image_utils import ensure_dir, load_image
 from logger import configure_logging, get_logger
+from pixel_convention import centre_to_corner
 
 logger = get_logger(__name__)
 
@@ -177,12 +178,12 @@ def extract_contours(
         contour[:, 0] += minr - 1  # y offset
         contour[:, 1] += minc - 1  # x offset
 
-        # Convert from skimage center-of-pixel to ImageJ/QuPath corner-of-pixel convention
-        # NOTE: this +0.5 offset is intentional and QuPath-specific — it diverges from
-        # mask_to_geojson.py's no-offset (skimage center-of-pixel) contours, which feed
-        # the VALIS reg-QC warp instead of QuPath import. Do not "fix" one to match the
-        # other; each serves a different consumer's pixel convention.
-        contour += 0.5
+        # skimage centre-of-pixel -> ImageJ/QuPath corner-of-pixel. Intentional
+        # and QuPath-specific: it diverges from mask_to_geojson.py's no-offset
+        # contours, which feed the VALIS reg-QC warp instead of QuPath import.
+        # Do not "fix" one to match the other -- bin/utils/pixel_convention.py
+        # owns the rule and records why the two sites differ.
+        contour = centre_to_corner(contour)
 
         # Simplify with Douglas-Peucker
         simplified = approximate_polygon(contour, tolerance=simplify_tolerance)

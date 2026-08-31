@@ -3,6 +3,13 @@
 Covers the join strategies, positivity extraction, and cohort flattening. The
 zarr I/O layer needs `spatialdata` (export container only); everything tested
 here operates on AnnData and plain frames.
+
+One test builds its `obsm["spatial"]` with the REAL
+`export_spatialdata.build_table`, stubbing only `TableModel` (a pass-through
+wrapper). That coupling is deliberate: `join_by_centroid`'s inverse is only
+correct relative to whatever pixel convention `build_table` stores, so a
+hand-written coordinate array cannot notice when that changes -- which is
+exactly how this file went stale when the store moved to corner-of-pixel.
 """
 
 from __future__ import annotations
@@ -29,6 +36,12 @@ spec = importlib.util.spec_from_file_location("join_flowpath", BIN / "join_flowp
 jf = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(jf)
 
+_esd_spec = importlib.util.spec_from_file_location(
+    "export_spatialdata", BIN / "export_spatialdata.py"
+)
+esd = importlib.util.module_from_spec(_esd_spec)
+_esd_spec.loader.exec_module(esd)
+
 PX = 0.325
 
 
@@ -40,7 +53,10 @@ def flowpath_frame(n=3, with_label=False, signs=None, phenotypes=None):
             "phenotype": phenotypes if phenotypes is not None else ["T cell"] * n,
             "Out_of_annotation": [False] * n,
             "Outlier": [False] * n,
-            # µm, as MIRAGE wrote them: (x_px + 0.5) * pixel_size
+            # µm, as MIRAGE wrote them. export_geojson's "Centroid X µm" is
+            # corner_px * pixel_size, and corner = regionprops centroid + 0.5
+            # (bin/utils/pixel_convention.py), so a cell whose centroid sits at
+            # centre-of-pixel i*10 is exported at (i*10 + 0.5) * PX.
             "centroid_x": [(i * 10 + 0.5) * PX for i in range(n)],
             "centroid_y": [(i * 10 + 0.5) * PX for i in range(n)],
             "area": [100.0] * n,
@@ -108,18 +124,87 @@ def test_join_by_label_marks_missing_as_negative_one():
     assert stats["matched"] == 1
 
 
-def test_join_by_centroid_inverts_mirage_convention():
+@pytest.fixture
+def stub_table_model(monkeypatch):
+    """spatialdata is container-only; TableModel.parse is a pass-through."""
+    import types
+
+    class _TableModel:
+        @staticmethod
+        def parse(adata, **_kwargs):
+            return adata
+
+    models = types.ModuleType("spatialdata.models")
+    models.TableModel = _TableModel
+    spatialdata = types.ModuleType("spatialdata")
+    spatialdata.models = models
+    monkeypatch.setitem(sys.modules, "spatialdata", spatialdata)
+    monkeypatch.setitem(sys.modules, "spatialdata.models", models)
+
+
+def _mirage_obsm_spatial(tmp_path, centre_px):
+    """The real obsm["spatial"] EXPORT_SPATIALDATA publishes for these cells.
+
+    Built by the real build_table from a quantification CSV carrying raw
+    regionprops (centre-of-pixel) centroids, so this array tracks the store's
+    convention instead of asserting a remembered one.
+    """
+    pd.DataFrame(
+        {
+            "label": np.arange(1, len(centre_px) + 1),
+            "x": centre_px[:, 0],
+            "y": centre_px[:, 1],
+            "area": 50.0,
+            "CD3: Cell: Mean": 1.0,
+        }
+    ).to_csv(tmp_path / "quant.csv", index=False)
+    table = esd.build_table(
+        str(tmp_path / "quant.csv"),
+        "P001",
+        None,
+        {},
+        {"qc_json": "{}", "versions": ""},
+        {},
+    )
+    return table.obsm["spatial"]
+
+
+def test_join_by_centroid_inverts_mirage_convention(tmp_path, stub_table_model):
+    """The inverse must land ON obsm["spatial"], not merely near it.
+
+    Both sides are corner-of-pixel: FlowPath's µm centroids come from
+    export_geojson's "Centroid X µm", and obsm["spatial"] is converted by
+    build_table. A half-pixel correction on either side is not a rounding
+    detail -- it is a constant bias that spends part of the
+    --centroid-join-max-px budget and narrows the margin between a true match
+    and its neighbour.
+    """
+    # What regionprops measured, in skimage's centre-of-pixel convention.
+    centre_px = np.array([[0.0, 0.0], [10.0, 10.0], [20.0, 20.0]])
+    centroids = _mirage_obsm_spatial(tmp_path, centre_px)
+
     df = flowpath_frame(3)
-    centroids = np.array([[0.0, 0.0], [10.0, 10.0], [20.0, 20.0]])
     idx, stats = jf.join_by_centroid(df, centroids, PX, max_dist_px=2.0)
     assert stats["method"] == "centroid"
     assert idx.tolist() == [0, 1, 2]
 
+    # The assertion that actually pins the convention. A generous radius pairs
+    # the cells correctly even with a half-pixel bias (0.707 px < 2 px), so it
+    # is the TIGHT radius that distinguishes "exact" from "close enough".
+    idx_exact, stats_exact = jf.join_by_centroid(
+        df, centroids, PX, max_dist_px=0.001
+    )
+    assert idx_exact.tolist() == [0, 1, 2], (
+        "the centroid inverse does not land exactly on obsm['spatial']: it is "
+        f"off by a constant ({stats_exact['matched']}/3 matched within 0.001 px). "
+        "Both sides are corner-of-pixel -- see bin/utils/pixel_convention.py."
+    )
+
 
 def test_join_by_centroid_is_mutual():
     """A far-away table cell must not steal a FlowPath row already claimed."""
-    df = flowpath_frame(1)  # one cell at pixel (0, 0)
-    centroids = np.array([[0.0, 0.0], [0.6, 0.0]])
+    df = flowpath_frame(1)  # one cell, corner-of-pixel, at (0.5, 0.5)
+    centroids = np.array([[0.5, 0.5], [1.1, 0.5]])
     idx, _ = jf.join_by_centroid(df, centroids, PX, max_dist_px=5.0)
     assert idx.tolist() == [0, -1]
 
