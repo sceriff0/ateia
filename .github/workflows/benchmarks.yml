@@ -30,12 +30,20 @@ jobs:
         # ORDER IS LOAD-BEARING, and mirrors containers/tiled/Dockerfile: torch
         # first and from the CPU index, because kornia pulls torch from PyPI --
         # the CUDA wheel, ~2.5 GB -- if torch is not already satisfied.
+        #
+        # scikit-learn + matplotlib are for the ANALYSIS layer, not stare_bench:
+        # benchmarks/analysis/lib/regress.py imports sklearn.linear_model and
+        # test_plotting.py imports matplotlib. Without them pytest dies during
+        # COLLECTION with exit 2 -- four ImportErrors, zero tests run -- which is
+        # how this job failed on 2026-08-26 and 2026-08-27 while looking like an
+        # ordinary red build. Versions match ci.yml's pins.
         run: |
           # Pinned to the SAME versions ci.yml pins (tests/test_ci_stack_pinned.py
           # enforces the `==` form): an unpinned imaging stack lets this job resolve
           # different numerics than the production containers.
           pip install numpy==1.26.4 scipy==1.15.3 scikit-image==0.25.2 \
-                      tifffile==2025.5.10 pandas pyyaml pytest ruff
+                      tifffile==2025.5.10 pandas pyyaml pytest ruff \
+                      scikit-learn==1.5.2 matplotlib==3.8.4
           pip install torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
           pip install kornia==0.7.3
       - name: Test
