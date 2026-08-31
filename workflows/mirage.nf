@@ -138,7 +138,7 @@ workflow MIRAGE {
         //
         // ALLOWLIST, NOT DENYLIST. This used to name 'tiled' explicitly, so any method the
         // schema enum gained afterwards passed the check and was then silently registered
-        // with VALIS. 'ashlar' would have been the first to hit that.
+        // with VALIS -- the next method added to the enum would have been the first to hit it.
         if (params.registration_method != 'valis') {
             error "mode='add_cycle' does not support --registration_method ${params.registration_method} yet; use valis."
         }

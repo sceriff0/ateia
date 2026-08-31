@@ -336,8 +336,7 @@
           <div class="mod"><div class="n">TILE_FOR_BASIC → BASICPY → APPLY_PROFILES <span class="tag">opt</span></div>
             <div class="x">BaSiC illumination correction, as <b>three</b> processes rather than one, because nf-core's
               <b>BASICPY</b> computes flatfield/darkfield <i>profiles only</i> — mcmicro applies them downstream inside
-              ASHLAR's mosaic step, which mirage has no counterpart for even on its ashlar backend, since that drives
-              ashlar's aligners directly for the transform and writes no mosaic — and refuses a single-sited image,
+              ASHLAR's mosaic step, which mirage has no counterpart for — and refuses a single-sited image,
               which every stitched mirage slide is. <b>TILE_FOR_BASIC</b> writes the non-overlapping pseudo-FOV grid onto the Z axis so the module sees one
               site per tile, and decides the fiducial skip once; <b>APPLY_PROFILES</b> does the division/subtraction and
               reassembles the slide. It runs at nf-core's <i>upstream</i> defaults, so no darkfield is estimated. The
@@ -384,14 +383,6 @@
                 <i>before</i> merging CLI arguments, so a preset lookup written there could never see
                 <code>--reg_tiled_mode low</code>.</div>
               <div class="pp" style="margin-top:6px"><span>mode <b>high</b></span><span>tile <b>2048</b></span><span>halo <b>256</b></span><span>coarse_max_dim <b>2048</b></span><span>gate_tre <b>1.0</b></span></div></div>
-            <div class="opt"><div class="oh"><span>ashlar → ASHLAR</span><span class="tag-alt">baseline only</span></div>
-              <div class="ox"><b>A benchmark baseline, not a production backend.</b> The field-standard cyclic-IF
-                registrar (labsyspharm), wired in as a third backend so it can be ranked against VALIS and STARE on
-                the <i>same</i> reg_qc=2 metric rather than in a parallel table. <code>ASHLAR_RETILE</code>
-                synthesizes the raw tile grid mirage's pre-stitched inputs lack; <code>ASHLAR_SOLVE</code> rewrites
-                ashlar's per-tile placements into the same M0 + mesh manifest STARE emits, so the warp is
-                <code>TILED_STITCH</code> aliased. Piecewise <b>translation only</b> — no non-rigid warp. See S2.</div>
-              <div class="pp" style="margin-top:6px"><span>tile <b>1024</b></span><span>overlap <b>0.1</b></span><span>max_shift_um <b>30</b></span></div></div>
           </div>
           <div class="mod"><div class="n">GENERATE_REGISTRATION_QC <span class="tag tag-on">reg_qc≥1</span></div>
             <div class="x">Nuclear-channel overlay, registered vs reference.</div></div>
@@ -786,7 +777,7 @@
         </table>
         <h4>Registration</h4>
         <table class="pr">
-          <tr><td class="k">registration_method</td><td class="v">valis</td><td class="d">valis | tiled (STARE) | ashlar (baseline)</td></tr>
+          <tr><td class="k">registration_method</td><td class="v">valis</td><td class="d">valis | tiled (STARE)</td></tr>
           <tr><td class="k">reg_qc</td><td class="v">2</td><td class="d">0 none · 1 overlay · 2 +seg</td></tr>
           <tr><td class="k">reg_micro_reg</td><td class="v">2</td><td class="d">micro-reg depth (MAX default)</td></tr>
           <tr><td class="k">memory_mode</td><td class="v">high</td><td class="d">VALIS tier: high | medium | low | custom</td></tr>
@@ -800,12 +791,6 @@
           <tr><td class="k">reg_tiled_halo</td><td class="v nul">null</td><td class="d">per-tile read halo (px) — tier: 256/192/128</td></tr>
           <tr><td class="k">reg_tiled_coarse_max_dim</td><td class="v nul">null</td><td class="d">anchor thumbnail (px) — tier: 4096/2048/1024</td></tr>
           <tr><td class="k">reg_tiled_gate_tre</td><td class="v">1.0</td><td class="d">refine above this TRE</td></tr>
-        </table>
-        <h4>Registration — ashlar (baseline)</h4>
-        <table class="pr">
-          <tr><td class="k">reg_ashlar_tile</td><td class="v">1024</td><td class="d">grid granularity — the fairness knob</td></tr>
-          <tr><td class="k">reg_ashlar_overlap</td><td class="v">0.1</td><td class="d">synthesized tile overlap fraction</td></tr>
-          <tr><td class="k">reg_ashlar_max_shift_um</td><td class="v">30</td><td class="d">per-tile shift budget (MICRONS)</td></tr>
         </table>
       </div>
       <div class="pcol">
@@ -853,8 +838,8 @@
     DAPI then CELLTOX) and moved to channel 0 — DAPI is used where present, otherwise CELLTOX.
     <b>(b)</b> Execution is gated by <code>--start</code>/<code>--stop</code> across four ordered steps, each
     writing a resumable checkpoint. <b>(c)</b> Preprocessing standardizes and illumination-corrects images;
-    registration aligns each moving slide to the reference through one of three interchangeable backends behind a
-    single adapter seam — VALIS, the JVM-free tiled/STARE backend, or ASHLAR as an external benchmark baseline —
+    registration aligns each moving slide to the reference through one of two interchangeable backends behind a
+    single adapter seam — VALIS or the JVM-free tiled/STARE backend —
     with staged registration QC on by default and micro-registration at maximum depth; segmentation
     detects every cell on the reference and extracts morphology and contours once per mask; postprocessing
     quantifies each marker per compartment and exports. <b>(d)</b> The three

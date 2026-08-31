@@ -132,11 +132,9 @@ workflow SEG_QC {
     // joined, because the methods' transforms are keyed differently (per-slide vs
     // per-patient) and only VALIS has a stage checkpoint at all.
     //
-    // ashlar joins with tiled, not with VALIS: bin/ashlar_solve.py emits the SAME M0 + mesh
-    // manifest TILED_SOLVE does, keyed per moving slide, and carries no stage checkpoint.
-    // Membership rather than `!= 'valis'` so a fourth backend must declare which shape it
-    // has instead of inheriting the tiled join by default.
-    if (method in ['tiled', 'ashlar']) {
+    // Equality on 'tiled' rather than `!= 'valis'`, so a THIRD backend has to declare which
+    // of the two join shapes it has instead of silently inheriting the tiled one by default.
+    if (method == 'tiled') {
         // Tiled: one transform per moving slide (meta-keyed). Join it to the moving GeoJSON by
         // (patient, sorted-channels) so each slide is scored against its own transform. No
         // stage checkpoint (stages are separable by construction) and no JVM — `[]` is the

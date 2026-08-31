@@ -714,6 +714,24 @@ after that doc and is detailed inline below:
   authorised):** row order in the three manifests changes; contents and column order do not.
 
 ### Removed
+- **The `ashlar` registration backend is removed; v1.0.0 ships exactly two, `valis` and
+  `tiled`.** ASHLAR was wired in as a *benchmark baseline* so it could be ranked against
+  VALIS and STARE on the same `reg_qc=2` metric — never as a production backend — and it
+  survives in that role on the **`benchmarking`** branch, which is the only place it was
+  ever used. Gone from here: `bin/ashlar_retile.py`, `bin/ashlar_solve.py`,
+  `modules/local/ashlar_{retile,solve}.nf`,
+  `subworkflows/local/adapters/ashlar_adapter.nf` (with it, the `ASHLAR_STITCH` alias of
+  `TILED_STITCH`), the three parameters `reg_ashlar_tile` / `reg_ashlar_overlap` /
+  `reg_ashlar_max_shift_um`, the `ashlar` member of the `registration_method` enum, the
+  `ashlar` row of `lib/WarpBackends.groovy` and the `ashlar` choice of
+  `bin/warp_seg_qc.py --method`, plus 6 test files. `--registration_method ashlar` is now
+  refused by the schema at launch. There is nothing to migrate for a `valis` or `tiled`
+  run; a script pinning `ashlar` must move to the `benchmarking` branch.
+
+  One knock-on worth naming: the migration note above attributes the unrecognised-unit
+  launch failure to "the ASHLAR retiler". That component is gone, but the behaviour is
+  not — `PREFLIGHT_SCALE` now owns it and hard-fails on OME metadata `--pixel_size auto`
+  cannot interpret, so the operator-visible outcome is unchanged.
 - **Automated panel-agnostic phenotyping is extracted off this branch, and preserved
   intact on `feat/automated-phenotyping` (at `56a3a46`).** It is work in progress and
   is parked there rather than deleted. Gone from here: `COMPILE_PANEL` and `PHENOTYPE`

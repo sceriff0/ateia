@@ -76,17 +76,13 @@ def unit_to_um(unit: Optional[str]) -> Optional[float]:
     """Multiplier taking a length in ``unit`` to micrometres, or None if the
     unit is one this module does not recognise.
 
-    Exported because it has a second caller with a different policy for the
-    None case. ``read_ome_pixel_size`` below reports None and lets the caller
-    carry on -- its result is only ever used to WARN, while ``params.pixel_size``
-    stays authoritative -- whereas ``bin/ashlar_retile.py`` raises, because the
-    number it derives IS the authoritative scale and there is nothing to fall
-    back to that would be any more right.
-
-    Those two policies are the reason this is one function and not one shared
-    reader: the conversion table must not fork (a second private table would
-    drift, and the drift would be a silent scale error in whichever copy fell
-    behind), but what "unknown" means depends on what the number is for.
+    Exported rather than kept private because the conversion table must not
+    fork: a second copy in another script would drift, and the drift would be a
+    silent scale error in whichever copy fell behind. What "unrecognised" MEANS
+    is deliberately left to the caller -- ``read_ome_pixel_size`` below reports
+    None and lets the caller carry on, because its result is only ever used to
+    WARN while ``params.pixel_size`` stays authoritative; a caller deriving an
+    authoritative scale would have to raise on the same None instead.
 
     ``None`` means the attribute was absent, which OME's 2016-06 schema defines
     as micrometres -- so it maps to 1.0, not to "unrecognised".

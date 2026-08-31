@@ -58,11 +58,6 @@ ALLOW_FILES = {
     # spec Phase 6 owns rewriting it -- half-rewriting it here would be worse than
     # leaving it to its owner.
     "docs/figures/registration-schematic.html",
-    # TEMPORARY -- Task 4 deletes both of these files outright (it removes the `ashlar`
-    # backend). When it does, DELETE these two entries too; leaving them behind would
-    # silently re-open the hole this guard exists to close.
-    "subworkflows/local/adapters/ashlar_adapter.nf",
-    "tests/test_ashlar_solve.py",
 }
 
 

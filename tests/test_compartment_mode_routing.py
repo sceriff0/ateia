@@ -280,7 +280,16 @@ ALLOWED_LINES = {
         # corrects for host variance rather than searching for an unknown magnitude).
         # 1298 + 9 = 1307. Re-pinned directly from the file:
         #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1307
-        1307: (
+        # 1307 -> 1251 when the ashlar registration backend was removed for v1.0.0, leaving
+        # exactly two production backends (valis, tiled). -56 above this line: the whole
+        # ASHLAR section of conf/modules.config -- its banner comment plus the
+        # ASHLAR_RETILE, ASHLAR_SOLVE and ASHLAR_STITCH withName blocks and the blank line
+        # closing the section. That is the exact inverse of the 1064 -> 1103 entry above,
+        # whose +54/-15 it now unwinds. Composition check: 1307 - 56 = 1251, and
+        # `wc -l conf/modules.config` fell 1394 -> 1338, the same 56. Re-pinned directly
+        # from the file, not computed:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1251
+        1251: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

@@ -50,11 +50,6 @@ REPO = Path(__file__).resolve().parent.parent
 # the moment a writer is added or removed.
 PIXEL_WRITERS = {
     "bin/apply_basic_profiles.py": (1, "the illumination-corrected multi-channel slide"),
-    # minisblack, no compression, untiled, no bigtiff: one tile is reg_ashlar_tile^2 px
-    # (1 MB at the 1024 default), so neither tiling nor BigTIFF applies. These are
-    # throwaway inputs for the ASHLAR container, never published -- ASHLAR_RETILE sets
-    # publishDir enabled:false -- and the registered slide is written by tiled_stitch.py.
-    "bin/ashlar_retile.py": (1, "the synthesized ASHLAR tile grid (unpublished)"),
     "bin/convert_image.py": (1, "the converted multi-channel slide"),
     "bin/extract_mask_series.py": (1, "cell/nuclei masks recovered from a prior pyramid"),
     "bin/merge_channels_pyramid.py": (1, "the published QuPath pyramid"),
@@ -71,7 +66,6 @@ PIXEL_WRITERS = {
 # Writers that emit a (C, H, W) stack. These MUST set photometric="minisblack".
 MULTI_CHANNEL_WRITERS = (
     "bin/apply_basic_profiles.py",
-    "bin/ashlar_retile.py",
     "bin/convert_image.py",
     "bin/tile_for_basic.py",
     "bin/merge_channels_pyramid.py",

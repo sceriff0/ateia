@@ -21,7 +21,7 @@ inert and misleading; those have been removed. What remains is three cases:
 
 <div class="gate">
   <div class="g"><div class="k">case 1</div><div class="v">withName owns all three</div><div class="d">No label. The block sets cpus, memory and time. 15 processes.</div></div>
-  <div class="g"><div class="k">case 2</div><div class="v">label owns all three</div><div class="d">The withName block, if any, sets only publishDir / ext.args. 9 processes.</div></div>
+  <div class="g"><div class="k">case 2</div><div class="v">label owns all three</div><div class="d">The withName block, if any, sets only publishDir / ext.args. 7 processes.</div></div>
   <div class="g"><div class="k">case 3</div><div class="v">partial override</div><div class="d">withName sets one or two fields; a label supplies the rest. 6 processes.</div></div>
 </div>
 
@@ -130,19 +130,9 @@ laptop-viable.
 | `TILED_REG_TILE` | `2` *(label)* | derived from `reg_tiled_tile` + 2×`reg_tiled_halo`, `× attempt` *(withName)* — 4 GB at defaults | `2.h × attempt` *(label)* | partial | `20` |
 | `TILED_SOLVE` | `1` *(label)* | `1 GB × attempt` *(withName)* | `8.h × attempt` *(label)* | partial | — |
 | `TILED_STITCH` | `4` *(label)* | derived from `reg_tiled_out_tile`, `× attempt` *(withName)* — 4 GB at defaults | `4.h × attempt` *(label)* | partial | `10` |
-| `ASHLAR_RETILE` | `2` *(label)* | `32 GB × attempt` *(label)* | `2.h × attempt` *(label)* | process_low | `20` |
-| `ASHLAR_SOLVE` | `2` *(label)* | `32 GB × attempt` *(label)* | `2.h × attempt` *(label)* | process_low | `20` |
 
 `TILED_COARSE` / `TILED_REG_TILE` / `TILED_SOLVE` / `TILED_STITCH` are the STARE method —
 the only shape it has.
-
-`ASHLAR_RETILE` / `ASHLAR_SOLVE` are the ASHLAR benchmark baseline
-(`--registration_method ashlar`); its third step is `TILED_STITCH` under the alias
-`ASHLAR_STITCH`, which inherits that row's resources, because ASHLAR's transform is
-serialized as the same M0 + mesh manifest STARE emits. Both keep their label and set no
-resource fields in `conf/modules.config`, so the label owns all three — `ASHLAR_RETILE`
-streams one tile at a time through `tiled_io.open_lazy` rather than loading the slide, and
-`ASHLAR_SOLVE` works on tile positions, not pixels, so neither needs a derived request.
 
 `TILED_REG_TILE`, `TILED_STITCH`, `TILE_FOR_BASIC`, `APPLY_PROFILES` and
 `MERGE_AND_PYRAMID` are the

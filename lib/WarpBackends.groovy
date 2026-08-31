@@ -91,22 +91,6 @@ class WarpBackends {
             flags       : { _ctx -> ['--method tiled'] },
             stubExtras  : { _ctx -> [:] },
         ],
-        // ASHLAR (benchmark baseline). Deliberately the SAME container and the SAME stage
-        // vocabulary as tiled: bin/ashlar_solve.py rewrites ASHLAR's per-tile placements into
-        // the identical M0 + mesh manifest, so the scorer reads it through the identical
-        // tiled_stage_warp warper and needs neither the ashlar image nor a JVM.
-        //
-        // The flag still says `--method ashlar`, not `--method tiled`. Both route to the same
-        // warper inside bin/warp_seg_qc.py, but the report records the method it was given, and
-        // an ASHLAR arm labelled 'tiled' in the QC JSON would be indistinguishable from a STARE
-        // arm in exactly the table the arm ranking is built from.
-        ashlar: [
-            container   : 'bolt3x/mirage-tiled:1.0.0',
-            stages      : ['native', 'rigid', 'refined'],
-            versionTools: ['skimage', 'scipy'],
-            flags       : { _ctx -> ['--method ashlar'] },
-            stubExtras  : { _ctx -> [:] },
-        ],
     ].asImmutable()
 
     static List<String> methods() {
