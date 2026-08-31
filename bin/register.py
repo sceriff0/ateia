@@ -204,7 +204,7 @@ def valis_registration(
     max_non_rigid_dim: Optional[int] = None,
     micro_reg_fraction: float = 0.125,
     max_image_dim_px: int = 4000,
-    micro_reg: int = 2,
+    micro_reg: int = 1,
     interp_method: str = "bicubic",
     jvm_heap_gb: Optional[int] = None,
     stage_checkpoint_dir: Optional[str] = None,
@@ -1048,10 +1048,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--micro-reg",
         type=int,
-        default=2,
+        default=1,
         choices=[0, 1, 2],
         help="Micro-registration depth (nested): 0=none, 1=micro-rigid only "
-        "(refines slide.M), 2=+micro non-rigid (register_micro) [default]",
+        "(refines slide.M) [default], 2=+micro non-rigid (register_micro)",
     )
 
     # Advanced registration options

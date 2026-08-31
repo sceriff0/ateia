@@ -7,10 +7,19 @@ truth for the shipped default -- see `test_no_duplicate_param_defaults.py`),
 `nextflow_schema.json` (the schema's own copy of that default, which
 `validateParameters()` uses), `docs/parameters.md`'s parameter table, three
 `docs/figures/*.html` supplementary schematics, two `params/*.json` presets,
-and a prose cross-reference in `bin/register.py`'s docstring. None of these
-are generated from another -- each is a hand-maintained restatement -- so a
-numeric change to one does not propagate to the rest; this test is the check
-that they were all moved together.
+and `bin/register.py`. None of these are generated from another -- each is
+a hand-maintained restatement -- so a numeric change to one does not
+propagate to the rest; this test is the check that they were all moved
+together.
+
+`bin/register.py` alone turned out to carry FOUR of its own restatements,
+not one: `valis_registration()`'s docstring prose (the home the plan's brief
+counted), its Python function-signature default (`micro_reg: int = ...`),
+the `--micro-reg` argparse `default=`, and the `[default]` marker inside
+that argument's `--help` text. A first pass of this guard checked only the
+docstring and missed the other three -- caught in review, not by this file
+-- so all four are asserted below, independently, each anchored to its own
+syntactic shape rather than to the docstring's.
 
 `conf/test.config` pins `reg_micro_reg = 0` deliberately (Phase 0c: micro-
 registration OOMed the JVM on a 15.6 GiB CI runner) and is NOT one of the
@@ -32,6 +41,9 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+
+from tests.nfmodel import block_extent as _block_extent
+from tests.nfmodel import strip_comments as _strip_comments
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -61,12 +73,41 @@ def _read(path: Path) -> str:
     return text
 
 
+def _parse_top_level_params_block(config_text: str) -> dict[str, str]:
+    """Return {name: declared_value_text} for a top-level `params { ... }`
+    block in a .config file.
+
+    Mirrors `test_no_duplicate_param_defaults.py`'s `parse_declared_params`:
+    the block's extent comes from `tests.nfmodel.block_extent`'s comment/
+    string-aware brace walk (not a naive brace count, which a `{`/`}` inside
+    a comment or quoted default could mis-balance), and comments are
+    stripped via `tests.nfmodel.strip_comments` before the line-by-line
+    `name = value` parse, so both `nextflow.config` and `conf/test.config`
+    -- which share this exact shape -- go through the same model rather than
+    a second private regex.
+    """
+    start = config_text.find("params {")
+    assert start != -1, "Could not locate `params { ... }` block"
+    brace_start = config_text.find("{", start)
+    end = _block_extent(config_text, brace_start + 1)
+    block = config_text[brace_start + 1 : end - 1]
+    clean_block = _strip_comments(block)
+    declared: dict[str, str] = {}
+    for raw_line in clean_block.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$", line)
+        if m:
+            declared[m.group(1)] = m.group(2)
+    return declared
+
+
 def test_nextflow_config_default_is_one():
-    text = _read(NEXTFLOW_CONFIG)
-    match = re.search(r"^\s*reg_micro_reg\s*=\s*(\S+)", text, re.MULTILINE)
-    assert match, "reg_micro_reg assignment not found in nextflow.config"
-    assert match.group(1) == "1", (
-        f"nextflow.config's reg_micro_reg default is {match.group(1)!r}, expected '1'"
+    declared = _parse_top_level_params_block(_read(NEXTFLOW_CONFIG))
+    assert "reg_micro_reg" in declared, "reg_micro_reg not declared in nextflow.config's params {}"
+    assert declared["reg_micro_reg"] == "1", (
+        f"nextflow.config's reg_micro_reg default is {declared['reg_micro_reg']!r}, expected '1'"
     )
 
 
@@ -175,15 +216,65 @@ def test_register_py_docstring_does_not_call_two_the_default():
     )
 
 
+def test_register_py_function_signature_default_is_one():
+    """`valis_registration()`'s own Python default -- a direct import (not
+    the pipeline, which always passes --micro-reg explicitly: register.nf)
+    silently gets whatever this says."""
+    text = _read(REGISTER_PY)
+    match = re.search(r"^\s*micro_reg:\s*int\s*=\s*(\S+?),", text, re.MULTILINE)
+    assert match, "micro_reg: int = ... signature default not found in bin/register.py"
+    assert match.group(1) == "1", (
+        f"bin/register.py's valis_registration() signature default is "
+        f"{match.group(1)!r}, expected '1'"
+    )
+
+
+def test_register_py_argparse_default_is_one():
+    """The `--micro-reg` CLI flag's own default -- a hand invocation without
+    the flag silently gets whatever this says, independent of the pipeline
+    (which always passes --micro-reg explicitly: register.nf)."""
+    text = _read(REGISTER_PY)
+    match = re.search(
+        r'"--micro-reg",\s*\n\s*type=int,\s*\n\s*default=(\S+?),', text
+    )
+    assert match, "--micro-reg argparse block not found in bin/register.py"
+    assert match.group(1) == "1", (
+        f"bin/register.py's --micro-reg argparse default is {match.group(1)!r}, expected '1'"
+    )
+
+
+def test_register_py_help_text_marks_one_not_two_as_default():
+    """The --micro-reg --help string's own '[default]' marker -- must sit on
+    the '1=...' clause, not '2=...', or --help visibly lies to an operator
+    about which value is shipped."""
+    text = _read(REGISTER_PY)
+    match = re.search(
+        r'help="Micro-registration depth \(nested\):.*?"\s*\n\s*"[^"]*",',
+        text,
+        re.DOTALL,
+    )
+    assert match, "--micro-reg help text not found in bin/register.py"
+    normalized = re.sub(r"\s+", " ", match.group(0))
+    one_clause_match = re.search(r"1\s*=.*?\[default\]", normalized)
+    assert one_clause_match, (
+        f"bin/register.py's --micro-reg help text does not mark the '1=...' "
+        f"clause as [default]: {normalized!r}"
+    )
+    two_clause_match = re.search(r"2\s*=.*?\[default\]", normalized)
+    assert two_clause_match is None, (
+        f"bin/register.py's --micro-reg help text still marks the '2=...' "
+        f"clause as [default]: {normalized!r}"
+    )
+
+
 def test_conf_test_config_pin_is_untouched():
     """conf/test.config is a deliberate divergence from the shipped default,
     not one of the nine homes -- Phase 0c pinned it to 0 because micro-
     registration OOMed the JVM on a 15.6 GiB CI runner. It must stay 0."""
-    text = _read(TEST_CONFIG)
-    match = re.search(r"^\s*reg_micro_reg\s*=\s*(\S+)", text, re.MULTILINE)
-    assert match, "reg_micro_reg assignment not found in conf/test.config"
-    assert match.group(1) == "0", (
-        f"conf/test.config's reg_micro_reg pin is {match.group(1)!r}, expected '0' "
+    declared = _parse_top_level_params_block(_read(TEST_CONFIG))
+    assert "reg_micro_reg" in declared, "reg_micro_reg not declared in conf/test.config's params {}"
+    assert declared["reg_micro_reg"] == "0", (
+        f"conf/test.config's reg_micro_reg pin is {declared['reg_micro_reg']!r}, expected '0' "
         "(this file is deliberately NOT one of the nine homes -- see module docstring)"
     )
 
