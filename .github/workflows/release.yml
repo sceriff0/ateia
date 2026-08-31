@@ -319,7 +319,16 @@ jobs:
             exit 1
           fi
 
+      # MIRAGE_STRICT_SKIPS turns on tests/conftest.py's session floor: any skip
+      # not in tests/expected_skips.txt fails the gate by name, and the collected
+      # count must clear tests/collected_floor.txt. This gate is the one that
+      # shipped for months missing three packages -- 13 tests failed and 30 more
+      # silently vanished, and only the 13 were visible. Identical to ci.yml's
+      # `python-tests`, and STEP level for the same reason: the DISK non-skip
+      # proof step above runs pytest over one file, well below the floor.
       - name: Run Python tests
+        env:
+          MIRAGE_STRICT_SKIPS: '1'
         run: |
           pytest -v tests/ \
             --ignore=tests/testdata \

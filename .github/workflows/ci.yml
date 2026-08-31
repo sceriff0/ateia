@@ -209,7 +209,19 @@ jobs:
             exit 1
           fi
 
+      # MIRAGE_STRICT_SKIPS turns on tests/conftest.py's session floor: any skip
+      # not in tests/expected_skips.txt fails the job by name, and the collected
+      # count must clear tests/collected_floor.txt. Without it a degraded
+      # environment deselects most of the suite and still exits 0 -- release.yml
+      # shipped for months missing three packages, and of the 43 tests that
+      # stopped passing, 30 were silent.
+      #
+      # STEP level, not job level, ON PURPOSE. The "Assert the DISK front-end
+      # test is not skipped" step above runs pytest over a single file, which
+      # collects far below the floor; a job-level env would fail it.
       - name: Run Python unit tests
+        env:
+          MIRAGE_STRICT_SKIPS: '1'
         run: |
           pytest -v tests/ --ignore=tests/testdata --ignore=tests/modules --ignore=tests/subworkflows --ignore=tests/integration \
             --cov=bin --cov-report=xml --cov-report=term-missing

@@ -1,0 +1,18 @@
+# The minimum number of tests the Python suite must COLLECT. A RATCHET: it may
+# only go up. Read by tests/conftest.py, enforced only when MIRAGE_STRICT_SKIPS
+# is set (CI's blocking full-suite step).
+#
+# Measured with the suite's standard exclusions, after generating the fixtures:
+#
+#   python tests/testdata/generate_complete_testdata.py
+#   pytest tests/ --ignore=tests/testdata --ignore=tests/modules \
+#                 --ignore=tests/subworkflows --ignore=tests/integration
+#
+# and equal to passed + skipped. Measured 2026-09-01 on dev@1ed35df:
+# 1151 passed, 10 skipped, 0 failed.
+#
+# The check is `>=`, so adding tests never fails it. But a floor that is allowed
+# to fall arbitrarily far behind stops being a floor, so conftest.py also fails
+# once the suite has grown FLOOR_DRIFT (50) tests past this number, with the
+# replacement value in the message. Re-ratcheting is then one line, here.
+1161
