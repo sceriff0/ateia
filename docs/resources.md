@@ -361,31 +361,38 @@ VALIS tile-read failures and JVM out-of-heap conditions surface as a plain
 exit 1, which the default strategy would treat as fatal. `REGISTER` therefore
 retries on `[1, 104, 134, 135, 137, 139, 140, 143]`.
 
-### QC processes — never gating
+### QC processes — gating since 2026-08-25
 
 `GENERATE_PREPROCESS_QC`, `GENERATE_REGISTRATION_QC`,
 `GENERATE_POSTPROCESSING_QC`, `GENERATE_QC_REPORT`, `SEG_QC_SEGMENT`,
-`SEG_QC_GEOJSON` and `WARP_SEG_QC` share one policy: retry transient failures up to `maxRetries`, then
-**`ignore` rather than `finish`**.
+`SEG_QC_GEOJSON` and `WARP_SEG_QC` share one policy — **`retry-then-fail`**: retry
+a signal kill up to `maxRetries`, then **`finish`**.
 
 ```groovy
-errorStrategy = { task.exitStatus in ((130..145) + 104) && task.attempt <= 3 ? 'retry' : 'ignore' }
+errorStrategy = { task.exitStatus in ((130..145) + 104) && task.attempt <= 3 ? 'retry' : 'finish' }
 ```
 
 `130..145` is the whole "killed by a signal" range, not a hand-picked subset —
 an earlier enumerated set threw away the retry budget on any signal it had
-missed.
+missed. `'finish'` rather than `'terminate'` so in-flight tasks drain and the run
+reports every failure at once rather than only the first.
 
-!!! danger "A silently missing QC artifact is by design — and can hide a real failure"
+!!! danger "This policy was reversed — the closure above used to end in `'ignore'`"
     QC outputs are aggregated with `collect()` / `collectFile()` / `combine()` /
     `join()`, none of which require a fixed item count, so a missing QC output is
-    simply absent and never deadlocks the DAG. That is the point: a broken QC
-    step must never stop a multi-day run.
+    simply absent and never deadlocks the DAG. That property of the *wiring* is
+    what made an `'ignore'` fallback look free, and it was not: a genuine OOM or
+    walltime kill was swallowed after the retry budget, and forcing `WARP_SEG_QC`
+    to `exit 1` produced **shell exit 0, a full-looking output tree, and zero
+    `*_seg_qc.json`**.
 
-    The cost is that a genuine OOM or walltime kill in one of these processes is
-    swallowed after the retry budget. If a QC artifact you expected is missing,
-    check `.trace/trace.txt` for the task's exit status rather than assuming the
-    step was skipped.
+    On the default path that is closed: a broken QC task now fails the run, and a
+    green run implies a complete QC tree. **Two opt-in processes keep the old
+    policy on purpose** — `SEG_QUALITY_EVAL` and `MERGE_SEG_EVAL` carry
+    `retry-then-drop` (`{ task.attempt <= 3 ? 'retry' : 'ignore' }`), because
+    losing a QualityScore degrades QC and nothing else. When either drops,
+    `main.nf`'s `onComplete` warns via `workflow.stats.ignoredCount` rather than
+    leaving it to be inferred from an absent column.
 
 ---
 

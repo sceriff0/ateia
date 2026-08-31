@@ -17,7 +17,7 @@ process, default and path below is read from the pipeline source —
     - **S2 · registration** — [figure](figures/registration-schematic.html){ target=_blank } ·
       the two backends, step by step
     - **S3 · quality control** — [figure](figures/qc-schematic.html){ target=_blank } ·
-      the tagged artifact stream, the kind vocabulary, and the non-gating contract
+      the tagged artifact stream, the kind vocabulary, and the retry-then-fail contract
     - **S4 · lazy reads** — [figure](figures/zarr-schematic.html){ target=_blank } ·
       where lazy zarr reads cut peak memory, and every place they cannot help
 
@@ -293,8 +293,9 @@ resource `label` or a `withName:` block in `conf/modules.config`, never both.
 Memory and time scale with `task.attempt`, so a retry climbs the ramp, and every
 request is clamped to `params.max_cpus` / `max_memory` / `max_time`.
 
-Per-process figures, the retry policy, and the QC non-gating rule:
-[Resources](resources.md).
+Per-process figures, the retry policy, and the QC `retry-then-fail` rule (the
+seven QC processes fail the run; only the two opt-in segmentation evaluators are
+dropped): [Resources](resources.md).
 
 ---
 

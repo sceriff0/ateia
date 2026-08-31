@@ -646,9 +646,11 @@
         <p class="resnote">Retry fires on 104/134/135/137/139/140/143 (connection reset and the signal kills,
           including the OOM killer); anything else finishes the run. <code>REGISTER</code> additionally retries on
           exit 1, which is how VALIS reports a tile-read failure or a JVM out-of-heap. The <b>seven</b> QC
-          processes are non-gating: they retry the whole 130–145 signal range plus 104, then fall back to
-          <b>ignore</b> rather than finish — a broken QC step must never stop a multi-day run. Figure <b>S3</b>
-          takes that contract apart.</p>
+          processes are <b>gating</b>: they retry the whole 130–145 signal range plus 104, then <b>finish</b> —
+          a broken QC task fails the run, so a green run implies a complete QC tree. Only the two <i>opt-in</i>
+          evaluators above (<code>SEG_QUALITY_EVAL</code>, <code>MERGE_SEG_EVAL</code>) still fall back to
+          <b>ignore</b>, and <code>main.nf</code>'s <code>onComplete</code> announces a drop via
+          <code>workflow.stats.ignoredCount</code>. Figure <b>S3</b> takes that contract apart.</p>
       </div>
 
       <div>
@@ -854,7 +856,8 @@
     primary artifacts, plus an additive SpatialData <code>.zarr</code> that re-serializes the same masks,
     polygons, measurements and QC — including a per-cell registration residual — for the scverse ecosystem.
     <b>(f)</b> Each process's CPU, memory and wall-time request has a single owner and scales with the retry
-    attempt under global ceilings; quality-control processes are explicitly non-gating. <b>(g)</b> An
+    attempt under global ceilings; the seven quality-control processes are gating — they retry, then fail the
+    run — and only the two opt-in segmentation evaluators are dropped rather than fatal. <b>(g)</b> An
     incremental mode folds a new imaging cycle into a completed run, reusing the prior reference, masks, and
     quantification. <b>(h)</b> A separate branch benchmarks the unmodified pipeline by parameter sweep,
     harvesting resource, registration-accuracy, and segmentation-stability signals from QC the pipeline

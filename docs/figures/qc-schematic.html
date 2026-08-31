@@ -192,7 +192,7 @@
   .slot .k{font-family:var(--mono);font-weight:700;font-size:.64rem;margin-top:2px;overflow-wrap:anywhere;}
   .slot .r{font-family:var(--mono);font-size:.58rem;color:var(--ink-2);margin-top:4px;overflow-wrap:anywhere;}
 
-  /* g — non-gating */
+  /* g — failure contract */
   .warnbox{border:1px solid var(--ink);background:#fff;padding:9px 12px;font-size:.79rem;color:var(--ink-2);margin:12px 0 0;}
   .warnbox b{color:var(--ink);}
   .warnbox .wl{font-family:var(--mono);font-size:.57rem;text-transform:uppercase;letter-spacing:.07em;
@@ -222,7 +222,7 @@
 
   <div class="masthead">
     <div class="kick">Supplementary Figure S3 · quality control</div>
-    <h1>Quality control as one seam: a tagged artifact stream, a step-owned kind vocabulary, three guards, and a contract that can never stop the run</h1>
+    <h1>Quality control as one seam: a tagged artifact stream, a step-owned kind vocabulary, three guards, and a failure contract that stops the run</h1>
   </div>
   <nav class="figset" aria-label="Supplementary figure set">
     <a href="pipeline-schematic.html">S1 · pipeline</a>
@@ -235,7 +235,10 @@
     pairs. What a kind <i>is</i> has a single owner — the same step table that defines <code>--start</code> and
     <code>--stop</code> — and three separate guards make a mistyped or unwired kind a hard error rather than a
     silently empty section of a green report. Every QC gate below is <b>on by default</b>, and every QC process is
-    <b>non-gating</b>: it retries, then gives up, and never fails the run.</p>
+    <b>gating</b>: it retries a signal kill up to three times and then <b>fails the run</b>. That is the reverse of
+    what this figure said before 2026-08-25, and the reversal is the point — the old <code>'ignore'</code> fallback
+    let a broken QC step exit&nbsp;0 with an incomplete tree. Two <i>opt-in</i> evaluators are the only survivors of
+    the old policy, and when either drops, the run log says so.</p>
   <div class="figset" style="margin-top:11px;text-transform:none;letter-spacing:0">
     <span style="border:none;padding-left:0;color:var(--ink-3)">defaults: <code>reg_qc = 2</code> ·
     <code>skip_preprocess_qc = false</code> · <code>skip_postprocessing_qc = false</code> ·
@@ -622,16 +625,17 @@
   <!-- g — NON-GATING -->
   <section class="panel">
     <span class="plabel">g</span>
-    <div class="panel-head"><h2>The non-gating contract — and what it costs you</h2>
-      <p>QC output is informational, and every consumer of it is a <code>collect()</code> /
-        <code>collectFile()</code> / <code>combine()</code> / <code>join()</code> — none of which requires a fixed
-        item count. A missing QC artifact is therefore simply absent and can never deadlock the DAG. One
-        <code>withName:</code> selector states the policy for all <b>seven</b> QC processes at once.</p></div>
+    <div class="panel-head"><h2>The failure contract — retry, then fail the run</h2>
+      <p>Every consumer of QC output is a <code>collect()</code> / <code>collectFile()</code> /
+        <code>combine()</code> / <code>join()</code> — none of which requires a fixed item count, so a missing QC
+        artifact cannot deadlock the DAG. That is a property of the <i>wiring</i>, and it is what once made an
+        <code>'ignore'</code> fallback look free. It was not free, and it is gone: one <code>withName:</code>
+        selector now states <b>retry-then-fail</b> for all <b>seven</b> QC processes at once.</p></div>
     <div class="procrow">
       <span>GENERATE_PREPROCESS_QC</span><span>GENERATE_REGISTRATION_QC</span><span>GENERATE_POSTPROCESSING_QC</span>
       <span>GENERATE_QC_REPORT</span><span>SEG_QC_SEGMENT</span><span>SEG_QC_GEOJSON</span><span>WARP_SEG_QC</span>
     </div>
-    <div class="math">errorStrategy = { task.exitStatus in ((130..145) + 104) &amp;&amp; task.attempt &lt;= 3 ? 'retry' : 'ignore' }
+    <div class="math">errorStrategy = { task.exitStatus in ((130..145) + 104) &amp;&amp; task.attempt &lt;= 3 ? 'retry' : 'finish' }
       &nbsp;&nbsp;<span class="cm">maxRetries = 3, pinned here</span></div>
     <div class="seam" style="margin-top:13px">
       <div>
@@ -639,23 +643,32 @@
           "killed by a signal" band, not a hand-picked subset. The kill actually observed on
           <code>WARP_SEG_QC</code> was <b>140 = 128 + 12 = SIGUSR2</b> — SLURM's pre-walltime warning, not the
           SIGTERM an older comment claimed. With an enumerated subset, anything outside it was ignored on attempt 1
-          and threw away the entire retry budget. Compare the pipeline-wide default, which retries only
-          104/134/135/137/139/140/143 and <b>finishes</b> the run on anything else.</div>
+          and threw away the entire retry budget. The pipeline-wide default retries only
+          104/134/135/137/139/140/143; this block differs from it in the <i>width</i> of the retry range, not in
+          where it ends up — both <b>finish</b> the run once the budget is spent.</div>
         <div class="callout"><b>Why <code>maxRetries</code> is pinned here rather than inherited.</b> A dynamic
           strategy that returns <code>'retry'</code> after the budget is exhausted is treated as fatal — precisely
           what this block exists to avoid. Pinning keeps the closure's cutoff in lockstep with the budget on every
           profile.</div>
       </div>
       <div>
-        <div class="warnbox" style="margin-top:0"><span class="wl">read this before trusting a green run</span>
-          The fallback is <code>'ignore'</code>, so a QC task that exhausts its budget is <b>dropped without
-          failing the run</b>. That is the intended trade — a broken QC step must never stop a multi-day
-          registration — but it means <b>exit&nbsp;0 does not imply a complete QC tree</b>. Check the published
-          artifacts, not just the exit code: a report section that is empty because its producer was ignored looks
-          exactly like a report section that is empty because the step did not run.</div>
+        <div class="warnbox" style="margin-top:0"><span class="wl">this contract was reversed on 2026-08-25</span>
+          The fallback used to be <code>'ignore'</code>: a QC task that exhausted its budget was dropped and the run
+          still exited&nbsp;0, so an empty report section looked identical whether its producer had been ignored or
+          the step had never run. Forcing <code>WARP_SEG_QC</code> to <code>exit 1</code> gave <b>shell exit 0, a
+          full-looking tree, and zero <code>*_seg_qc.json</code></b>. The fallback is now <code>'finish'</code> —
+          in-flight tasks drain, every failure is reported at once, and the run fails. On the default path a green
+          run now <i>does</i> imply a complete QC tree.</div>
+        <div class="callout"><b>Two opt-in evaluators keep the old policy, deliberately.</b>
+          <code>SEG_QUALITY_EVAL</code> and <code>MERGE_SEG_EVAL</code> — reference-free segmentation scoring, off
+          unless the <code>seg_quality</code> profile is passed — carry
+          <code>{ task.attempt &lt;= 3 ? 'retry' : 'ignore' }</code>, because losing a QualityScore degrades QC and
+          nothing else. The drop is <b>announced, not inferred</b>: <code>main.nf</code>'s <code>onComplete</code>
+          reads <code>workflow.stats.ignoredCount</code> and warns that the run is reported successful with an
+          incomplete tree.</div>
         <div class="callout"><b>The guards in panel b are the other half of the same problem.</b> The
-          errorStrategy makes a <i>failed</i> QC task silent on purpose; the three vocabulary guards make a
-          <i>miswired</i> one loud, because that silence would be an accident rather than a policy.</div>
+          errorStrategy now makes a <i>failed</i> QC task loud; the three vocabulary guards make a <i>miswired</i>
+          one loud too. Both silences were once reachable, and only one of them was ever a policy.</div>
       </div>
     </div>
   </section>
@@ -722,8 +735,10 @@
     those polygons through every registration stage in one process that serves both registration backends from a
     table keyed on the method <i>argument</i>. <b>(f)</b> Aggregation is eight fixed, sorted input slots plus a
     size-log rollup, both uncacheable by construction. <b>(g)</b> All seven QC processes retry the whole signal
-    range and then fall back to <code>ignore</code>, never <code>finish</code> — so a broken QC step cannot stop a
-    multi-day run, and a green run correspondingly does not prove a complete QC tree. <b>(h)</b> QC defaults.
+    range and then <code>finish</code>: a broken QC step fails the run, so on the default path a green run does
+    imply a complete QC tree. Only the two opt-in evaluators (<code>SEG_QUALITY_EVAL</code>,
+    <code>MERGE_SEG_EVAL</code>) still fall back to <code>ignore</code>, and a drop is announced through
+    <code>workflow.stats.ignoredCount</code> rather than left to be inferred. <b>(h)</b> QC defaults.
     Supplementary Figure <b>S1</b> places these processes in the whole workflow; Supplementary Figure <b>S2</b>
     takes the <code>reg_qc</code> ladder apart per registration backend.
     <span class="footnote">Process names, containers, resource requests, published paths, parameter defaults and
