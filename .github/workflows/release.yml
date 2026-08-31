@@ -1,16 +1,60 @@
 # =============================================================================
 # Release (test-gated, tag-driven)
 # =============================================================================
-# A release is gated on the SAME checks CI runs. Nothing downstream (version
-# bump, git tag, image publish, artifacts) happens unless the test job passes.
+# ONE COMMIT FLOWS THROUGH THE WHOLE RELEASE. `validate` resolves the ref that
+# will be tagged and PINS IT TO A SHA; every gate job checks out that exact SHA;
+# `bump-and-tag` refuses to tag if the branch moved underneath the gate; and the
+# archive and the images are built from the CREATED TAG, after the bump.
+#
+# That was not true before 2026-08-31. The gate did a bare `actions/checkout`
+# (github.ref), `bump-and-tag` checked out `ref: main` and tagged that, and
+# `artifacts`/`publish-images`/`verify-config` all carried `needs: [validate,
+# test]` — NOT `needs: bump-and-tag` — and checked out github.ref. So a
+# workflow_dispatch tested one commit, tagged another, and built the tarball and
+# the ten images from a third, IN PARALLEL WITH the version bump: the shipped
+# `mirage-v1.0.0.tar.gz` carried a nextflow.config still reading the PREVIOUS
+# version, and the images were built from the un-bumped tree.
+#
+# WHAT THE GATE RUNS. The `test` job is an aggregator over the same five jobs
+# `ci.yml`'s blocking `all-tests` gate requires — python-tests, nextflow-stub,
+# nf-test-stub, security-tests, ruff — reproduced here as test-python,
+# test-nextflow, test-nf-test, test-security and test-ruff. Before that it ran 5
+# of those 13 blocking checks (the DISK non-skip proof, `pytest -v tests/`,
+# `run_validation_tests.sh` and one `-profile test -stub` run) while its header
+# claimed parity, so a release could ship with a broken `lib/` class, a leaking
+# DEEPCELL token, a profile that would not parse or a param/schema mismatch, and
+# be green.
+#
+# Three deliberate narrowings, so this header stays honest:
+#   * test-python runs ONE Python version (3.10), where ci.yml matrixes
+#     3.10 + 3.11. The matrix exists in ci.yml to catch resolver splits between
+#     interpreter versions, and it runs on every push; a second leg here would
+#     re-pay a ~190 MB torch install to re-test a resolution ci.yml has already
+#     exercised on the same commit.
+#   * nf-core structural lint is absent, exactly as it is absent from ci.yml's
+#     `all-tests`: it runs `|| true` and can never fail.
+#   * The nf-test REAL and INTEGRATION suites are absent, also as in
+#     `all-tests`. `nf-test-real` is advisory in ci.yml (see the comment on that
+#     job); gating a version tag on an advisory suite would block every release.
+# Everything else ci.yml blocks on, this gate blocks on.
 #
 # Two entry points:
-#   * workflow_dispatch (input: version) -> the full flow: validate -> test ->
-#     bump-and-tag (writes manifest.version, commits, creates+pushes the tag) ->
-#     publish-images + artifacts + release-notes.
-#   * release:published -> the tag already exists, so bump-and-tag is skipped;
-#     we still validate, run the test gate, verify the config matches the tag,
-#     publish images and attach artifacts/notes.
+#   * workflow_dispatch (input: version) -> validate (pins main's SHA) -> the
+#     five gate jobs on that SHA -> test -> bump-and-tag (writes
+#     manifest.version, commits, creates+pushes the tag on main) ->
+#     publish-images + artifacts, BOTH FROM THE TAG -> release-notes.
+#   * release:published -> the tag already exists, so `validate` pins the TAG's
+#     SHA, the gate runs on the tag, bump-and-tag is skipped, verify-config
+#     confirms the committed config matches the tag, and publish-images +
+#     artifacts build from the same tag.
+#
+# `artifacts` and `publish-images` therefore need `bump-and-tag`, which is
+# SKIPPED on the release path — and a job whose dependency is skipped is itself
+# skipped. That is why both carry `if: always() && ...` and re-assert
+# validate/test explicitly: `always()` is what lets a SKIPPED bump-and-tag
+# through, and the explicit result checks are what keep a FAILED gate from
+# getting through with it. tests/test_release_workflow_graph.py asserts all of
+# this structurally.
 # =============================================================================
 name: Release
 
@@ -36,33 +80,54 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  NFTEST_VERSION: '0.9.0'
+  # Same mechanism as ci.yml: point every job at one cacheable plugins
+  # directory instead of ~/.nextflow/plugins, so nf-schema is downloaded once
+  # and the air-gapped NXF_PLUGINS_DIR path documented in docs/usage.md is
+  # exercised rather than only described.
+  NXF_PLUGINS_DIR: ${{ github.workspace }}/.nextflow-plugins
+
 jobs:
   # ===========================================================================
-  # Job 1 - validate the requested/release version string.
+  # Job 1 - validate the requested/release version string, and PIN the exact
+  # commit the whole release is built from.
   # ===========================================================================
   validate:
     name: Validate Release
     runs-on: ubuntu-latest
-    # A regex check on one string. Anything slower than this is a wedged runner.
+    # A regex check on one string plus a shallow checkout and a rev-parse.
     timeout-minutes: 5
     outputs:
       version: ${{ steps.get_version.outputs.version }}        # e.g. v1.0.0
       version_no_v: ${{ steps.get_version.outputs.version_no_v }}  # e.g. 1.0.0
+      # The ref that WILL BE TAGGED: `main` on a dispatch (bump-and-tag tags
+      # main), the tag itself on a published release (it already exists).
+      gate_ref: ${{ steps.get_version.outputs.gate_ref }}
+      # gate_ref resolved to an immutable SHA. Every gate job checks out THIS,
+      # not gate_ref, so the five jobs cannot test five different trees if the
+      # branch moves mid-run, and bump-and-tag can prove it is tagging what was
+      # tested.
+      sha: ${{ steps.pin.outputs.sha }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: Get version
         id: get_version
         run: |
           if [ "${{ github.event_name }}" == "release" ]; then
             VERSION="${{ github.event.release.tag_name }}"
+            # The tag exists already; it IS what gets released, so gate on it.
+            GATE_REF="$VERSION"
           else
             VERSION="${{ github.event.inputs.version }}"
+            # bump-and-tag below tags main. The gate must therefore test main,
+            # not whatever branch the dispatch was fired from — testing the
+            # dispatch branch and tagging main is the defect this replaces.
+            GATE_REF="main"
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "version_no_v=${VERSION#v}" >> "$GITHUB_OUTPUT"
-          echo "Release version: $VERSION"
+          echo "gate_ref=$GATE_REF" >> "$GITHUB_OUTPUT"
+          echo "Release version: $VERSION (gating on ref: $GATE_REF)"
 
       - name: Validate version format (FAIL on bad format)
         run: |
@@ -73,40 +138,35 @@ jobs:
           fi
           echo "Version format OK: $VERSION"
 
+      - name: Checkout the ref that will be tagged
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.get_version.outputs.gate_ref }}
+
+      - name: Pin the release commit
+        id: pin
+        run: |
+          SHA="$(git rev-parse HEAD)"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Release commit: $SHA (${{ steps.get_version.outputs.gate_ref }})"
+
   # ===========================================================================
-  # Job 2 - THE GATE. Runs the same checks as ci.yml. If this fails, nothing
-  # downstream runs (no bump, no tag, no images, no artifacts).
+  # Gate job A - the Python unit suite, mirroring ci.yml's `python-tests`.
   # ===========================================================================
-  test:
-    name: Test Gate
+  test-python:
+    name: Gate - Python tests
     needs: validate
     runs-on: ubuntu-latest
-    # The heaviest job here: the full pytest suite + the 11-run validation script
-    # + a stub pipeline run. ci.yml budgets 30 min for python-tests and 30 for the
-    # stub job; this job is both, so 60.
-    timeout-minutes: 60
+    # ci.yml budgets 30 minutes per matrix leg for the same work.
+    timeout-minutes: 40
     steps:
-      - name: Checkout repository
+      - name: Checkout the pinned release commit
         uses: actions/checkout@v4
-
-      - name: Cache Nextflow
-        uses: actions/cache@v4
         with:
-          path: ~/.nextflow
-          key: ${{ runner.os }}-nextflow-release-${{ hashFiles('**/*.nf') }}
-          restore-keys: |
-            ${{ runner.os }}-nextflow-
-
-      - name: Install Nextflow (>=25.04.0)
-        uses: nf-core/setup-nextflow@v2
-        with:
-          version: 'latest-everything'
+          ref: ${{ needs.validate.outputs.sha }}
 
       # NOTE: no `docker/setup-buildx-action` here on purpose. Every step in this
-      # job is container-free — pytest, the validation script, and a `-profile test
-      # -stub` run (stub blocks only `touch` outputs). Setting up buildx bought
-      # nothing but runtime, and the image build that genuinely needs it happens in
-      # the `publish-images` job (build-images.yml). Guarded by
+      # job is container-free. Guarded by
       # tests/test_ci_job_hygiene.py::test_buildx_job_must_actually_use_buildx.
       # `cache: 'pip'` keys on the hash of **/requirements.txt -- which includes
       # containers/tiled/requirements.txt, the file that DOCUMENTS the torch/kornia split
@@ -125,17 +185,40 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          # Pinned for the reason .github/workflows/ci.yml gives at its own scikit-learn
-          # pin: bin/utils/cse/functions.py:650 builds its PCA model by assigning fitted
-          # attributes by hand, so it is valid only against the sklearn internals it was
-          # written for. Unpinned, pip resolved 1.7.2 on a 3.10 leg and 1.9.0 on a 3.11 leg
-          # and 1.9.0 made QualityScore come out `nan`. Tracks
-          # containers/segeval/requirements.txt.
-          pip install pytest pytest-cov pandas scikit-learn==1.5.2 xmltodict
+          # This list is IDENTICAL to ci.yml's python-tests job, line for line.
+          # There is deliberately NO `pip install -r requirements.txt` on either
+          # side: that file is an unpinned developer-convenience superset
+          # (stardist, csbdeep, basicpy, aicsimageio, dask[distributed] and a
+          # `git+https://.../deepcell-types@master` clone). ci.yml ran it with
+          # `|| true`, in the BLOCKING gate, so total failure was swallowed --
+          # and it does fail: deepcell-types declares `requires-python >=3.11`,
+          # so on the 3.10 leg pip resolves nothing at all and installs NOTHING,
+          # while on 3.11 it would resolve numpy 2.x before the pinned line
+          # downgrades it. Nothing in the suite needs those packages: every
+          # MODULE-SCOPE `pytest.importorskip` in tests/ targets anndata, cv2,
+          # kornia, numpy, pandas, scipy, skimage, tifffile, torch, yaml or
+          # zarr, all of which the pinned lines below install. The one test that
+          # touches stardist/csbdeep does so through a per-test `skipif` whose
+          # own docstring calls it "deliberately additive", with a structural
+          # counterpart that always runs.
+          #
+          # pyyaml is listed EXPLICITLY here for that reason: it used to be
+          # declared only in requirements.txt, and tests/test_ci_job_hygiene.py
+          # `importorskip`s it at module scope, so a failed `-r` install
+          # silently deleted two guards. It survived only transitively, via
+          # dask's own dependency on it.
+          #
+          # scikit-learn is PINNED for the reason ci.yml gives at its own pin:
+          # bin/utils/cse/functions.py:650 builds its PCA model by assigning
+          # fitted attributes by hand, so it is valid only against the sklearn
+          # internals it was written for. Unpinned, pip resolved 1.7.2 on a 3.10
+          # leg and 1.9.0 on a 3.11 leg and 1.9.0 made QualityScore come out
+          # `nan`. Tracks containers/segeval/requirements.txt.
+          pip install pytest pytest-cov pandas scikit-learn==1.5.2 xmltodict pyyaml
           # The imaging stack is pinned to containers/tiled/requirements.txt — the
           # production image that actually runs the tiled path — and installed in one
           # command, exactly as ci.yml's python-tests job does. This gate claims to run
-          # "the SAME checks CI runs"; installing an UNPINNED tifffile/numpy/
+          # the same checks CI runs; installing an UNPINNED tifffile/numpy/
           # scikit-image here (as it used to) meant it resolved a different stack than
           # both CI and the container, which is the class of bug that produced a blank
           # thumbnail (intensity p1/p50/p99.9 = 0.0/0.0/0.0) and `RuntimeError: ORB
@@ -184,8 +267,7 @@ jobs:
           # this gate needs it too. Same pin as ci.yml and as containers/stardist,
           # containers/cellsam and containers/convert: 2026.7.1. (This job is
           # single-version Python 3.10 -- see python-version above -- so no matrix
-          # consideration applies here; an earlier draft of this comment claimed a 3.9 leg
-          # that this job has never had.)
+          # consideration applies here.)
           pip install 'dask[array]==2026.7.1'
           # bin/utils/qc.py imports cv2 at module scope, and this runner has no display
           # libs, so -headless, not opencv-python (containers/regqc/requirements.txt's
@@ -210,7 +292,6 @@ jobs:
         run: |
           python tests/testdata/generate_complete_testdata.py
 
-      # --- Same Python tests CI runs ---
       # A skip is not a pass. tests/test_coarse_frontend.py's DISK+LightGlue cases
       # guard themselves with importorskip("torch")/importorskip("kornia"), so a
       # missing, broken or CUDA-only install turns them into silent skips -- which is
@@ -236,28 +317,377 @@ jobs:
             --ignore=tests/subworkflows \
             --ignore=tests/integration
 
-      # --- Same validation script CI runs ---
-      - name: Run validation tests
+  # ===========================================================================
+  # Gate job B - the Nextflow stub leg, mirroring ci.yml's `nextflow-stub`,
+  # INCLUDING its version matrix. `manifest.nextflowVersion` is `>=25.04.0`, and
+  # this repo documents that NF25 and NF26 differ on config-scope `log` binding
+  # and on CLI param stringification — so a gate that blocks a version tag while
+  # exercising only `latest-everything` never tests the minimum the manifest
+  # promises. It ran exactly that way until 2026-08-31.
+  # ===========================================================================
+  test-nextflow:
+    name: Gate - NF ${{ matrix.nextflow-version }} stub
+    needs: validate
+    runs-on: ubuntu-latest
+    # ci.yml budgets 30 minutes for the same step list.
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        nextflow-version: ['25.04.0', 'latest-everything']
+    steps:
+      - name: Checkout the pinned release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+
+      - name: Cache Nextflow
+        uses: actions/cache@v4
+        with:
+          path: ~/.nextflow
+          key: ${{ runner.os }}-nextflow-release-${{ matrix.nextflow-version }}-${{ hashFiles('**/*.nf') }}
+          restore-keys: |
+            ${{ runner.os }}-nextflow-release-${{ matrix.nextflow-version }}-
+            ${{ runner.os }}-nextflow-
+
+      - name: Install Nextflow
+        uses: nf-core/setup-nextflow@v2
+        with:
+          version: ${{ matrix.nextflow-version }}
+
+      - name: Cache Nextflow plugins
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.nextflow-plugins
+          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nf-plugins-
+
+      - name: Provision Nextflow plugins
+        # Install the pinned nf-schema explicitly so a registry outage fails in
+        # a step that names it, instead of halfway into a pipeline run. The
+        # version is read out of nextflow.config rather than duplicated here, so
+        # CI and the pipeline cannot pin different versions. No-op when the
+        # cache above already restored it. Every one of ci.yml's five Nextflow
+        # jobs has carried this step; this workflow had none.
+        run: |
+          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
+
+      - name: Install Python for test data generation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Generate test data
+        run: |
+          # Pinned to containers/tiled/requirements.txt (the production tiled-path
+          # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
+          # `pip install` of a guarded imaging package, in every job, to match.
+          pip install numpy==1.26.4 tifffile==2025.5.10
+          python tests/testdata/generate_complete_testdata.py
+
+      - name: Check all profiles parse without the gitignored site config
+        # Guards against the strict-parser regression class: a committed profile
+        # must never includeConfig a gitignored/missing file (breaks every
+        # profile in CI). Runs with conf/ieo.config absent (it already is here).
+        run: |
+          bash tests/check_profiles_parse.sh
+
+      - name: Check param surface consistency (config <-> schema <-> code)
+        # Fails if a param is declared/used but undocumented in nextflow_schema.json
+        # (or vice-versa) — keeps the parameter surface from drifting.
+        run: |
+          python3 tests/check_param_consistency.py
+
+      - name: Run pipeline validation tests
         run: |
           bash tests/run_validation_tests.sh
 
-      # --- Same stub pipeline run CI runs (container-free: stub needs no
-      #     images, and this gate runs BEFORE publish-images on a fresh tag). ---
-      - name: Run pipeline stub
+      - name: lib/ probe — assert lib/*.groovy behaviour
+        # The ONLY unit-test surface lib/*.groovy has: nf-test's assertion
+        # context cannot see lib/ classes, so the assertions live inside the
+        # script. A failing assert exits nonzero and fails this gate job. A
+        # release could previously ship a broken lib/ class, green.
+        run: |
+          nextflow run tests/lib_probe.nf -lib lib
+
+      - name: Run pipeline with test profile (stub mode)
+        # Stub blocks only `touch` outputs — no container engine needed. Running
+        # container-free keeps this gate green without pulling per-process
+        # images, which on a fresh tag do not exist yet (publish-images runs
+        # after this gate, by design).
         run: |
           nextflow run . \
             -profile test \
             -stub \
             --outdir test_results_stub
 
-      - name: Upload test results
+      - name: Run pipeline with SHIPPED defaults (stub mode)
+        # `-profile test` pins BOTH pixel_size (-> 0.325) and seg_method
+        # (-> 'stardist') away from what actually ships ('auto' / 'instantseg'),
+        # each for its own documented reason (conf/test.config) -- which means
+        # the exact combination that ships was never executed by this gate.
+        # `shipped_defaults_test` overrides both back and repoints `input` at
+        # the one fixture pair this repo generates with a real OME
+        # PhysicalSizeX/Y (tests/testdata/shipped_defaults_input.csv), because
+        # every other fixture is scale-less on purpose and `auto` would
+        # (correctly) hard-fail at PREFLIGHT_SCALE against it.
+        run: |
+          nextflow run . \
+            -profile shipped_defaults_test \
+            -stub \
+            --outdir test_results_shipped_defaults
+
+      - name: Verify work-directory cleanup and final-outputs-only publishing
+        # A shell script, not a pytest and not an nf-test, and it needs its own
+        # step or it runs nowhere. `cleanup` is a Nextflow session-teardown
+        # behaviour, invisible to a static guard over the sources and gone by
+        # the time nf-test's assertion context runs. The script's fourth case is
+        # the load-bearing one -- cleanup must never fire on a FAILED run, or a
+        # real failure becomes undiagnosable.
+        run: |
+          bash tests/cleanup_work.sh
+
+      - name: Upload stub test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: release-test-results
+          name: release-stub-results-nf-${{ matrix.nextflow-version }}
           path: |
             test_results_stub/
+            test_results_shipped_defaults/
             .nextflow.log
+
+  # ===========================================================================
+  # Gate job C - the nf-test stub suite, mirroring ci.yml's `nf-test-stub`.
+  # ~16 minutes. A release gate is rare and 214 cases of channel wiring is what
+  # a version tag ought to cost; the timeout below is sized for it.
+  # ===========================================================================
+  test-nf-test:
+    name: Gate - nf-test (stub)
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout the pinned release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+
+      - name: Cache Nextflow
+        uses: actions/cache@v4
+        with:
+          path: ~/.nextflow
+          key: ${{ runner.os }}-nextflow-release-nftest-${{ hashFiles('**/*.nf') }}
+          restore-keys: |
+            ${{ runner.os }}-nextflow-
+
+      - name: Install Nextflow
+        # Pinned to the supported release: nf-test 0.9.0's generated test
+        # wrappers do not compile under edge Nextflow's strict parser.
+        # latest-everything full-pipeline compatibility is covered by the
+        # test-nextflow job's matrix above.
+        uses: nf-core/setup-nextflow@v2
+        with:
+          version: '25.04.0'
+
+      - name: Cache Nextflow plugins
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.nextflow-plugins
+          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nf-plugins-
+
+      - name: Provision Nextflow plugins
+        run: |
+          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
+
+      - name: Install Python for test data generation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Generate test data
+        run: |
+          # Pinned to containers/tiled/requirements.txt (the production tiled-path
+          # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
+          # `pip install` of a guarded imaging package, in every job, to match.
+          pip install numpy==1.26.4 tifffile==2025.5.10
+          python tests/testdata/generate_complete_testdata.py
+
+      - name: Install nf-test
+        uses: nf-core/setup-nf-test@v1
+        with:
+          version: ${{ env.NFTEST_VERSION }}
+
+      - name: Run nf-test stub suite
+        # Container-free (-profile test) and stub-only (--tag stub): stub blocks
+        # need no images. This is CI's blocking nf-test gate, and it was absent
+        # from the release gate entirely.
+        run: |
+          nf-test test --tag stub --profile test --verbose
+
+      - name: Upload nf-test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-nf-test-stub-results
+          path: |
+            .nf-test/
+            tests/output/
+
+  # ===========================================================================
+  # Gate job D - the DEEPCELL token-leak guard, mirroring ci.yml's
+  # `security-tests`. It needs its own job for the reason ci.yml documents at
+  # length: tests/modules/segment_deepcell_token.nf.test needs
+  # `-profile test,singularity`, Nextflow rejects a duplicate `-profile`, and so
+  # the `--tag stub --profile test` sweep can never collect it. Verified there
+  # by dry-run: 0 deepcell tests matched. The second step asserts the guard was
+  # COLLECTED, not merely that nf-test exited 0.
+  # ===========================================================================
+  test-security:
+    name: Gate - Security tests
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout the pinned release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+
+      - name: Install Nextflow
+        # Same pin as test-nf-test: nf-test's generated wrappers do not compile
+        # under edge Nextflow's strict parser.
+        uses: nf-core/setup-nextflow@v2
+        with:
+          version: '25.04.0'
+
+      - name: Cache Nextflow plugins
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.nextflow-plugins
+          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nf-plugins-
+
+      - name: Provision Nextflow plugins
+        run: |
+          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
+
+      - name: Install Python for test data generation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Generate test data
+        run: |
+          # Same pin as every other job — guarded by tests/test_ci_stack_pinned.py.
+          pip install numpy==1.26.4 tifffile==2025.5.10
+          python tests/testdata/generate_complete_testdata.py
+
+      - name: Install nf-test
+        uses: nf-core/setup-nf-test@v1
+        with:
+          version: ${{ env.NFTEST_VERSION }}
+
+      - name: Token-leak guard
+        # Asserts DEEPCELL_ACCESS_TOKEN is forwarded BY NAME and its VALUE never
+        # reaches .command.run, which is group-readable on a typical shared HPC
+        # filesystem and is retained across -resume. The variable must be set in
+        # the environment invoking nf-test: the test asserts on its presence
+        # first, because without it SEGMENT never reaches the guarded branch and
+        # the whole case would pass while checking nothing.
+        env:
+          DEEPCELL_ACCESS_TOKEN: dummy-token-value
+        run: |
+          nf-test test tests/modules/segment_deepcell_token.nf.test \
+            --profile test,singularity --verbose
+
+      - name: Assert the guard actually executed
+        # A tag typo, a renamed file, or a --profile change would make nf-test
+        # exit 0 having run nothing — which is the exact failure this job was
+        # added to close, so it must not be able to recur here.
+        env:
+          DEEPCELL_ACCESS_TOKEN: dummy-token-value
+        run: |
+          n=$(nf-test test tests/modules/segment_deepcell_token.nf.test \
+                --profile test,singularity --dry-run 2>&1 \
+              | grep -ci "DEEPCELL_ACCESS_TOKEN" || true)
+          echo "collected $n case(s)"
+          test "$n" -ge 1
+
+  # ===========================================================================
+  # Gate job E - ruff, mirroring ci.yml's `ruff` job. `ruff check` only, not
+  # `ruff format`: the repo is not format-normalized yet.
+  # ===========================================================================
+  test-ruff:
+    name: Gate - Ruff lint
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout the pinned release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install ruff
+        # Pinned to the version used locally (see ruff.toml) so CI and local
+        # `ruff check .` agree exactly.
+        run: |
+          pip install ruff==0.16.0
+
+      - name: Run ruff check
+        run: |
+          ruff check .
+
+  # ===========================================================================
+  # Job 2 - THE GATE, as one job downstream can depend on. Mirrors ci.yml's
+  # `all-tests`: it needs the same five jobs and, like it, treats anything that
+  # is not `success` as a failure. `skipped` is NOT a pass here — a gate job
+  # that silently stops running must block the release, not wave it through.
+  # ===========================================================================
+  test:
+    name: Test Gate
+    needs: [test-python, test-nextflow, test-nf-test, test-security, test-ruff]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    steps:
+      - name: Check all gate jobs passed
+        run: |
+          if [ "${{ needs.test-python.result }}" != "success" ]; then
+            echo "::error::Python tests failed"
+            exit 1
+          fi
+          if [ "${{ needs.test-nextflow.result }}" != "success" ]; then
+            echo "::error::Nextflow stub tests failed"
+            exit 1
+          fi
+          if [ "${{ needs.test-nf-test.result }}" != "success" ]; then
+            echo "::error::nf-test stub suite failed"
+            exit 1
+          fi
+          if [ "${{ needs.test-security.result }}" != "success" ]; then
+            echo "::error::Security tests failed"
+            exit 1
+          fi
+          if [ "${{ needs.test-ruff.result }}" != "success" ]; then
+            echo "::error::Ruff lint failed"
+            exit 1
+          fi
+          echo "All release gate checks passed."
 
   # ===========================================================================
   # Job 3 - bump manifest.version, commit, and create+push the git tag.
@@ -280,6 +710,22 @@ jobs:
           ref: main
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Refuse to tag a commit the gate did not test
+        # The gate ran on validate's pinned SHA. If main moved while the gate
+        # was running, tagging HEAD would tag something no job here tested --
+        # the same class of defect as the old `checkout ref: main` under a gate
+        # that checked out github.ref, just narrower. Re-dispatch instead.
+        run: |
+          TESTED="${{ needs.validate.outputs.sha }}"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          if [ "$HEAD_SHA" != "$TESTED" ]; then
+            echo "::error::main is at $HEAD_SHA but the gate tested $TESTED."
+            echo "Someone pushed to main while the release gate was running."
+            echo "Re-run the release workflow so the gate tests what gets tagged."
+            exit 1
+          fi
+          echo "main is at the tested commit: $HEAD_SHA"
 
       - name: Write version into nextflow.config manifest
         run: |
@@ -317,7 +763,10 @@ jobs:
 
   # ===========================================================================
   # Verify (release trigger) - tag pre-exists, so just confirm the committed
-  # config matches the tag instead of bumping.
+  # config matches the tag instead of bumping. Checks out the TAG explicitly:
+  # on this trigger `github.ref` happens to be the tag already, but a bare
+  # checkout states no such requirement and is the same shape as the bug this
+  # workflow's header describes.
   # ===========================================================================
   verify-config:
     name: Verify Config Matches Tag
@@ -327,8 +776,10 @@ jobs:
     timeout-minutes: 5
     if: github.event_name == 'release'
     steps:
-      - name: Checkout repository
+      - name: Checkout the released tag
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.version }}
 
       - name: Check manifest.version matches the released tag
         run: |
@@ -344,32 +795,71 @@ jobs:
 
   # ===========================================================================
   # Job 4 - build & push all container images to Docker Hub (one descriptive tag
-  # per image). Reuses build-images.yml via workflow_call. Gated on the test job.
+  # per image). Reuses build-images.yml via workflow_call.
+  #
+  # `needs: bump-and-tag` and `ref: <tag>` are both load-bearing. The images pin
+  # manifest.version into what modules/local/*.nf pull, so building them from an
+  # un-bumped tree publishes mirage-<component>:1.0.0 built from a tree that
+  # still says the previous version. A reusable workflow does its OWN checkout
+  # and sees the CALLER's github.ref, so the tag has to be passed in explicitly;
+  # build-images.yml takes it as its `ref` input.
   # ===========================================================================
   publish-images:
     name: Publish Images
-    needs: [validate, test]
+    needs: [validate, test, bump-and-tag]
+    # `always()` is what lets a SKIPPED bump-and-tag (the release: published
+    # path, where the tag already exists) through; the explicit result checks
+    # are what stop a FAILED gate coming through with it.
+    if: >-
+      always()
+      && needs.validate.result == 'success'
+      && needs.test.result == 'success'
+      && (needs.bump-and-tag.result == 'success' || needs.bump-and-tag.result == 'skipped')
     uses: ./.github/workflows/build-images.yml
     with:
       version: ${{ needs.validate.outputs.version }}
+      ref: ${{ needs.validate.outputs.version }}
     permissions:
       contents: read
       packages: write
     secrets: inherit
 
   # ===========================================================================
-  # Job 5 - build the release tar.gz archive (preserved from the previous
-  # release.yml). Gated on the test job.
+  # Job 5 - build the release tar.gz archive, FROM THE TAG. This is the job the
+  # audit caught: it used to carry `needs: [validate, test]` and a bare
+  # checkout, so `mirage-v1.0.0.tar.gz` was tarred from the un-bumped tree, in
+  # parallel with the bump, and shipped a nextflow.config still reading the
+  # previous version.
   # ===========================================================================
   artifacts:
     name: Create Artifacts
-    needs: [validate, test]
+    needs: [validate, test, bump-and-tag]
     runs-on: ubuntu-latest
+    if: >-
+      always()
+      && needs.validate.result == 'success'
+      && needs.test.result == 'success'
+      && (needs.bump-and-tag.result == 'success' || needs.bump-and-tag.result == 'skipped')
     # tar of the working tree + artifact upload.
     timeout-minutes: 15
     steps:
-      - name: Checkout repository
+      - name: Checkout the released tag
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.version }}
+
+      - name: Assert the archive carries the released version
+        # The tarball's whole failure mode is silent: a wrong nextflow.config
+        # inside a correctly-named .tar.gz. Check it before tarring rather than
+        # discovering it from a user's bug report.
+        run: |
+          VERSION_NO_V="${{ needs.validate.outputs.version_no_v }}"
+          CONFIG_VERSION=$(grep -E "version[[:space:]]*=" nextflow.config | head -1 | grep -oP "'\K[^']+")
+          if [ "$CONFIG_VERSION" != "$VERSION_NO_V" ]; then
+            echo "::error::Archive would ship nextflow.config version '$CONFIG_VERSION' for release '$VERSION_NO_V'."
+            exit 1
+          fi
+          echo "Archive tree is at version $CONFIG_VERSION."
 
       - name: Create release archive
         run: |
@@ -411,8 +901,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
+      - name: Checkout the released tag
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.version }}
 
       - name: Download release archive
         uses: actions/download-artifact@v4

@@ -69,6 +69,19 @@ on:
         description: 'Image version to publish, matching manifest.version (e.g. 1.0.0; a leading v is stripped)'
         required: true
         type: string
+      ref:
+        # A reusable workflow does its own checkout and sees the CALLER's
+        # github.ref, NOT whatever the caller checked out. release.yml passes the
+        # release TAG here so the images are built from the tagged, version-bumped
+        # tree. Without it, a workflow_dispatch release built ten images from the
+        # dispatch branch's un-bumped tree while `bump-and-tag` was still running --
+        # so mirage-<component>:1.0.0 was built from a tree still saying the previous
+        # version. Empty (the default, and every non-workflow_call trigger) means
+        # actions/checkout's own default ref, i.e. unchanged behaviour.
+        description: 'Git ref (tag/branch/SHA) to build the images from. Empty = the default ref.'
+        required: false
+        default: ''
+        type: string
 
 # Docker Hub push needs no special GITHUB_TOKEN scope; contents:read for checkout.
 permissions:
@@ -153,6 +166,9 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Empty on every trigger but workflow_call -> actions/checkout's default.
+          ref: ${{ inputs.ref }}
 
       # The image list lives in ONE place (containers/images.json) so the matrix
       # and the `only` filter cannot disagree. Selecting a subset is filtering
@@ -212,6 +228,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Same ref the setup job resolved the matrix from, so the build context
+          # and the image list can never come from two different commits.
+          ref: ${{ inputs.ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
