@@ -345,7 +345,7 @@ Per-process requests, resource labels, retry policy and containers:
 | `slurm_partition` | `null` | SLURM partition (becomes the queue). |
 | `slurm_account` | `null` | SLURM account (`--account`). |
 | `slurm_qos` | `null` | SLURM QoS (`--qos`). |
-| `gpu_type` | `nvidia_h200:1` | GRES string for GPU jobs (`--gres=gpu:<value>`). Match `sinfo -o "%G"`. |
+| `gpu_type` | `1` | GRES string for GPU jobs (`--gres=gpu:<value>`). Bare `1` = any one GPU, which is portable; set a typed string (e.g. `nvidia_a100:1`) in your site config to match `sinfo -o "%G"`. |
 | `max_memory` | `700.GB` | Global memory ceiling. Clamps every process's request via `process.resourceLimits`. |
 | `max_cpus` | `128` | Global CPU ceiling. |
 | `max_time` | `240.h` | Global walltime ceiling. |

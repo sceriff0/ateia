@@ -651,8 +651,8 @@
                 },
                 "gpu_type": {
                     "type": "string",
-                    "description": "GPU type specification for SLURM.",
-                    "default": "nvidia_h200:1"
+                    "description": "GRES string for GPU jobs, rendered as --gres=gpu:<value>. Bare '1' means any one GPU and is portable; set a typed string (e.g. 'nvidia_a100:1') in your site config to match `sinfo -o \"%G\"`.",
+                    "default": "1"
                 }
             }
         },
