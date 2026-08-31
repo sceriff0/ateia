@@ -143,7 +143,19 @@ jobs:
           # tests/test_ci_stack_pinned.py globs EVERY workflow under .github/workflows/
           # and guards this pin; it used to look only at ci.yml, which is how this line
           # stayed unpinned.
-          pip install numpy==1.26.4 scipy==1.15.3 scikit-image==0.25.2 tifffile==2025.5.10 zarr==2.18.3 numcodecs==0.13.1
+          #
+          # imagecodecs supplies the zstd/LZW codecs tifffile calls through, and belongs on
+          # THIS line rather than one of its own so the resolver never gets a window in
+          # which it can move the stack. Its absence is not an ImportError at import time --
+          # it surfaces only when something WRITES with a codec, as `ModuleNotFoundError: No
+          # module named 'compression'` raised from inside tifffile. This line used to stop
+          # at numcodecs while ci.yml's counterpart -- identical apart from this one token
+          # -- carried imagecodecs, and tests/test_ci_stack_pinned.py's presence check was
+          # a UNION across workflows, so ci.yml satisfied it on this file's behalf, in a
+          # gate ci.yml does not run. Measured cost of the omission in this
+          # gate: 13 failed / 1072 passed against ci.yml's 1115 passed. Authority:
+          # containers/tiled/requirements.txt.
+          pip install numpy==1.26.4 scipy==1.15.3 scikit-image==0.25.2 tifffile==2025.5.10 zarr==2.18.3 numcodecs==0.13.1 imagecodecs==2025.3.30
           # torch + kornia power STARE's DISK+LightGlue COARSE front-end
           # (bin/utils/coarse_align.py). Without them tests/test_coarse_frontend.py's DISK
           # case importorskips and proves nothing -- which is how an unimplemented
@@ -154,6 +166,18 @@ jobs:
           # pulls the ~2.5 GB CUDA wheel from PyPI if torch is not already satisfied.
           pip install torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
           pip install kornia==0.7.3
+          # matplotlib is a hard dependency of the CSE evaluation path, not a plotting
+          # nicety: the vendored CSE source runs `import matplotlib.pyplot` at the top of
+          # functions.py's foreground_separation(), which single_method_eval.py calls on
+          # the main path. Without it bin/seg_quality_eval.py exits 1 and
+          # tests/test_seg_quality_eval_cli.py fails -- which is exactly what this gate did
+          # while ci.yml, which installs it, stayed green.
+          #
+          # Pinned to segeval's version, NOT to containers/tiled's -- the tiled image
+          # neither pins nor imports matplotlib. containers/segeval/requirements.txt is the
+          # authority and explains it at length; tests/test_ci_stack_pinned.py encodes the
+          # split.
+          pip install matplotlib==3.8.4
           # dask[array] powers bin/convert_image.py's lazy read: BioImage.dask_data is a
           # dask array, and tests/test_convert_lazy_read.py +
           # tests/test_convert_streaming_write.py import dask.array UNCONDITIONALLY, so
@@ -163,6 +187,19 @@ jobs:
           # consideration applies here; an earlier draft of this comment claimed a 3.9 leg
           # that this job has never had.)
           pip install 'dask[array]==2026.7.1'
+          # bin/utils/qc.py imports cv2 at module scope, and this runner has no display
+          # libs, so -headless, not opencv-python (containers/regqc/requirements.txt's
+          # runtime pin). Pinned to the same 4.10.0.82 release that container installs, and
+          # to a build compatible with numpy==1.26.4 above -- opencv-python-headless>=5
+          # requires numpy>=2 and would break the pin the imaging-stack line exists to
+          # protect.
+          #
+          # Its absence here was SILENT, not loud: tests/test_merge_pyramid_streaming.py
+          # and tests/test_registration_qc_lazy_read.py call pytest.importorskip("cv2") at
+          # MODULE scope, so 24 + 5 tests were deselected from this gate without a single
+          # failure to show for it. That is why cv2's distribution is now in
+          # tests/test_ci_stack_pinned.py's IMPORTORSKIP_GUARDED set.
+          pip install opencv-python-headless==4.10.0.82
           # anndata powers tests/test_join_flowpath.py. Capped below 0.12: anndata >= 0.12
           # requires zarr >= 3, which breaks tifffile's aszarr store used by the tiled
           # tests. 0.11.x works with zarr 2 and is all these tests need — they only build
