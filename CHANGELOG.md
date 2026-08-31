@@ -386,6 +386,46 @@ after that doc and is detailed inline below:
   `lib/WarpBackends.groovy`, not from the param, so the two can never disagree.
 
 ### Fixed
+- **The release workflow built a release from three different commits.**
+  `.github/workflows/release.yml` gated on a bare `actions/checkout` (`github.ref`),
+  tagged `ref: main` regardless, and gave `artifacts`, `publish-images` and
+  `verify-config` `needs: [validate, test]` rather than `needs: bump-and-tag` — so on a
+  `workflow_dispatch` the tarball and the ten container images were built **in parallel
+  with** the version bump, from the un-bumped tree. `mirage-v1.0.0.tar.gz` would have
+  shipped a `nextflow.config` still reading the previous version. `validate` now
+  resolves the ref that will be tagged and pins it to a SHA, every gate job checks out
+  that SHA, `bump-and-tag` refuses to tag if `main` moved underneath the gate, and the
+  archive and images are built from the created tag (`build-images.yml` gained a `ref`
+  input, because a reusable workflow checks out the *caller's* ref).
+  `tests/test_release_workflow_graph.py` asserts the graph.
+- **The release gate claimed parity with CI and ran 5 of its 13 blocking checks.**
+  Absent were the whole nf-test stub suite, `ruff check .`, the DEEPCELL token-leak
+  guard *and* its collection assertion, `tests/lib_probe.nf` (the only unit-test
+  surface `lib/*.groovy` has), `tests/check_profiles_parse.sh`,
+  `tests/check_param_consistency.py`, `tests/cleanup_work.sh` and the shipped-defaults
+  stub run — so a release could ship a broken `lib/` class, a leaking token, a profile
+  that will not parse or a param/schema mismatch, and be green. The gate is now five
+  jobs mirroring ci.yml's blocking `all-tests` set, its Nextflow leg carries the same
+  `['25.04.0', 'latest-everything']` matrix (it was `latest-everything` only, so the job
+  blocking a version tag never exercised the `>=25.04.0` minimum the manifest promises),
+  and it provisions the nf-schema plugin explicitly like every Nextflow job in ci.yml.
+- **`pip install -r requirements.txt || true` removed from CI's blocking gate.**
+  Unpinned, swallowing total failure, and resolving numpy 2.x ahead of the line that
+  pins it back. It never worked on the 3.10 leg at all — `deepcell-types` declares
+  `requires-python >=3.11`, so pip resolved nothing and installed nothing. `pyyaml` was
+  declared **only** there while `tests/test_ci_job_hygiene.py` `importorskip`s it at
+  module scope, so it is now installed explicitly; it had survived transitively via
+  dask. `.github/workflows/ci.yml` and `release.yml` now install identical
+  environments.
+- **`tests/test_ci_stack_pinned.py` had two scope holes.** Its presence check was
+  per-FILE, so deleting `numpy` and `tifffile` from ci.yml's *blocking* imaging line
+  left it green — five sibling jobs in the same file carry those pins to generate test
+  data. It is now per-JOB, via a structural `yaml.safe_load` of the `jobs:` block. It
+  was also blind to `-r`: `pip install -r <file>` yields no package tokens, so the
+  "==-pinned" rule passed while a file installed guarded packages unpinned.
+- **`all-tests` treated `skipped` as a pass**, and `nf-test-real` carried
+  `continue-on-error: true` on top of already being absent from `needs:` — 129 real
+  cases showed a green tick whatever they did. Both removed.
 - **Three `DAPI` hardcodes removed; the nuclear/fiducial channel is now resolved the
   same way everywhere.** `params.nuclear_markers` was already the declared source of
   truth (`lib/MarkerUtils.groovy`, `bin/utils/metadata.py`), but three sites still
