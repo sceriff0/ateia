@@ -37,6 +37,18 @@ runs:
       with:
         nextflow-version: ${{ inputs.nextflow-version }}
 
+    - name: Cache nf-test
+      # KEYED ON THE NF-TEST VERSION, which is the whole point of it living here
+      # rather than riding along in setup-nextflow's key: that key knows the
+      # Nextflow version and the pipeline sources and nothing about nf-test, so a
+      # version bump would restore a directory the previous version populated.
+      uses: actions/cache@v4
+      with:
+        path: ~/.nf-test
+        key: ${{ runner.os }}-nf-test-${{ inputs.nf-test-version }}
+        restore-keys: |
+          ${{ runner.os }}-nf-test-
+
     - name: Install nf-test
       uses: nf-core/setup-nf-test@v1
       with:

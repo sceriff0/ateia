@@ -558,7 +558,7 @@ BLOCKING_CHECKS = [
     # lives in ci.yml's `ruff` job (which IS in the `all-tests` gate's `needs:`),
     # not in the advisory `lint` job that runs `|| true`. Both needles resolve
     # through .github/actions/** like the rest of this table.
-    ("actionlint (workflow + composite-action syntax)", "rhysd/actionlint"),
+    ("actionlint (workflow + composite-action syntax)", "actionlint"),
 ]
 
 
@@ -574,7 +574,7 @@ def test_the_release_gate_runs_every_check_ci_blocks_on(label, needle):
     """
     # Non-vacuity, and a typo detector: the needle must be a command ci.yml really
     # runs. A misspelled needle fails HERE rather than passing vacuously on both sides.
-    assert needle in ci_actions.resolved_text(CI), (
+    assert needle in ci_actions.resolved_run_text(CI), (
         f"{needle!r} ({label}) does not appear in ci.yml, so it is not a check CI runs "
         "and this parametrised case is asserting against a string that matches nothing."
     )

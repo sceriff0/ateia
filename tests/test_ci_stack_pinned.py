@@ -284,7 +284,7 @@ def test_no_workflow_step_that_installs_a_requirements_file_is_conditional():
             for step in ci_actions.steps_of(job):
                 if "if" not in step:
                     continue
-                if ci_actions._requirements_from_step(step):
+                if ci_actions.requirements_from_step(step):
                     offenders.append(
                         f"{wf.relative_to(ROOT).as_posix()}::{name}: step "
                         f"{step.get('name', step.get('uses', '?'))!r} installs a "

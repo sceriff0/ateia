@@ -141,9 +141,58 @@ def resolved_paths(path: Path) -> list[Path]:
     return [path, *resolved_action_files(path.read_text())]
 
 
+def strip_comment_lines(text: str) -> str:
+    """Drop whole-line `#` comments.
+
+    THIS IS LOAD-BEARING, NOT TIDINESS. Every view below is substring-matched by
+    guards looking for a COMMAND, and this repo's YAML explains its commands at
+    length -- `.github/actions/setup-nextflow/action.yml` names
+    `nextflow plugin install` in prose precisely because that command is one of
+    test_release_workflow_graph.BLOCKING_CHECKS' needles. Measured: replacing the
+    real command with `echo DELETED-PROVISIONING` while leaving the comment
+    standing left the release-parity guard GREEN (14 passed). A comment must
+    never be able to satisfy a claim about what CI runs.
+
+    Same rule, same reason, as `test_ci_stack_pinned.pip_invocations`, which has
+    stripped `#` lines since it was written: a comment explaining why a pin was
+    removed necessarily quotes the pin.
+    """
+    return "\n".join(
+        ln for ln in text.splitlines() if not ln.strip().startswith("#")
+    )
+
+
+def _run_bodies(steps) -> list[str]:
+    return [str(s["run"]) for s in steps if isinstance(s, dict) and "run" in s]
+
+
+def _action_run_bodies(path: Path) -> list[str]:
+    action = yaml.safe_load(path.read_text()) or {}
+    return _run_bodies((action.get("runs") or {}).get("steps") or [])
+
+
 def resolved_text(path: Path) -> str:
-    """The text of `path` concatenated with every local action it reaches."""
-    return "\n".join(p.read_text() for p in resolved_paths(path))
+    """The text of `path` plus every local action it reaches, COMMENTS STRIPPED.
+
+    Still contains YAML prose (`description:` blocks), so it is the right view for
+    "does this file mention X" and the WRONG view for "does CI run the command X".
+    Use `resolved_run_text` for the latter.
+    """
+    return strip_comment_lines("\n".join(p.read_text() for p in resolved_paths(path)))
+
+
+def resolved_run_text(path: Path) -> str:
+    """Every `run:` body a WORKFLOW executes, its local actions included.
+
+    Comments stripped, and `description:`/`name:` prose never present at all --
+    this is a view of COMMANDS. It is what a guard asserting "CI runs X" must read.
+    """
+    bodies: list[str] = []
+    for _name, job in load_jobs(path).items():
+        bodies += _run_bodies(job.get("steps") or [])
+    for action in resolved_action_files(path.read_text()):
+        bodies += _action_run_bodies(action)
+    return strip_comment_lines("\n".join(bodies))
 
 
 # ---------------------------------------------------------------------------
@@ -171,21 +220,28 @@ def job_local_actions(job: dict) -> list[Path]:
 
 
 def job_run_text(job: dict) -> str:
-    """The job's own `run:` bodies, in order."""
-    return "\n".join(str(s["run"]) for s in steps_of(job) if "run" in s)
+    """The job's own `run:` bodies, in order, comments stripped."""
+    return strip_comment_lines("\n".join(_run_bodies(steps_of(job))))
 
 
 def job_resolved_run_text(job: dict) -> str:
-    """The job's `run:` bodies PLUS the full text of the local actions it uses.
+    """The job's `run:` bodies PLUS the `run:` bodies of the local actions it uses.
 
-    The action text is included whole, not just its `run:` bodies: an action's
-    `uses:` steps (nf-core/setup-nextflow, actions/setup-python) are part of what
-    the job runs, and a guard asking "does this job install Nextflow" must be
-    able to see them.
+    COMMANDS ONLY. An earlier version of this returned the actions' FULL FILE
+    TEXT, which meant a needle could be satisfied by a `description:` block or a
+    `#` comment -- and one was: `.github/actions/setup-nextflow/action.yml`
+    documents `nextflow plugin install` in prose, so deleting the command itself
+    left test_release_workflow_graph's parity check green. See
+    `strip_comment_lines`.
+
+    A guard that needs to know which ACTIONS a job uses should ask
+    `job_local_actions(job)`; a guard that needs the third-party `uses:` inside
+    them should read those files itself and say so.
     """
-    parts = [job_run_text(job)]
-    parts += [p.read_text() for p in job_local_actions(job)]
-    return "\n".join(parts)
+    bodies = _run_bodies(steps_of(job))
+    for path in job_local_actions(job):
+        bodies += _action_run_bodies(path)
+    return strip_comment_lines("\n".join(bodies))
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +294,7 @@ def _eval_action_if(condition: str, inputs: dict[str, str]) -> bool:
     return equal if op == "==" else not equal
 
 
-def _requirements_from_step(step: dict, inputs: dict[str, str] | None = None) -> list[str]:
+def requirements_from_step(step: dict, inputs: dict[str, str] | None = None) -> list[str]:
     """requirements/*.txt files ONE step installs, in order.
 
     Three forms, all of which exist in this repo:
@@ -296,7 +352,7 @@ def _requirements_from_step(step: dict, inputs: dict[str, str] | None = None) ->
                 nested_step["if"], nested_inputs
             ):
                 continue
-            files += _requirements_from_step(nested_step, nested_inputs)
+            files += requirements_from_step(nested_step, nested_inputs)
 
     return files
 
@@ -309,5 +365,5 @@ def requirement_files_installed(job: dict) -> list[str]:
     """
     files: list[str] = []
     for step in steps_of(job):
-        files += _requirements_from_step(step)
+        files += requirements_from_step(step)
     return files

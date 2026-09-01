@@ -470,12 +470,9 @@ jobs:
         # input reference or an expression that cannot resolve is exactly the class
         # of defect that otherwise surfaces only as a red run on main.
         #
-        # Run through the pinned image rather than `curl | bash` from a moving
-        # branch: the image bundles the shellcheck actionlint shells out to, and a
-        # version here is a version, not a supply-chain surprise. `-color` is
-        # omitted on purpose -- the Actions log is not a tty.
-        run: |
-          docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12
+        # The version, its checksum, and the reason it is not a Docker Hub pull all
+        # live in the action.
+        uses: ./.github/actions/actionlint
 
   # ============================================================================
   # Linting (nf-core structure lint — advisory, not a merge gate)
@@ -504,8 +501,17 @@ jobs:
           plugins: 'false'
 
       - name: Set up Python and install nf-core tools
+        # DELIBERATE CHANGE OF BEHAVIOUR, recorded rather than slipped in. Before
+        # 2026-09-01 this job had no `actions/setup-python` at all and installed
+        # nf-core tools into whatever interpreter the runner image happened to
+        # ship. That is a moving target: an `ubuntu-latest` image bump could
+        # change the Python under an advisory linter with no signal anywhere. It
+        # is pinned to 3.10 -- the version every other job in this workflow uses
+        # -- and stated at the call site rather than inherited from the action's
+        # default, so the pin is visible where the job is read.
         uses: ./.github/actions/setup-python-env
         with:
+          python-version: '3.10'
           requirements: 'requirements/nf-core.txt'
 
       - name: Run nf-core lint

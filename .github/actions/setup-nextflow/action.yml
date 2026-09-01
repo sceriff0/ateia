@@ -19,9 +19,21 @@
 # Actions caches are repository-scoped, so the release gate now warms on CI's
 # cache instead of paying a cold download.
 #
-# `~/.nf-test` rides along in the cached paths because the jobs that install
-# nf-test want it and `actions/cache` tolerates a path that does not exist as
-# long as at least one does (~/.nextflow always will).
+# `~/.nf-test` IS NOT CACHED HERE. It rode along in the first version of this
+# action, and that was wrong for a reason the key makes obvious: this key carries
+# `runner.os`, the NEXTFLOW version and the pipeline sources, and nothing about
+# which nf-test is installed -- so an nf-test bump could restore a directory
+# populated by the previous one. Inlined, the five copies had the same hole; the
+# unification widened it, because one key now serves more jobs. `~/.nf-test` is
+# cached by `.github/actions/setup-nf-test`, which knows the nf-test version and
+# puts it in its own key.
+#
+# `hashFiles('**/*.nf')` staying in a NEXTFLOW DISTRIBUTION key is deliberate and
+# is NOT mine to change: what lands in ~/.nextflow does not depend on the
+# pipeline sources, so the hash only rotates the cache more often than needed.
+# It is pre-existing (all five inline copies carried it), Phase 3 owns the
+# caching rework, and changing the key shape in two consecutive phases costs two
+# cold caches to fix one warm-up cost.
 #
 # GUARDS THAT READ THIS FILE. Moving a step into a composite action moves it out
 # of `.github/workflows/*.yml`, which is where several guard tests used to stop
@@ -61,9 +73,7 @@ runs:
     - name: Cache Nextflow
       uses: actions/cache@v4
       with:
-        path: |
-          ~/.nextflow
-          ~/.nf-test
+        path: ~/.nextflow
         key: ${{ runner.os }}-nextflow-${{ inputs.nextflow-version }}-${{ hashFiles('**/*.nf') }}
         restore-keys: |
           ${{ runner.os }}-nextflow-${{ inputs.nextflow-version }}-

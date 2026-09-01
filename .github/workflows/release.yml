@@ -485,9 +485,9 @@ jobs:
         # Parity with ci.yml's `ruff` job, which is where workflow lint lives --
         # see the comment there for why it is not in the advisory `lint` job.
         # tests/test_release_workflow_graph.py's BLOCKING_CHECKS asserts this
-        # gate runs every check ci.yml blocks on, actionlint included.
-        run: |
-          docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12
+        # gate runs every check ci.yml blocks on, actionlint included; the shared
+        # action is what makes the two sides impossible to drift apart.
+        uses: ./.github/actions/actionlint
 
   # ===========================================================================
   # Job 2 - THE GATE, as one job downstream can depend on. Mirrors ci.yml's
