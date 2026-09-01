@@ -634,7 +634,12 @@ def test_no_workflow_job_sets_continue_on_error():
 
     ci.yml's `nf-test-real` carried it as a SECOND advisory mechanism on top of
     simply being absent from `all-tests`' `needs:` — 129 real cases showing green
-    unconditionally. It was removed; nothing forbade it coming back.
+    unconditionally. It was removed; nothing forbade it coming back. That job now
+    lives in nightly.yml (Phase 4), which this scan reaches because the scope is a
+    glob and never a filename list — and it matters MORE there, not less: a
+    nightly suite that is expected to be red is exactly where someone reaches for
+    `continue-on-error` to quieten it, and quietening it is the one thing that
+    would make the move pointless.
 
     If a legitimate use ever appears, allow-list it BY JOB ID here with the reason
     written down, rather than deleting the scan.
@@ -664,7 +669,7 @@ def test_no_workflow_job_sets_continue_on_error():
     # not "read no jobs".
     assert scanned >= 15, (
         f"scanned only {scanned} job(s) across {[p.name for p in workflow_files()]}; the "
-        "three workflows here declare far more than that, so this scan did not read what "
+        "workflows here declare far more than that, so this scan did not read what "
         "it thinks it read."
     )
     assert not offenders, (
@@ -714,4 +719,216 @@ def test_no_workflow_branches_on_the_workflow_call_event_name():
         "workflow(s) branch on `github.event_name` being 'workflow_call', which it "
         "never is — inside a called workflow the event name is the CALLER's:\n"
         + "\n".join(hits)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Invariant 6: a green workflow run means a green gate.
+# ---------------------------------------------------------------------------
+# Added 2026-09-01 with the CI redesign's Phase 4.
+#
+# A GitHub Actions run's conclusion is the WORST conclusion of any job in it.
+# Gate membership does not enter into that: a job absent from `all-tests`'
+# `needs:` is advisory to the MERGE and not to the RUN, so it still paints the
+# commit, the badge and the PR checks list red. ci.yml carried `nf-test-real` and
+# `nf-test-integration` on exactly those terms, and on every push to main or dev
+# reported `failure` while its gate was green (verified on 84cc53f). People learn
+# to ignore that red, which is the failure mode the whole redesign is against.
+#
+# The fix is location, not `continue-on-error`: an advisory suite lives in a
+# workflow nothing is gated on -- .github/workflows/nightly.yml. The two checks
+# below hold both halves of that.
+
+# Jobs deliberately outside their workflow's gate DAG. BY (file, job id), with the
+# reason, because an unexplained one is exactly the defect.
+GATE_DISCONNECTED_JOBS = {
+    ("ci.yml", "lint"): (
+        "nf-core structural lint. Its one substantive step ends in `|| true`, so "
+        "the lint itself can never fail the run -- keeping it out of `all-tests` "
+        "is what stops it being a fake gate. NOTE THE RESIDUAL, honestly: its "
+        "setup steps (checkout, setup-nextflow, setup-python-env) are NOT behind "
+        "`|| true`, so an infrastructure failure there still reddens the run. "
+        "Phase 7 of the redesign owns the `|| true`; this entry is not a claim "
+        "that the hole is closed."
+    ),
+}
+
+# The advisory nf-test suites, keyed on the COMMAND, never on a job or file name.
+# Naming the job would let a rename hide a deletion, and naming the file would go
+# blind the day the workflow is split again.
+ADVISORY_SUITES = {
+    "nf-test real suite": "--tag real",
+    "nf-test integration suite": "--tag integration",
+}
+
+
+def _needs_dag_connected(jobs: dict, roots: list[str]) -> set[str]:
+    """Every job reachable from `roots` through `needs:`, in EITHER direction.
+
+    Upstream (a job the gate needs) and downstream (a job that needs the gate, as
+    release.yml's whole publish chain does) both count as connected: what matters
+    is whether the job's result can reach the gate's verdict at all, not which way
+    the arrow points.
+    """
+    connected = set(roots)
+    changed = True
+    while changed:
+        changed = False
+        for job_id, job in jobs.items():
+            if not isinstance(job, dict):
+                continue
+            declared = set(needs_of(job))
+            if job_id in connected and declared - connected:
+                connected |= declared
+                changed = True
+            elif job_id not in connected and declared & connected:
+                connected.add(job_id)
+                changed = True
+    return connected
+
+
+def test_every_job_is_connected_to_its_workflows_gate():
+    """In a workflow that HAS a gate, every job must be wired to it.
+
+    A job with no `needs:` and nothing needing it is invisible to the gate and
+    fully visible in the run status -- the worst of both. That was `nf-test-real`.
+
+    Workflows with no gate aggregator (build-images.yml, nightly.yml) are out of
+    scope BY CONSTRUCTION, not by exemption: there is no gate for a job to be
+    disconnected from, and nightly.yml being one of them is the entire point of
+    it existing. They are counted, not skipped -- a skip is not a pass in this
+    suite, and a per-file `pytest.skip` here would put two permanent entries in
+    tests/expected_skips.txt for a condition that is not an environment fact.
+    """
+    offenders = []
+    gated = []
+    for path in workflow_files():
+        aggregators = sorted(result_aggregator_jobs(path))
+        if not aggregators:
+            continue
+        gated.append(path.name)
+        jobs = jobs_of(path)
+        connected = _needs_dag_connected(jobs, aggregators)
+        offenders += [
+            f"{path.name}: `{job_id}` is in neither direction of the {aggregators} DAG"
+            for job_id in sorted(jobs)
+            if job_id not in connected and (path.name, job_id) not in GATE_DISCONNECTED_JOBS
+        ]
+    # Non-vacuity: this is a "must not find" scan, and it examines only gated
+    # workflows -- so a discovery predicate that stops matching turns it green.
+    assert len(gated) >= 2, (
+        f"only {gated} carries a gate aggregator. ci.yml (`all-tests`) and "
+        "release.yml (`test`) both do; a smaller set means result_aggregator_jobs "
+        "stopped recognising one of them and this scan read nothing."
+    )
+    assert not offenders, (
+        "job(s) sit outside their workflow's gate DAG. Such a job cannot fail the "
+        "MERGE and can still fail the RUN, so a green gate reports a red commit:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nEither add it to the gate's `needs:`, or move it to a workflow that "
+        "has no gate (nightly.yml), or add it to GATE_DISCONNECTED_JOBS with a "
+        "reason that survives being read."
+    )
+
+
+def test_the_gate_disconnected_allowlist_has_no_dead_entries():
+    """An exemption for a job that no longer exists, or that is now wired in, is a
+    licence nobody is using and the next reader will trust."""
+    stale = []
+    for (file_name, job_id), reason in GATE_DISCONNECTED_JOBS.items():
+        path = WORKFLOWS / file_name
+        if not path.is_file():
+            stale.append(f"{file_name}: no such workflow")
+            continue
+        jobs = jobs_of(path)
+        if job_id not in jobs:
+            stale.append(f"{file_name}: no job `{job_id}`")
+            continue
+        aggregators = sorted(result_aggregator_jobs(path))
+        if aggregators and job_id in _needs_dag_connected(jobs, aggregators):
+            stale.append(
+                f"{file_name}: `{job_id}` IS connected to {aggregators} now -- "
+                "delete the exemption"
+            )
+        assert reason.strip(), f"{file_name}:{job_id} has an empty reason"
+    assert not stale, "\n".join(stale)
+
+
+@pytest.mark.parametrize(
+    "label,needle", sorted(ADVISORY_SUITES.items()), ids=sorted(ADVISORY_SUITES)
+)
+def test_each_advisory_suite_runs_in_a_workflow_nothing_is_gated_on(label, needle):
+    """Two failures at once, and they pull in opposite directions.
+
+    Moving a suite out of the blocking workflow is one keystroke away from
+    DELETING it -- and a deleted advisory suite has no symptom at all, because its
+    absence looks exactly like its silence. So: the command must still be run by
+    some job somewhere.
+
+    And it must be run somewhere that carries no gate aggregator, because a
+    workflow whose run status people read as the merge verdict cannot host a suite
+    that is expected to be red. Discovery is by COMMAND, so a renamed job or a
+    third split still resolves.
+    """
+    homes = []
+    for path in workflow_files():
+        for job_id, job in jobs_of(path).items():
+            if isinstance(job, dict) and needle in run_text(job):
+                homes.append((path, job_id))
+    assert homes, (
+        f"no job in any workflow runs `nf-test ... {needle}` ({label}). The suite "
+        "was moved to nightly.yml to keep ci.yml honest, not deleted -- and a "
+        "deleted advisory suite is silent by definition. Restore it, or if it was "
+        "removed on purpose, remove it from ADVISORY_SUITES in the same commit."
+    )
+    offenders = [
+        f"{path.name}::{job_id}"
+        for path, job_id in homes
+        if result_aggregator_jobs(path)
+    ]
+    assert not offenders, (
+        f"`nf-test ... {needle}` ({label}) runs in a workflow that carries a gate "
+        f"aggregator: {offenders}. A run's conclusion is the worst conclusion of "
+        "any job in it, so an advisory suite there reddens a workflow whose status "
+        "is read as the merge verdict. That is the state Phase 4 removed."
+    )
+
+
+def test_the_integration_suite_is_still_manual_only():
+    """`--tag integration` has NEVER run unattended, and the move must not change
+    that.
+
+    In ci.yml the job carried `if: github.event_name == 'workflow_dispatch'`, so
+    it ran only when a human fired the workflow by hand. nightly.yml adds a
+    `schedule:` trigger, and a job moved there with its `if:` dropped silently
+    becomes a two-hour suite that runs every night against Docker Hub -- a change
+    of behaviour that looks like a pure relocation in the diff. Asserted, keyed on
+    the COMMAND rather than on the job's name or its file.
+
+    The real suite deliberately has no such condition: running once a day on the
+    default branch is exactly what it was moved here to do.
+    """
+    needle = ADVISORY_SUITES["nf-test integration suite"]
+    checked = 0
+    offenders = []
+    for path in workflow_files():
+        for job_id, job in jobs_of(path).items():
+            if not isinstance(job, dict) or needle not in run_text(job):
+                continue
+            checked += 1
+            cond = str(job.get("if", "")).replace('"', "'")
+            if "workflow_dispatch" not in cond:
+                offenders.append(
+                    f"{path.name}::{job_id} runs `{needle}` under `if: {cond or '<none>'}`"
+                )
+    assert checked >= 1, (
+        f"no job runs `nf-test ... {needle}`; "
+        "test_each_advisory_suite_runs_in_a_workflow_nothing_is_gated_on should have "
+        "caught that first."
+    )
+    assert not offenders, (
+        "the nf-test integration suite is no longer restricted to a manual "
+        "`workflow_dispatch`:\n  " + "\n  ".join(offenders) + "\n"
+        "It has always been manual-only. If that is meant to change, change it "
+        "deliberately and update this guard in the same commit."
     )
