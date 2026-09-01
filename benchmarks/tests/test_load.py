@@ -83,6 +83,7 @@ def test_load_runs_joins_trace_sizes_and_params():
 
 def test_only_successful_drops_failed_and_aborted():
     import pandas as pd
+
     from benchmarks.analysis.lib.load import only_successful
     df = pd.DataFrame({
         "process": ["A", "B", "C", "D"],

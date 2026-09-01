@@ -25,8 +25,10 @@
 # <RESULTS>/.launch/<run_id>/work, so nothing large is ever written to $HOME,
 # which is small and read-only inside the containers.
 #
-# The only thing written back into the checkout is benchmarks/paper_data/*.csv in
-# step 3 (a few hundred KB of tables); pull_to_ihc_method.sh reads them from there.
+# The only thing written back into the checkout is benchmarks/_handoff/arms/*.csv
+# in step 3 (a few hundred KB of tables and figures); pull_to_ihc_method.sh reads
+# them from there. The SWEEP's equivalents land in benchmarks/_handoff/sweep --
+# separate roots, because the two experiments write the same filenames.
 #
 # Prereq (login node, once): the benchmark lives on the `benchmarking` branch, so
 # the checkout must be on it --
@@ -89,8 +91,22 @@ echo "Using python: $PYTHON ($("$PYTHON" --version 2>&1))"
     exit 1
 }
 
-# Pin Nextflow: NF 26.x dropped the automatic lib/*.groovy class loading this
-# pipeline relies on (ParamUtils/CsvUtils) and rejects the CLI boolean forms below.
+# Pin Nextflow to 25.04.x. The pin STAYS, but its stated reasons are now stale in
+# both halves and are corrected here rather than left to mislead:
+#
+#   * "NF 26.x dropped the automatic lib/*.groovy class loading this pipeline
+#     relies on" -- it did not, or no longer does. The pipeline is verified
+#     end-to-end on 26.04.6, lib/ classes included (Layout, ParamUtils, Checkpoint
+#     are all exercised by tests/lib_probe.nf on both engines).
+#   * "rejects the CLI boolean forms below" -- true, and BROADER than booleans:
+#     NF26 delivers EVERY CLI param as a String, so integer axes are rejected too
+#     ("--reg_qc (1): Value is [string] but should be [integer]"). run_arms.sh and
+#     run_sweep.sh no longer pass any of them on the command line; they build a
+#     -params-file, which carries JSON types and works on both engines.
+#
+# What is left is that nothing has RUN on 26.x on this cluster. Lifting the pin is
+# a cluster experiment, not an edit -- do it deliberately, with one arm, before
+# trusting a whole benchmark to it.
 export NXF_VER="${NXF_VER:-25.04.7}"
 # Singularity image cache off read-only $HOME (matches conf/ieo.config's cacheDir).
 export SINGULARITY_CACHEDIR="${SINGULARITY_CACHEDIR:-/hpcnfs/scratch/P_DIMA_ATTEND/users/vfassi/docker_images}"
@@ -200,14 +216,22 @@ export ARMS_PROFILE="$PROFILES"
 echo "=================================================="
 echo "Arms finished: $(date)"
 echo
+# The arms and sweep experiments write to SEPARATE roots, and BOTH halves matter:
+# make_tables and make_figures each write nine filenames the other experiment also
+# writes. They shared benchmarks/paper_data (tables) and benchmarks/analysis
+# (figures) until 2026-08-25, so whichever analysis ran second silently overwrote
+# the first's, and pull_to_ihc_method.sh copied whatever was left into the
+# consumer. These are the same roots the Makefile's `arm-tables` target uses.
+# Guarded by benchmarks/tests/test_handoff_paths_are_disjoint.py.
 echo "Next, on a login node — emit the tables:"
 echo "    cd $SRC_DIR"
 echo "    python -m benchmarks.analysis.make_tables \\"
 echo "        --results-root $RESULTS --run-plan $BENCH_DIR/arm_plan.csv \\"
-echo "        --outdir benchmarks/paper_data"
+echo "        --outdir benchmarks/_handoff/arms"
 echo "    python -m benchmarks.analysis.make_figures \\"
 echo "        --results-root $RESULTS --run-plan $BENCH_DIR/arm_plan.csv \\"
-echo "        --outdir benchmarks/analysis"
+echo "        --reg-eval <aggregate_eval.csv | none> \\"
+echo "        --outdir benchmarks/_handoff/arms"
 echo
 echo "Then hand off to ihc_method (small QC artifacts only — the images stay here):"
 echo "    benchmarks/pull_to_ihc_method.sh $RESULTS <path-to>/ihc_method"

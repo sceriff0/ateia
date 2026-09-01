@@ -181,18 +181,22 @@ echo "=== 2/5  SWEEP tables -> data/benchmark/ ==="
 #   make_tables : runs_master, param_matrix, registration_accuracy,
 #                 registration_valis_rtre, segmentation_agreement, scaling_fits
 #   make_figures: measurements, resource_stats, run_cost
-# Preference order matters. benchmarks/_handoff/sweep is what --build writes and
-# is unambiguously the sweep. The legacy default outdirs are searched only as a
-# fallback, for a tree built before this script grew --sweep.
+# ONE source: benchmarks/_handoff/sweep, which is unambiguously the sweep's.
+#
+# There used to be two fallbacks -- benchmarks/paper_data and
+# benchmarks/analysis, the legacy default outdirs -- searched "for a tree built
+# before this script grew --sweep". They were the last surviving arm of the
+# collision this hand-off split exists to close: the ARMS experiment wrote those
+# same two directories (submit_arms.sh printed them as its documented next step)
+# and writes the same nine filenames, so a legacy tree could hold either
+# experiment's tables with nothing to tell them apart. Copying that into
+# data/benchmark/ produces an R page that renders cleanly with the wrong answer.
+#
+# Failing loudly, naming the target that rebuilds them, is strictly better.
 copied=0
-for d in "$SWEEP_TABLES" "$PIPELINE_DIR/benchmarks/paper_data" "$PIPELINE_DIR/benchmarks/analysis"; do
-  [[ -d "$d" ]] || continue
-  for f in "$d"/*.csv; do
-    [[ -e "$f" ]] || continue
-    # first writer wins, so _handoff/sweep is never overwritten by the legacy dirs
-    [[ -e "$DEST_BENCH/$(basename "$f")" ]] && continue
-    cp "$f" "$DEST_BENCH"/ && copied=$((copied + 1))
-  done
+for f in "$SWEEP_TABLES"/*.csv; do
+  [[ -e "$f" ]] || continue
+  cp "$f" "$DEST_BENCH"/ && copied=$((copied + 1))
 done
 
 # Name the tables the R pages actually open, so a missing one is visible here
@@ -206,9 +210,14 @@ done
 echo "  $copied table(s) copied"
 if [[ ${#missing[@]} -gt 0 ]]; then
   echo "  WARNING: not present: ${missing[*]}" >&2
-  echo "           Re-run with --sweep <results_root> --build, or generate them by hand:" >&2
-  echo "             $PY -m benchmarks.analysis.make_tables  --results-root R --run-plan P --outdir D" >&2
-  echo "             $PY -m benchmarks.analysis.make_figures --results-root R --run-plan P --outdir D" >&2
+  echo "           Looked ONLY in $SWEEP_TABLES. The two legacy fallback directories" >&2
+  echo "           were removed (see the comment above this block): the ARMS experiment" >&2
+  echo "           wrote those same directories and the same filenames, so a hit there" >&2
+  echo "           could silently have been the wrong experiment's tables." >&2
+  echo "           Re-run with --sweep <results_root> --build, or generate them by hand" >&2
+  echo "           INTO THE SWEEP ROOT:" >&2
+  echo "             $PY -m benchmarks.analysis.make_tables  --results-root R --run-plan P --outdir $SWEEP_TABLES" >&2
+  echo "             $PY -m benchmarks.analysis.make_figures --results-root R --run-plan P --outdir $SWEEP_TABLES" >&2
 fi
 
 echo "=== 3/5  ARM tables -> data/registration_arms/ ==="

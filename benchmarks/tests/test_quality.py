@@ -68,8 +68,10 @@ def test_harvest_registration_qc(tmp_path):
 
 
 def test_harvest_registration_qc_tolerates_bad_json(tmp_path):
-    plan = tmp_path / "plan.csv"; pd.DataFrame({"run_id": ["r0"]}).to_csv(plan, index=False)
-    d = tmp_path / "r0" / "out" / "P001" / "qc" / "registration"; d.mkdir(parents=True)
+    plan = tmp_path / "plan.csv"
+    pd.DataFrame({"run_id": ["r0"]}).to_csv(plan, index=False)
+    d = tmp_path / "r0" / "out" / "P001" / "qc" / "registration"
+    d.mkdir(parents=True)
     (d / "x_seg_qc.json").write_text("{ not json")
     assert quality.harvest_registration_qc(tmp_path, plan).empty   # no crash, just empty
 
@@ -101,23 +103,30 @@ def test_harvest_valis_rtre_and_per_run(tmp_path):
 
 
 def test_harvest_valis_rtre_tolerates_missing(tmp_path):
-    plan = tmp_path / "plan.csv"; pd.DataFrame({"run_id": ["r0"]}).to_csv(plan, index=False)
+    plan = tmp_path / "plan.csv"
+    pd.DataFrame({"run_id": ["r0"]}).to_csv(plan, index=False)
     assert quality.harvest_valis_rtre(tmp_path, plan).empty
     assert quality.valis_rtre_per_run(pd.DataFrame(columns=["run_id"])).empty
 
 
 # ── segmentation counts + agreement (injected mask reader) ──
 def _mk_seg_run(tmp_path, run_id, patient="P001"):
-    d = tmp_path / run_id / "out" / patient / "segment"; d.mkdir(parents=True, exist_ok=True)
-    p = d / f"{patient}_cell_mask.tif"; p.write_bytes(b""); return p
+    d = tmp_path / run_id / "out" / patient / "segment"
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / f"{patient}_cell_mask.tif"
+    p.write_bytes(b"")
+    return p
 
 
 def test_harvest_segmentation_counts(tmp_path):
-    plan = tmp_path / "plan.csv"; pd.DataFrame({"run_id": ["r0", "r1"]}).to_csv(plan, index=False)
-    _mk_seg_run(tmp_path, "r0"); _mk_seg_run(tmp_path, "r1")
+    plan = tmp_path / "plan.csv"
+    pd.DataFrame({"run_id": ["r0", "r1"]}).to_csv(plan, index=False)
+    _mk_seg_run(tmp_path, "r0")
+    _mk_seg_run(tmp_path, "r1")
     # r1 has a NON-contiguous label (5) for a single cell — distinct-count = 1 (correct); max-label = 5.
     masks = {"r0": np.array([[0, 1], [2, 3]]), "r1": np.array([[0, 0], [0, 5]])}
-    reader = lambda p: masks["r0" if "r0" in str(p) else "r1"]
+    def reader(p):
+        return masks["r0" if "r0" in str(p) else "r1"]
     out = quality.harvest_segmentation_counts(tmp_path, plan, reader=reader).set_index("run_id")
     assert out.loc["r0", "n_cells"] == 3 and out.loc["r1", "n_cells"] == 1
 
@@ -136,10 +145,13 @@ def test_instance_f1_iou_matching():
 def test_harvest_segmentation_counts_finds_global_default_location(tmp_path):
     # SEGMENT uses the global-default publishDir -> masks land at out/segment/ (NOT out/<patient>/...),
     # so the harvest must search recursively. Regression for the wrong */segment*/ glob.
-    plan = tmp_path / "plan.csv"; pd.DataFrame({"run_id": ["r0"]}).to_csv(plan, index=False)
-    d = tmp_path / "r0" / "out" / "segment"; d.mkdir(parents=True)   # no patient dir
+    plan = tmp_path / "plan.csv"
+    pd.DataFrame({"run_id": ["r0"]}).to_csv(plan, index=False)
+    d = tmp_path / "r0" / "out" / "segment"
+    d.mkdir(parents=True)   # no patient dir
     (d / "P001_cell_mask.tif").write_bytes(b"")
-    reader = lambda p: np.array([[0, 1], [2, 3]])
+    def reader(_p):
+        return np.array([[0, 1], [2, 3]])
     out = quality.harvest_segmentation_counts(tmp_path, plan, reader=reader)
     assert len(out) == 1 and out.iloc[0]["n_cells"] == 3
 
@@ -148,10 +160,12 @@ def test_segmentation_agreement_pairwise(tmp_path):
     plan = tmp_path / "plan.csv"
     pd.DataFrame({"run_id": ["s", "c"], "target_px": [4096, 4096], "n_channels": [2, 2],
                   "seg_method": ["stardist", "cellsam"]}).to_csv(plan, index=False)
-    _mk_seg_run(tmp_path, "s"); _mk_seg_run(tmp_path, "c")
+    _mk_seg_run(tmp_path, "s")
+    _mk_seg_run(tmp_path, "c")
     # contiguous labels 1..N (as real masks are relabeled), so max label == cell count
     m = {"s": np.array([[1, 1], [0, 2]]), "c": np.array([[1, 0], [0, 2]])}   # 2 vs 2 cells, partial overlap
-    reader = lambda p: m["s" if "/s/" in str(p) else "c"]
+    def reader(p):
+        return m["s" if "/s/" in str(p) else "c"]
     out = quality.segmentation_agreement(tmp_path, plan, reader=reader)
     assert len(out) == 1
     r = out.iloc[0]

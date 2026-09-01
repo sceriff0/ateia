@@ -86,21 +86,38 @@ col_val() {
   echo "${vals[$idx]:-}"
 }
 
-# add_param <flag> <value>: append `--flag value` ONLY when value is non-empty.
+# add_param <name> <value>: record `name=value` ONLY when value is non-empty.
 #
 # The blank check is load-bearing, not defensive. A tiled/STARE arm has NO
 # memory_mode and NO reg_micro_reg — those are VALIS-only params — so those cells
-# are legitimately blank. Passing `--memory_mode ""` would set the param to an
-# empty string rather than leave it at its default, and schema validation would
-# reject it (or worse, accept it and register at a configuration nobody chose).
-ARGS=()
-add_param() { [[ -n "${2:-}" ]] && ARGS+=("--$1" "$2") || true; }
+# are legitimately blank. Passing an empty value would set the param to an empty
+# string rather than leave it at its default, and schema validation would reject
+# it (or worse, accept it and register at a configuration nobody chose).
+#
+# These are collected as name=value pairs and written to a -params-file, NOT
+# passed as `--name value`. Nextflow 26 delivers every CLI param as a String and
+# nextflow_schema.json declares real types, so the command-line form fails
+# validateParameters() before a single task runs:
+#     * --reg_qc (1): Value is [string] but should be [integer]
+# 25.04.7 accepts it and 26.04.6 does not. JSON carries types; the coercion is
+# benchmarks/params_json.py, which reads each param's declared type out of the
+# schema rather than guessing from the text.
+PAIRS=()
+add_param() { [[ -n "${2:-}" ]] && PAIRS+=("$1=$2") || true; }
 
-launch() {                       # launch <run_id> <arm> <input> <outdir> <args...>
+launch() {                       # launch <run_id> <arm> <input> <outdir> <name=value...>
   local run_id="$1" arm="$2" in_csv="$3" outdir="$4"; shift 4
-  local run_args=("$@")
+  local run_pairs=("$@")
   local rundir="$ROOT/.launch/$run_id"
   mkdir -p "$rundir" "$outdir" "$outdir/trace"
+  # Typed params as JSON — see the add_param comment above for why this cannot be
+  # a list of --name value flags on Nextflow 26.
+  local run_params="$rundir/params.json"
+  if ! (cd "$PIPELINE_DIR" && python3 -m benchmarks.params_json --out "$run_params" \
+          ${run_pairs[@]+"${run_pairs[@]}"}); then
+    echo "[$run_id] SKIP: could not type its parameters against nextflow_schema.json" >&2
+    return 1
+  fi
   echo "[$run_id] arm=$arm -> $outdir"
   (
     cd "$rundir"
@@ -109,10 +126,10 @@ launch() {                       # launch <run_id> <arm> <input> <outdir> <args.
       -c "$BENCH_CONF" \
       -work-dir "$rundir/work" \
       -name "arms-$run_id" \
+      -params-file "$run_params" \
       --input "$in_csv" \
       --outdir "$outdir" \
       --trace_dir "$outdir/trace" \
-      "${run_args[@]}" \
       "${EXTRA_ABS[@]+"${EXTRA_ABS[@]}"}" \
       > "$outdir/nextflow.stdout.log" 2> "$outdir/nextflow.stderr.log" \
       || {
@@ -212,7 +229,7 @@ run_pass() {
       continue
     fi
 
-    ARGS=()
+    PAIRS=()
     add_param start                "$start"
     add_param stop                 "$stop"
     add_param seg_method           "$(col_val seg_method "${vals[@]}")"
@@ -249,7 +266,7 @@ run_pass() {
     fi
 
     reap
-    launch "$run_id" "$arm" "$in_csv" "$ROOT/$arm" "${ARGS[@]}" &
+    launch "$run_id" "$arm" "$in_csv" "$ROOT/$arm" ${PAIRS[@]+"${PAIRS[@]}"} &
     pids+=($!)
   done < <(tail -n +2 "$PLAN" | tr -d '\r')
 }

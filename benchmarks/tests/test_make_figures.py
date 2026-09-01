@@ -9,7 +9,7 @@ def test_run_produces_config_and_figures(tmp_path):
     result = make_figures.run(
         results_root=FIX / "runs",
         run_plan_csv=FIX / "runs_run_plan.csv",
-        reg_eval_csv=None,
+        reg_eval_csv=FIX / "reg_eval_min.csv",
         outdir=tmp_path,
     )
     # tidy frame has the 2 runs x 2 processes
@@ -27,7 +27,7 @@ def test_run_writes_tidy_csvs(tmp_path):
 
     res = make_figures.run(
         results_root=FIX / "runs", run_plan_csv=FIX / "runs_run_plan.csv",
-        reg_eval_csv=None, outdir=tmp_path,
+        reg_eval_csv=FIX / "reg_eval_min.csv", outdir=tmp_path,
     )
 
     meas = pd.read_csv(res["measurements_csv"])
@@ -52,15 +52,17 @@ def test_run_emits_an_optimized_config_with_live_blocks(tmp_path):
     """
     make_figures.run(
         results_root=FIX / "runs", run_plan_csv=FIX / "runs_run_plan.csv",
-        reg_eval_csv=None, outdir=tmp_path,
+        reg_eval_csv=FIX / "reg_eval_min.csv", outdir=tmp_path,
     )
     assert (tmp_path / "modules.optimized.config").read_text().count("withName") >= 2
 
 
 def test_run_accepts_formats_and_writes_png(tmp_path):
-    res = make_figures.run(
+    # Return value deliberately unused: what `formats=` controls is which FILES land
+    # on disk, which is what the globs below assert.
+    make_figures.run(
         results_root=FIX / "runs", run_plan_csv=FIX / "runs_run_plan.csv",
-        reg_eval_csv=None,
+        reg_eval_csv=FIX / "reg_eval_min.csv",
         outdir=tmp_path, formats=("png",),
     )
     pngs = list((tmp_path / "figures").glob("scaling_*.png"))

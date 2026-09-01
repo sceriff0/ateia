@@ -33,7 +33,6 @@ REPO_ROOT = BENCH.parent
 ARMS_YAML = BENCH / "configs" / "arms.yaml"
 
 
-
 def _param_checker():
     path = REPO_ROOT / "tests" / "check_param_consistency.py"
     # That module imports its sibling `_code_view` flat; loading a file by path does

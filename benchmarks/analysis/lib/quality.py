@@ -22,6 +22,15 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .contract import identity_columns, load_sweep
+
+# The two experiment definitions. run_cost_summary serves BOTH -- the Makefile's
+# `arm-tables` target runs make_tables against the arms results root -- so the
+# identity is the union of what either varies, filtered per table by
+# `if c in df.columns`.
+SWEEP_PATH = Path(__file__).resolve().parents[2] / "configs" / "sweep.yaml"
+ARMS_PATH = Path(__file__).resolve().parents[2] / "configs" / "arms.yaml"
+
 # Processes that run on the GPU (approximate — for a GPU-hours estimate).
 GPU_LEAVES = {"SEGMENT", "QUANTIFY", "EXTRACT_CELL_PROPERTIES", "GENERATE_POSTPROCESSING_QC"}
 
@@ -229,7 +238,9 @@ def instance_f1(ma, mb, iou_thresh=0.5) -> dict:
             break
         if al[k] in used_a or bl[k] in used_b:
             continue
-        used_a.add(int(al[k])); used_b.add(int(bl[k])); matched += 1
+        used_a.add(int(al[k]))
+        used_b.add(int(bl[k]))
+        matched += 1
     precision = matched / nb
     recall = matched / na
     f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
@@ -290,14 +301,19 @@ def run_cost_summary(runs_df: pd.DataFrame) -> pd.DataFrame:
     df = runs_df.copy()
     df["_leaf"] = df["process"].map(_leaf)
     key = "run_id" if "run_id" in df.columns else "config_id"
-    carry = [c for c in ("varied_axis", "target_px", "n_channels", "n_register_images",
-                         "registration_method", "memory_mode", "reg_micro_reg",
-                         "reg_tiled_tile", "reg_tiled_gate_tre", "reg_tiled_coarse_max_dim",
-                         # ashlar's grid granularity is its fairness knob against
-                         # reg_tiled_tile; without it here two ashlar arms that differ only by
-                         # tile size collapse into indistinguishable rows.
-                         "reg_ashlar_tile", "seg_method",
-                         "config_id", "rep") if c in df.columns]
+    # DERIVED, never hardcoded. This was 14 columns maintained by hand against a
+    # sweep with 30+ axes, and it is the carry that actually RUNS -- make_tables'
+    # 33-entry CONFIG_COLS was documentation nothing imported. Axes missing from
+    # this list do not reach any table, so two runs differing only on them produce
+    # the same row: reg_max_image_dim was swept over [2000, 4000, 8000] and absent,
+    # and sweep.yaml itself calls it the dominant runtime-and-accuracy axis of
+    # VALIS.
+    #
+    # `if c in df.columns` is kept: a run plan from a DIFFERENT sweep (the arms
+    # experiment, or an older results tree) carries a different column set, and a
+    # missing column must degrade the table rather than raise.
+    wanted = identity_columns(load_sweep(SWEEP_PATH), load_sweep(ARMS_PATH))
+    carry = [c for c in wanted if c in df.columns and c != key]
     out = []
     for run, g in df.groupby(key):
         rt = g["realtime_s"].fillna(0)

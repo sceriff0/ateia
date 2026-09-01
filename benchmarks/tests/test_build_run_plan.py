@@ -1,6 +1,6 @@
 import importlib.util
-import sys
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -449,6 +449,27 @@ def test_project_sweep_enables_qc_signals():
     assert sweep["baseline"]["reg_qc"] == 2                       # staged registration QC (dice + displacement)
 
 
+# Baseline values that deliberately DIFFER from the shipped default, each with the
+# reason. Kept deliberately small and specific: the baseline run is supposed to BE
+# the shipped config, and every entry here is a place where it is not.
+#
+# An entry whose pipeline default has caught up with the baseline is a hard failure
+# below, not a silent pass -- the same shrink-only discipline the debt allowlists in
+# tests/ follow. A stale exemption is how the seg_method desync survived.
+BASELINE_DEVIATIONS = {
+    "cleanup_level": (
+        "The pipeline ships 'final' (publish final artifacts only); the sweep pins "
+        "'none'. The analysis layer READS published intermediates -- "
+        "analysis/lib/quality.py::_cell_masks rglobs the run's out/ for "
+        "*_cell_mask.tif, and 'segmentation' is an INTERMEDIATE kind "
+        "(Layout.FINAL_KINDS), so at the shipped default those masks are never "
+        "published and the cell-count metric silently returns no rows while every "
+        "run exits 0. registration_eval reads the registered slides for the same "
+        "reason. Benchmarking 'final' is worth doing one day, but it needs an "
+        "analysis that does not depend on the files it removes."),
+}
+
+
 def test_project_sweep_baseline_matches_pipeline_defaults():
     """Every baseline value must equal the shipped nextflow.config default.
 
@@ -458,6 +479,10 @@ def test_project_sweep_baseline_matches_pipeline_defaults():
     sweep kept claiming stardist was the pipeline default, because seg_method was never asserted.
     Deriving the expected values means a new pipeline default cannot silently desync the baseline --
     the same approach tests/check_param_consistency.py takes for the schema.
+
+    BASELINE_DEVIATIONS above is the escape hatch, and it is narrow on purpose: a
+    deviation has to be written down with its reason, and it stops being allowed the
+    moment the pipeline default agrees with it again.
     """
     import yaml
     base = yaml.safe_load(
@@ -470,6 +495,8 @@ def test_project_sweep_baseline_matches_pipeline_defaults():
     checked = 0
     for name, baseline_value in base.items():
         if name in synthetic:
+            continue
+        if name in BASELINE_DEVIATIONS:
             continue
         assert name in config_defaults, (
             f"sweep baseline sets '{name}', which is not a pipeline param in nextflow.config"
@@ -487,6 +514,39 @@ def test_project_sweep_baseline_matches_pipeline_defaults():
         checked += 1
 
     assert checked > 20, f"only {checked} baseline params checked -- parser likely broke"
+
+
+def test_every_baseline_deviation_is_still_a_deviation():
+    """A deviation the pipeline has caught up with is a stale exemption, and a stale
+    exemption is how the seg_method desync survived: the entry keeps a param out of
+    the check above forever, so the NEXT divergence on that param is invisible.
+
+    Also asserts each entry is a real baseline key -- an entry naming a param the
+    sweep no longer sets exempts nothing and should be deleted.
+    """
+    import yaml
+    base = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())["baseline"]
+    config_defaults = pipeline_param_defaults()
+
+    problems = []
+    for name in BASELINE_DEVIATIONS:
+        if name not in base:
+            problems.append(
+                f"BASELINE_DEVIATIONS names '{name}', which the sweep baseline does not "
+                f"set -- the entry exempts nothing; delete it"
+            )
+            continue
+        expected = config_defaults.get(name)
+        if isinstance(expected, Unparsed):
+            continue
+        if base[name] == expected:
+            problems.append(
+                f"BASELINE_DEVIATIONS names '{name}', but the baseline value "
+                f"{base[name]!r} now EQUALS the pipeline default. The deviation is "
+                f"gone; delete the entry so the param is checked again."
+            )
+    assert not problems, "\n".join(problems)
 
 
 def test_project_sweep_all_configs_share_columns():
@@ -570,8 +630,20 @@ NOT_SWEPT = {
     # benchmark.config, because a `-c` file overrides a profile's params and would clobber
     # the site ceiling.
     "max_cpus": "resourceLimits clamp — a site ceiling; varying it benchmarks the machine",
-    "max_memory": "resourceLimits clamp — a site ceiling; varying it benchmarks the machine",
-    "max_time": "resourceLimits clamp — a site ceiling; varying it benchmarks the machine",
+    "max_memory": "resourceLimits clamp — see max_cpus",
+    "max_time": "resourceLimits clamp — see max_cpus",
+    "concurrency": (
+        "cluster concurrency, not pipeline cost — the single coupled knob max_forks and "
+        "queue_size are now derived from (5 -> 5/20, the shipped ratio). Same category and "
+        "the same reasoning as those two below: varying it changes how fast the SWEEP "
+        "drains, never what a task costs, so it benchmarks the machine. Note it is derived "
+        "in the executor/process scopes rather than in the params block, because the params "
+        "block is evaluated BEFORE the CLI is applied and a derived default there would "
+        "silently ignore --concurrency."),
+    "config_profile_name": (
+        "nf-core provenance string, printed in the run header and the QC report. Null by "
+        "default and set by a site profile; it has no cost curve and reaches no task."),
+    "config_profile_description": "nf-core provenance string — see config_profile_name",
     "max_forks": (
         "cluster concurrency, not pipeline cost. It caps how many tasks of one process run "
         "at once, so varying it changes how fast the SWEEP drains, never what a task costs. "
@@ -733,3 +805,89 @@ def test_every_not_swept_entry_states_a_reason():
     for name, reason in NOT_SWEPT.items():
         assert isinstance(reason, str) and len(reason) > 15, (
             f"NOT_SWEPT['{name}'] must state a real reason, got {reason!r}")
+
+
+def _schema_enum(name):
+    """The enum nextflow_schema.json declares for a param."""
+    import json
+
+    doc = json.loads((REPO_ROOT / "nextflow_schema.json").read_text())
+
+    def walk(node):
+        if isinstance(node, dict):
+            entry = (node.get("properties") or {}).get(name)
+            if isinstance(entry, dict) and "enum" in entry:
+                return entry["enum"]
+            for value in node.values():
+                hit = walk(value)
+                if hit:
+                    return hit
+        elif isinstance(node, list):
+            for value in node:
+                hit = walk(value)
+                if hit:
+                    return hit
+        return None
+
+    return walk(doc)
+
+
+def test_every_shipped_registration_method_is_actually_swept():
+    """`ashlar` is a schema-valid registration_method with three params and its
+    own adapter, and registration_method_grid contained only `tiled`.
+
+    The existing coverage guard passed anyway, because it counts a param as
+    covered when it merely appears in `baseline` -- so "declared and never
+    varied" was indistinguishable from "swept". Appearing in baseline is a
+    DEFAULT, not coverage: every run shares it, so nothing is being measured
+    against anything.
+
+    The enum is read from the schema rather than restated, so a fourth backend
+    is covered the day it is added.
+    """
+    import yaml
+
+    shipped = set(_schema_enum("registration_method") or [])
+    assert shipped, "registration_method has no enum in nextflow_schema.json"
+    sweep = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+    grid = sweep.get("registration_method_grid") or {}
+    swept = set(grid) if isinstance(grid, dict) else {
+        e.get("registration_method") for e in grid
+    }
+    # The baseline method is the anchor every OFAT run uses, so it IS measured
+    # even though it has no grid block of its own.
+    swept.add(sweep["baseline"].get("registration_method"))
+    missing = shipped - swept
+    assert not missing, (
+        f"shipped but never benchmarked: {sorted(missing)} -- a backend the "
+        f"pipeline offers and the paper never measures. Add a "
+        f"registration_method_grid block for it, or remove it from the schema "
+        f"enum; a third option is not honest."
+    )
+
+
+def test_baseline_membership_does_not_count_as_coverage():
+    """The specific weakness the check above closes, asserted on the mechanism.
+
+    A param that appears ONLY in `baseline` must not show up in the swept-axis
+    set. If it did, `identity_columns` would claim it identifies a run while
+    every run shares its value -- and the coverage guard would count it as
+    benchmarked.
+    """
+    import yaml
+
+    from benchmarks.analysis.lib import contract
+
+    sweep = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+    axes = contract.axes(sweep)
+    baseline_only = set(sweep.get("baseline") or {}) - axes
+    assert baseline_only, (
+        "every baseline entry is also swept, so this guard is checking an empty "
+        "set -- cleanup_level and the tier-owned nulls should be in here"
+    )
+    assert not (baseline_only & axes), (
+        f"declared-only params leaked into the axis set: "
+        f"{sorted(baseline_only & axes)}"
+    )

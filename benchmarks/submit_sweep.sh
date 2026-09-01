@@ -164,10 +164,24 @@ export SWEEP_PROFILE="$PROFILES"
 
 echo "=================================================="
 echo "Sweep finished: $(date)"
+# The arms and sweep experiments write to SEPARATE roots, and BOTH halves matter:
+# make_tables and make_figures each write nine filenames the other experiment also
+# writes. They shared benchmarks/paper_data (tables) and benchmarks/analysis
+# (figures) until 2026-08-25, so whichever analysis ran second silently overwrote
+# the first's. These are the same roots the Makefile's `sweep-tables` target uses.
+# Guarded by benchmarks/tests/test_handoff_paths_are_disjoint.py.
 echo "Next (login node) — emit the paper DATA tables:"
 echo "    python -m benchmarks.analysis.make_tables \\"
-echo "        --results-root $RESULTS --run-plan $RUN_PLAN --outdir benchmarks/paper_data"
-echo "Optional figures + derived config:"
+echo "        --results-root $RESULTS --run-plan $RUN_PLAN --outdir benchmarks/_handoff/sweep"
+# --reg-eval is REQUIRED by make_figures: it carries the landmark TRE from
+# benchmarks/registration_eval/, the benchmark's only GROUND-TRUTH registration
+# accuracy number, and it used to sit unread in that function's signature so the
+# number reached no table and no figure. Pass `none` to run deliberately without
+# it -- that writes NO_GROUND_TRUTH.txt into the output, so a cost-only result
+# says so in the deliverable instead of reading like a complete one.
+echo "Figures + derived config (make_figures also emits the accuracy-vs-cost table):"
 echo "    python -m benchmarks.analysis.make_figures \\"
-echo "        --results-root $RESULTS --run-plan $RUN_PLAN --outdir benchmarks/analysis"
+echo "        --results-root $RESULTS --run-plan $RUN_PLAN \\"
+echo "        --reg-eval <aggregate_eval.csv | none> \\"
+echo "        --outdir benchmarks/_handoff/sweep"
 echo "=================================================="

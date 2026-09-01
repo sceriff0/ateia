@@ -34,34 +34,22 @@ from .lib import load, quality, regress
 # swept at fixed input piles many points at one x and corrupts the regression). Mirrors make_figures.
 SIZE_VARYING_AXES = {"baseline", "scaling_grid", "registration_grid", "target_px", "n_channels"}
 
-# Config columns carried onto the master/param tables (present depending on the sweep). This is the
-# run's IDENTITY: every knob sweep.yaml varies belongs here, or two runs that differ only by that knob
-# become indistinguishable rows in the paper tables. Columns absent from a given sweep are simply not
-# carried, so listing a param the current sweep does not vary is harmless.
+# The run's IDENTITY -- which config columns reach the tables -- is NOT decided
+# here. It is derived from benchmarks/configs/sweep.yaml by
+# benchmarks/analysis/lib/contract.py and applied in quality.run_cost_summary,
+# whose output is the config half of every table build_runs_master assembles.
 #
-# registration_method (valis|tiled) + reg_micro_reg (micro-reg depth 0/1/2) replace the old boolean
-# skip_micro_registration, which was removed on main; reg_tiled_* are the STARE knobs swept by
-# registration_method_grid. STARE has a single execution shape (the per-tile fan-out).
-CONFIG_COLS = (
-    "varied_axis", "target_px", "n_channels", "n_register_images",
-    # registration
-    "registration_method", "memory_mode", "reg_micro_reg", "reg_jvm_heap_gb",
-    "reg_tiled_tile", "reg_tiled_gate_tre", "reg_tiled_coarse_max_dim",
-    "reg_ashlar_tile",
-    # preprocessing — the pipeline exposes exactly these three (see sweep.yaml)
-    "skip_preprocessing", "preproc_skip_nuclear", "preproc_tile_size",
-    # segmentation (per-backend knobs, crossed by segmentation_grid)
-    "seg_method", "seg_gpu", "seg_n_tiles_x", "seg_n_tiles_y",
-    "seg_instantseg_tile_size", "seg_instantseg_batch_size",
-    "seg_cellsam_block_size", "seg_cellsam_bbox_threshold",
-    # quantification + export
-    "quantify_compartments", "expanded_quantification",
-    "skip_spatialdata_export", "spatialdata_include_image",
-    "compression", "pyramid_resolutions", "tilex",
-    "simplify_tolerance", "geojson_coord_precision",
-    # measurement settings — comparable on COST only (see sweep.yaml caveats)
-    "reg_qc",
-)
+# A 33-entry tuple used to sit at this spot, documented as exactly that and
+# imported by NOTHING -- the only occurrence of its name in the tree was its own
+# definition -- while the carry that actually ran was 14 hardcoded columns in
+# quality.py. Two swept axes were missing from that one, so runs differing only
+# on them produced indistinguishable rows in the paper tables, including
+# reg_max_image_dim, which sweep.yaml itself calls the dominant
+# runtime-and-accuracy axis of VALIS.
+#
+# Do not reintroduce a constant here. A second name for the run's identity is
+# precisely how that drift started: the authoritative-looking one went stale
+# because nothing depended on it.
 
 
 def _size_varying(runs_df: pd.DataFrame) -> pd.DataFrame:

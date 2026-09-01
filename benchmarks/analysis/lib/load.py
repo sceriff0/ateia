@@ -151,3 +151,54 @@ def load_runs(results_root, run_plan_csv) -> pd.DataFrame:
         rows.append(t)
     df = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
     return df
+
+
+# The ground-truth accuracy columns aggregate_eval.py emits per (pair_id, mode).
+# Only the landmark-derived ones: valis_rtre/stare_* are METHOD-NATIVE self-reports
+# (each method scoring its own transform), which is a different claim and already
+# has its own table via quality.harvest_valis_rtre.
+GROUND_TRUTH_COLS = (
+    "true_median_px", "true_mean_px", "true_p90_px",
+    "true_median_rtre", "true_median_um", "true_p90_um",
+)
+
+
+def load_reg_eval(reg_eval_csv) -> pd.DataFrame:
+    """Landmark TRE per registration METHOD, ready to join onto the run table.
+
+    This is the benchmark's only GROUND-TRUTH registration accuracy number --
+    ANHIR/ACROBAT expert landmarks, warped through each method's transform. It
+    used to reach nothing: `make_figures.run()` took `reg_eval_csv` in its
+    signature, its docstring and its call site and never read it in the body,
+    and every test passed None, so nothing could detect it.
+
+    KEYED ON METHOD, NOT ON run_id, and that is not a shortcut. The registration
+    evaluation is a separate experiment: benchmarks/registration_eval/ registers
+    a fixed set of landmark PAIRS with each method and writes one row per
+    (pair_id, mode), where `mode` is the registration method name
+    (run_registration.sh loops `for method in valis tiled`). There is no run_id
+    in it and there cannot be -- the pairs are not sweep runs. So the honest join
+    is "this run used method M, and M's measured ground-truth TRE is X", with the
+    median taken across pairs.
+
+    The returned frame is keyed `registration_method` so it merges directly onto
+    the run table, and its columns are prefixed `gt_` so a reader cannot mistake
+    a per-method constant for a per-run measurement.
+    """
+    df = pd.read_csv(reg_eval_csv)
+    if "mode" not in df.columns:
+        raise ValueError(
+            f"{reg_eval_csv} has no 'mode' column; it does not look like the output "
+            f"of benchmarks/registration_eval/aggregate_eval.py"
+        )
+    present = [c for c in GROUND_TRUTH_COLS if c in df.columns]
+    if not present:
+        raise ValueError(
+            f"{reg_eval_csv} carries none of the ground-truth columns "
+            f"{list(GROUND_TRUTH_COLS)}; joining it would add nothing"
+        )
+    out = df.groupby("mode")[present].median(numeric_only=True).reset_index()
+    out["gt_n_pairs"] = df.groupby("mode")[present[0]].count().values
+    return out.rename(
+        columns={"mode": "registration_method", **{c: f"gt_{c}" for c in present}}
+    )

@@ -1,3 +1,3 @@
-run_id,varied_axis,target_px,n_channels,memory_mode
-run0000,baseline,4096,2,medium
-run0001,target_px,8192,2,medium
+run_id,varied_axis,target_px,n_channels,memory_mode,registration_method
+run0000,baseline,4096,2,medium,valis
+run0001,target_px,8192,2,medium,valis

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+
 from benchmarks.generate_matrix import compute_target_shape, synthesize_channels
 
 
@@ -108,6 +109,7 @@ def test_compute_target_shape_rejects_zero_dimension():
 
 def test_run_matrix_preserves_uint16_dtype(tmp_path):
     import tifffile
+
     from benchmarks.generate_matrix import run_matrix
 
     src = tmp_path / "src16.tif"
@@ -131,6 +133,7 @@ def test_run_matrix_preserves_uint16_dtype(tmp_path):
 
 def test_run_matrix_writes_cells_and_manifest(tmp_path):
     import tifffile
+
     from benchmarks.generate_matrix import run_matrix
 
     src = tmp_path / "src.tif"
@@ -159,6 +162,7 @@ def test_run_matrix_writes_cells_and_manifest(tmp_path):
 
 def test_run_matrix_paired_writes_moving_with_distinct_channels(tmp_path):
     import tifffile
+
     from benchmarks.generate_matrix import run_matrix
     src = tmp_path / "s.tif"
     tifffile.imwrite(src, np.full((200, 100), 100, dtype=np.uint8))
@@ -176,6 +180,7 @@ def test_run_matrix_paired_writes_moving_with_distinct_channels(tmp_path):
 
 def test_run_matrix_n_moving_writes_distinct_panels(tmp_path):
     import tifffile
+
     from benchmarks.generate_matrix import run_matrix
     src = tmp_path / "s.tif"
     tifffile.imwrite(src, np.full((200, 100), 100, dtype=np.uint8))
@@ -211,6 +216,7 @@ def test_derive_from_sweep_computes_matrix_shape(tmp_path):
 def test_derive_from_sweep_matches_repo_sweep():
     """The shipped sweep.yaml derives a self-consistent matrix (no manual --n-moving sync)."""
     from pathlib import Path
+
     from benchmarks.generate_matrix import derive_from_sweep
     d = derive_from_sweep(Path(__file__).parents[1] / "configs" / "sweep.yaml")
     assert d["n_moving"] == 7 and d["paired"] is True
@@ -223,6 +229,7 @@ def test_derive_from_sweep_matches_repo_sweep():
 
 def test_derive_moving_map_matches_registration_grid():
     from pathlib import Path
+
     from benchmarks.generate_matrix import derive_from_sweep
     d = derive_from_sweep(Path(__file__).parents[1] / "configs" / "sweep.yaml")
     mm = d["n_moving_map"]
@@ -236,6 +243,7 @@ def test_derive_moving_map_matches_registration_grid():
 
 def test_run_matrix_moving_map_generates_per_cell_counts(tmp_path):
     import tifffile
+
     from benchmarks.generate_matrix import run_matrix
     src = tmp_path / "s.tif"
     tifffile.imwrite(src, np.full((64, 64), 100, dtype=np.uint8))
@@ -251,6 +259,7 @@ def test_run_matrix_moving_map_generates_per_cell_counts(tmp_path):
 
 def test_run_matrix_default_unpaired_manifest_columns_unchanged(tmp_path):
     import tifffile
+
     from benchmarks.generate_matrix import run_matrix
     src = tmp_path / "s.tif"
     tifffile.imwrite(src, np.full((80, 80), 100, dtype=np.uint8))
@@ -272,6 +281,7 @@ def test_bioio_only_suffixes_are_a_subset_of_the_pipeline_format_table():
     """
     import re
     from pathlib import Path
+
     from benchmarks.generate_matrix import _BIOIO_ONLY_SUFFIXES
 
     repo = Path(__file__).resolve().parents[2]
@@ -289,7 +299,9 @@ def test_nd2_without_bioio_fails_with_an_actionable_message(tmp_path, monkeypatc
     """tifffile.imread on an ND2 raises a bare 'cannot determine format', which
     reads like a corrupt file rather than a missing dependency."""
     import builtins
+
     import pytest
+
     from benchmarks.generate_matrix import _read_source_2d
 
     real_import = builtins.__import__
@@ -322,7 +334,9 @@ def test_only_one_synthesized_stack_is_alive_at_a_time(tmp_path, monkeypatch):
     -- the previous one must have been released before the next is allocated.
     """
     import weakref
+
     import numpy as np
+
     from benchmarks import generate_matrix as gm
 
     alive, seen_max = [], []

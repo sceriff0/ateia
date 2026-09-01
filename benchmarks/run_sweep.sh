@@ -158,15 +158,33 @@ while IFS=',' read -r -a vals; do
   #     `--config_id cfg000 --rep 0`; nextflow_schema.json sets additionalProperties:true so nf-schema
   #     tolerated them, but they are still undeclared params and would become hard validation errors the
   #     moment the schema is tightened.
-  params=()
+  #
+  # These become a -params-file, NOT `--<name> <value>` flags. Nextflow 26 delivers
+  # every CLI param as a String and nextflow_schema.json declares real types, so the
+  # command-line form fails validateParameters() before a single task runs:
+  #     * --reg_qc (1): Value is [string] but should be [integer]
+  # 25.04.7 accepts it and 26.04.6 does not, so the whole sweep was unlaunchable on
+  # the engine this pipeline is verified on -- and it would have failed at LAUNCH,
+  # on the cluster, after the matrix had already been generated. JSON carries types.
+  # benchmarks/params_json.py does the coercion, reading each param's declared type
+  # out of the schema rather than guessing from the text; it is unit-tested in
+  # benchmarks/tests/test_params_json.py.
+  pairs=()
   for i in "${!cols[@]}"; do
     k="${cols[$i]}"
     case "$k" in run_id|varied_axis|config_id|rep|target_px|n_channels|n_register_images) continue;; esac
-    # Skip EMPTY values (a null/blank cell, e.g. reg_jvm_heap_gb: null) — passing `--param ""` would
-    # override the pipeline default with an empty string. Empty means "use the pipeline default".
+    # Skip EMPTY values (a null/blank cell, e.g. reg_jvm_heap_gb: null) — an empty
+    # value would override the pipeline default with an empty string. Empty means
+    # "use the pipeline default".
     [[ -z "${vals[$i]:-}" ]] && continue
-    params+=("--${k}" "${vals[$i]}")
+    pairs+=("${k}=${vals[$i]}")
   done
+  run_params="$run_dir/params.json"
+  if ! (cd "$PIPELINE_DIR" && python3 -m benchmarks.params_json --out "$run_params" \
+          ${pairs[@]+"${pairs[@]}"}); then
+    echo "ERROR: $run_id — could not type its parameters against nextflow_schema.json; SKIPPING" >&2
+    continue
+  fi
 
   echo ">>> $run_id (varied=${varied_axis}, cell=$cell_id)"
   # Launch in the background FROM the per-run dir, so each run's .nextflow/ (history+cache), work dir,
@@ -176,8 +194,9 @@ while IFS=',' read -r -a vals; do
     cd "$run_dir" && nextflow -log nextflow.log run "$PIPELINE_DIR" -profile "$PROFILE" \
       -c "$PIPELINE_DIR/benchmarks/configs/benchmark.config" \
       -work-dir work -name "bench_${run_id}" \
+      -params-file "$run_params" \
       --input "$sheet" --outdir out --trace_dir trace \
-      "${params[@]}" ${EXTRA_ABS[@]+"${EXTRA_ABS[@]}"} \
+      ${EXTRA_ABS[@]+"${EXTRA_ABS[@]}"} \
       && echo "RUN OK: $run_id" || echo "RUN FAILED: $run_id" >&2
   ) &
   pids+=("$!")
