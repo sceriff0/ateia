@@ -237,6 +237,38 @@ def test_the_scanned_files_actually_install_something():
     )
 
 
+# The requirements/ files CI actually installs, as a NAMED SET rather than a count.
+# Measured 2026-09-01 on ci/phase-6-7 (CI redesign Phase 7):
+#   _test-suite.yml::python-tests    ci.txt, torch-cpu.txt, kornia.txt
+#   _test-suite.yml::nextflow-stub   testdata.txt
+#   _test-suite.yml::nf-test-stub    testdata.txt
+#   _test-suite.yml::security-tests  testdata.txt
+#   _test-suite.yml::ruff            lint.txt
+#   nightly.yml::nf-test-real        testdata.txt
+#   nightly.yml::nf-test-integration testdata.txt
+# requirements/nf-core.txt was in this set until Phase 7 deleted the `nf-core lint`
+# job that installed it; no released nf-core/tools version can lint this repository
+# (the nf-core tools config at the repository root carries the version-by-version
+# measurement in its header), so the job went rather than the pin.
+#
+# THAT PARENTHESIS IS DELIBERATELY NOT WRITTEN AS THE FILENAME, and the reason is
+# worth one sentence because it bit twice in five minutes. tests/test_nfmodel.py
+# discovers "guards that read Nextflow source" by a SUBSTRING test for the Nextflow
+# file extension, and the nf-core config filename starts with that same substring --
+# so naming the file here got this module reported as a private Nextflow parser,
+# which it is not. Writing the explanation out then tripped it a second time.
+# Recorded rather than worked around in silence: the heuristic has the same false
+# positive on tests/test_test_profile_fixture_compat.py today, and tightening it to
+# a non-word-boundary form drops exactly those two and nothing else (measured).
+EXPECTED_CI_REQUIREMENTS = {
+    "requirements/ci.txt",
+    "requirements/torch-cpu.txt",
+    "requirements/kornia.txt",
+    "requirements/testdata.txt",
+    "requirements/lint.txt",
+}
+
+
 def test_ci_still_installs_the_files_it_is_supposed_to():
     """The real non-vacuity floor, and the reason the invocation count above can be 1.
 
@@ -257,11 +289,40 @@ def test_ci_still_installs_the_files_it_is_supposed_to():
                 per_job[f"{wf.relative_to(ROOT).as_posix()}::{name}"] = installed
 
     distinct = {req for files in per_job.values() for req in files}
-    assert len(distinct) >= 5, (
-        "CI resolves to fewer than five distinct requirements/ files across every job, "
-        f"which means the installs have gone somewhere tests/ci_actions.py cannot follow: "
-        f"{per_job}"
+
+    # TWO CHECKS, NOT ONE, AND THE REASON IS THE MESSAGE RATHER THAN THE NUMBER.
+    # This was a bare `len(distinct) >= 5`, and after Phase 7 deleted the nf-core lint
+    # job (and requirements/nf-core.txt with it) the resolved set is EXACTLY five. So
+    # the next routine consolidation -- folding requirements/kornia.txt into
+    # requirements/testdata.txt, say, which changes no behaviour -- would have gone red
+    # saying "the installs have gone somewhere tests/ci_actions.py cannot follow",
+    # which is not what happened and sends the reader to the wrong file.
+    #
+    # The tripwire and the inventory are different questions, so they are asked
+    # separately: a floor far below any plausible consolidation catches a resolver
+    # that stopped resolving, and an exact set catches a change to WHICH files CI
+    # installs -- naming the difference in both directions, so the failure text says
+    # what actually changed.
+    assert len(distinct) >= 3, (
+        f"CI resolves to only {len(distinct)} distinct requirements/ file(s) across "
+        "every job. That is far below anything a consolidation would produce, so the "
+        "installs have gone somewhere tests/ci_actions.py cannot follow -- fix the "
+        f"resolver, not this number: {per_job}"
     )
+    if distinct != EXPECTED_CI_REQUIREMENTS:
+        gone = sorted(EXPECTED_CI_REQUIREMENTS - distinct)
+        new_files = sorted(distinct - EXPECTED_CI_REQUIREMENTS)
+        raise AssertionError(
+            "the set of requirements/ files CI installs has changed.\n"
+            f"  no longer installed: {gone or 'none'}\n"
+            f"  newly installed:     {new_files or 'none'}\n"
+            "If a file was CONSOLIDATED into another or a job was deleted, that is a "
+            "normal change: update EXPECTED_CI_REQUIREMENTS in the same commit and "
+            "this test is done. If a file went missing with no such change, a job "
+            "stopped installing something it needs -- and a missing pin is how this "
+            "suite once ran with no cv2 and 29 tests silently deselected.\n"
+            f"Per job: {per_job}"
+        )
     for req in sorted(distinct):
         assert (REQUIREMENTS_DIR / Path(req).name).is_file(), (
             f"a CI job installs {req}, which does not exist. Either the file was deleted "
