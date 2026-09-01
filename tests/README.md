@@ -65,6 +65,16 @@ def test_compute_cell_intensities_simple():
 pytest -v tests/
 ```
 
+**The floor (`MIRAGE_STRICT_SKIPS`)**: 39 modules here `pytest.importorskip` at
+module scope, so a degraded environment deselects most of the suite and still
+exits 0. Set `MIRAGE_STRICT_SKIPS=1` and `tests/conftest.py` fails the session
+on any skip not listed in `tests/expected_skips.txt`, and on a collected count
+below `tests/collected_floor.txt`. Both files are ratchets that only go up;
+both are read, not restated, so moving one is a one-line diff. CI sets the
+variable on its blocking full-suite step. It is off by default so a partial
+local environment is not blocked — but run with it before pushing, because
+that is the environment the gate uses. Measured `1151 passed / 10 skipped`.
+
 ### 2. Nextflow Process Tests (nf-test)
 
 **Purpose**: Test individual Nextflow processes with realistic inputs

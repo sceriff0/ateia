@@ -1,0 +1,56 @@
+# Skips this suite is allowed to have. A RATCHET: it may only shrink.
+#
+# Read by tests/conftest.py's pytest_sessionfinish hook, which runs only when
+# MIRAGE_STRICT_SKIPS is set (CI's blocking full-suite step). Any skip whose
+# nodeid is not listed here fails the session, named, with its reason. Any
+# entry here that matches no skip ALSO fails the session, so a stale exemption
+# cannot sit here quietly widening.
+#
+# Format: one exact pytest nodeid per line. No globs, no prefixes -- the entry
+# names one test, or, for a module-scope importorskip that stops a file being
+# collected at all, one file. Blank lines and lines starting with `#` ignored.
+#
+# Every entry needs a reason. A skip that cannot be justified in a sentence is
+# not a legitimate skip; it is a test that stopped running.
+
+# --- containers/ that pin inline in their Dockerfile rather than in a
+# --- requirements.txt. The parametrisation covers all 11 images; these 7 have
+# --- no requirements.txt for the harmonisation check to read, which is a
+# --- property of the repo, not of the environment. Deliberately listed one
+# --- image at a time: a 12th image arriving without a requirements.txt should
+# --- be a reviewed line in this file, not a silent inheritance.
+tests/test_container_harmonisation.py::test_every_requirements_file_is_actually_installed[cellsam]
+tests/test_container_harmonisation.py::test_every_requirements_file_is_actually_installed[convert]
+tests/test_container_harmonisation.py::test_every_requirements_file_is_actually_installed[instanseg]
+tests/test_container_harmonisation.py::test_every_requirements_file_is_actually_installed[merge]
+tests/test_container_harmonisation.py::test_every_requirements_file_is_actually_installed[preprocess]
+tests/test_container_harmonisation.py::test_every_requirements_file_is_actually_installed[quantify]
+tests/test_container_harmonisation.py::test_every_requirements_file_is_actually_installed[stardist]
+
+# --- containers/spatialdata is the documented python:3.12 / zarr>=3 island;
+# --- harmonising it against the zarr==2.18.3 set would be wrong, not missing.
+# --- The exception is stated in the test itself and in ci.yml's anndata pin.
+tests/test_container_harmonisation.py::test_shared_packages_match_the_harmonised_version[spatialdata]
+
+# --- bin/utils/tiled_pipeline.py has no production importer by design: it is a
+# --- test/benchmark oracle for the STARE registration path (CHANGELOG.md:487-488).
+# --- The skip comes from that file's own permanent allowlist, so this entry is
+# --- a pointer to a decision recorded elsewhere, not a second decision.
+tests/test_no_dead_bin_modules.py::test_bin_utils_module_has_a_real_importer[tiled_pipeline.py]
+
+# --- DEBT, not an exemption. Read this one before adding anything like it.
+# ---
+# --- This case skips when stardist/csbdeep are not importable. NEITHER pytest
+# --- job installs them -- not ci.yml's `python-tests`, not release.yml's
+# --- `test-python` -- so it does not merely skip here, it skips EVERYWHERE and
+# --- has never run in CI. It is listed rather than fixed because Phase 0's
+# --- mandate is to put a floor under the suite, not to change what CI
+# --- installs; making the floor red on day one over a pre-existing condition
+# --- would just get the floor reverted.
+# ---
+# --- What keeps this honest: the file's environment-independent structural
+# --- counterpart (test_segment_py_delegates_to_the_lazy_reader, same module)
+# --- always runs, so the delegation is not unverified -- only the live import
+# --- path is. Phase 1 (requirements/) is where this gets settled: either
+# --- csbdeep lands in the CI set and this line is deleted, or the case is.
+tests/test_segment_lazy_dapi_read.py::test_segment_py_delegation_is_live_when_importable
