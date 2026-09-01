@@ -15,34 +15,39 @@
 # `mirage-v1.0.0.tar.gz` carried a nextflow.config still reading the PREVIOUS
 # version, and the images were built from the un-bumped tree.
 #
-# WHAT THE GATE RUNS. The `test` job is an aggregator over the same five jobs
-# `ci.yml`'s blocking `all-tests` gate requires — python-tests, nextflow-stub,
-# nf-test-stub, security-tests, ruff — reproduced here as test-python,
-# test-nextflow, test-nf-test, test-security and test-ruff. Before that it ran 5
-# of those 13 blocking checks (the DISK non-skip proof, `pytest -v tests/`,
-# `run_validation_tests.sh` and one `-profile test -stub` run) while its header
-# claimed parity, so a release could ship with a broken `lib/` class, a leaking
-# DEEPCELL token, a profile that would not parse or a param/schema mismatch, and
-# be green.
+# WHAT THE GATE RUNS, AND WHY THIS PARAGRAPH IS SHORT NOW. `test` is an
+# aggregator over `test-suite`, which is a call to
+# `.github/workflows/_test-suite.yml` -- the SAME reusable workflow `ci.yml`'s
+# blocking `all-tests` gate calls. There is one definition of "the tests pass",
+# so CI/release parity is structural: it is what `uses:` says, not what this
+# header says.
 #
-# Three deliberate narrowings, so this header stays honest:
-#   * test-python runs ONE Python version (3.10), where ci.yml matrixes
-#     3.10 + 3.11. The matrix exists in ci.yml to catch resolver splits between
-#     interpreter versions, and it runs on every push; a second leg here would
-#     re-pay a ~190 MB torch install to re-test a resolution ci.yml has already
+# This header used to say it instead, and it was wrong. The gate was five jobs
+# hand-copied from ci.yml, and before that repair (2026-08-31) it ran 5 of those
+# 13 blocking checks -- the DISK non-skip proof, `pytest -v tests/`,
+# `run_validation_tests.sh` and one `-profile test -stub` run -- while claiming
+# parity, so a release could ship with a broken `lib/` class, a leaking DEEPCELL
+# token, a profile that would not parse or a param/schema mismatch, and be green.
+# Keeping the copy honest then cost a guard test that compared command strings
+# across two files. Phase 5 (2026-09-01) deleted the copy.
+#
+# ONE deliberate narrowing survives, and it is an INPUT rather than a paragraph:
+#   * `python-matrix: '["3.10"]'` -- one Python version, where ci.yml matrixes
+#     3.10 + 3.11. That matrix exists to catch resolver splits between
+#     interpreter versions and runs on every push; a second leg here would re-pay
+#     a ~190 MB torch install to re-test a resolution ci.yml has already
 #     exercised on the same commit.
-#   * nf-core structural lint is absent, exactly as it is absent from ci.yml's
-#     `all-tests`: it runs `|| true` and can never fail.
-#   * The nf-test REAL and INTEGRATION suites are absent, also as in
-#     `all-tests`. Since 2026-09-01 they do not live in ci.yml at all -- they are
-#     `.github/workflows/nightly.yml`, whose header records why the real suite is
-#     currently red. Gating a version tag on an advisory suite would block every
-#     release.
-# Everything else ci.yml blocks on, this gate blocks on.
+# The two narrowings that used to be listed beside it are gone, because they are
+# now the ABSENCE OF A JOB from `_test-suite.yml` rather than a claim about this
+# file: `nf-core` structural lint is not in it (it runs `|| true` and can never
+# fail, so it gates nothing anywhere), and neither are the nf-test REAL and
+# INTEGRATION suites (they live in `.github/workflows/nightly.yml`, whose header
+# records why the real suite is currently red; gating a version tag on an
+# advisory suite would block every release).
 #
 # Two entry points:
 #   * workflow_dispatch (input: version) -> validate (pins main's SHA) -> the
-#     five gate jobs on that SHA -> test -> bump-and-tag (writes
+#     shared test suite on that SHA -> test -> bump-and-tag (writes
 #     manifest.version, commits, creates+pushes the tag on main) ->
 #     publish-images + artifacts, BOTH FROM THE TAG -> release-notes.
 #   * release:published -> the tag already exists, so `validate` pins the TAG's
@@ -82,13 +87,12 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  NFTEST_VERSION: '0.9.0'
-  # Same mechanism as ci.yml: point every job at one cacheable plugins
-  # directory instead of ~/.nextflow/plugins, so nf-schema is downloaded once
-  # and the air-gapped NXF_PLUGINS_DIR path documented in docs/usage.md is
-  # exercised rather than only described.
-  NXF_PLUGINS_DIR: ${{ github.workspace }}/.nextflow-plugins
+# NO WORKFLOW-LEVEL `env:`. This file used to set NFTEST_VERSION and
+# NXF_PLUGINS_DIR for its five hand-copied gate jobs. Those jobs are now
+# `_test-suite.yml`'s, and `env:` does NOT cross a workflow_call boundary -- a
+# called workflow sees nothing the caller set -- so the values are declared
+# there, where they are read. Nothing remaining in this file runs Nextflow or
+# nf-test; leaving the two names here would be two more copies to drift.
 
 jobs:
   # ===========================================================================
@@ -167,363 +171,76 @@ jobs:
           echo "Release commit: $SHA (${{ steps.get_version.outputs.gate_ref }})"
 
   # ===========================================================================
-  # Gate job A - the Python unit suite, mirroring ci.yml's `python-tests`.
+  # THE GATE, part 1 - the shared blocking test suite.
+  #
+  # This used to be five hand-copied jobs (test-python, test-nextflow,
+  # test-nf-test, test-security, test-ruff), each a duplicate of a job in ci.yml.
+  # The copy is what made the parity claim in this file's header a claim: it had
+  # already diverged once, running 5 of the 13 checks ci.yml blocks on while
+  # saying it ran all of them, and a release could ship a broken `lib/` class, a
+  # leaking DEEPCELL token, an unparseable profile or a param/schema mismatch,
+  # and be green. Since 2026-09-01 (CI redesign Phase 5) both gates call
+  # `.github/workflows/_test-suite.yml`, so parity is what `uses:` says rather
+  # than what a header says.
+  #
+  # `ref` IS THE LOAD-BEARING INPUT. A reusable workflow does its OWN checkout
+  # and sees the CALLER's `github.ref`, not whatever the caller checked out --
+  # the property build-images.yml's `workflow_call` block documents after it
+  # built ten container images from the wrong tree. Here the consequence would be
+  # worse: the gate would TEST a commit other than the one `bump-and-tag` tags.
+  # `needs.validate.outputs.sha` is the SHA `validate` pinned once, so the whole
+  # suite runs on one tree and `bump-and-tag` can prove it is tagging what was
+  # tested. Every `actions/checkout` inside the called workflow reads it;
+  # tests/test_release_workflow_graph.py asserts both halves.
+  #
+  # `python-matrix` is the ONE deliberate narrowing that survives, and it is now
+  # an input instead of a paragraph: ci.yml matrixes 3.10 + 3.11 to catch
+  # resolver splits between interpreter versions and runs on every push, so a
+  # second leg here would re-pay a ~190 MB torch install to re-test a resolution
+  # ci.yml has already exercised on the same commit.
+  #
+  # NO `secrets:` BLOCK. The suite's only secret is the Codecov token, and
+  # `upload-coverage: false` means it is not used; `secrets: inherit` would hand
+  # a test suite this workflow's Docker Hub push credentials for nothing.
   # ===========================================================================
-  test-python:
-    name: Gate - Python tests
+  test-suite:
+    name: Gate - test suite
     needs: validate
-    runs-on: ubuntu-latest
-    # ci.yml budgets 30 minutes per matrix leg for the same work.
-    timeout-minutes: 40
-    steps:
-      - name: Checkout the pinned release commit
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.validate.outputs.sha }}
-
-      # NOTE: no `docker/setup-buildx-action` here on purpose. Every step in this
-      # job is container-free. Guarded by
-      # tests/test_ci_job_hygiene.py::test_buildx_job_must_actually_use_buildx.
-
-      # The same composite action ci.yml's `python-tests` job uses, with the same
-      # three requirements files in the same order -- which is now a structural
-      # guarantee rather than two copies of a comment that had to agree.
-      # requirements/ci.txt is the CI stack; torch-cpu.txt and kornia.txt are
-      # STARE's DISK+LightGlue COARSE front-end (bin/utils/coarse_align.py),
-      # without which tests/test_coarse_frontend.py's DISK cases importorskip and
-      # prove nothing. torch-cpu.txt's `--index-url .../whl/cpu` must not leak
-      # into another resolve, and kornia drags the ~2.5 GB CUDA wheel if torch is
-      # not already satisfied -- hence one invocation per line, torch first. See
-      # .github/actions/setup-python-env, and tests/test_disk_test_actually_runs.py
-      # which resolves this job through it.
-      - name: Install Python and the CI stack
-        uses: ./.github/actions/setup-python-env
-        with:
-          python-version: '3.10'
-          upgrade-pip: 'true'
-          requirements: |
-            requirements/ci.txt
-            requirements/torch-cpu.txt
-            requirements/kornia.txt
-
-      - name: Generate test data
-        # requirements/ci.txt above is a superset of requirements/testdata.txt.
-        uses: ./.github/actions/generate-testdata
-        with:
-          setup-python: 'false'
-
-      # A skip is not a pass. tests/test_coarse_frontend.py's DISK+LightGlue cases
-      # guard themselves with importorskip("torch")/importorskip("kornia"), so a
-      # missing, broken or CUDA-only install turns them into silent skips -- which is
-      # how an unimplemented front-end shipped once already. This step proves both
-      # libraries import in the SAME interpreter pytest runs in, and then proves the
-      # file reports ZERO skips. tests/test_disk_test_actually_runs.py asserts this
-      # step exists in every workflow that runs the pytest suite.
-      - name: Assert the DISK front-end test is not skipped
-        run: |
-          set -euo pipefail
-          python -c "import torch, kornia; print(torch.__version__, kornia.__version__)"
-          pytest tests/test_coarse_frontend.py -rs -q | tee coarse_frontend.log
-          if grep -qi 'skipped' coarse_frontend.log; then
-            echo "::error::tests/test_coarse_frontend.py reported a SKIP -- the DISK+LightGlue case did not run"
-            exit 1
-          fi
-
-      # MIRAGE_STRICT_SKIPS turns on tests/conftest.py's session floor: any skip
-      # not in tests/expected_skips.txt fails the gate by name, and the collected
-      # count must clear tests/collected_floor.txt. This gate is the one that
-      # shipped for months missing three packages -- 13 tests failed and 30 more
-      # silently vanished, and only the 13 were visible. Identical to ci.yml's
-      # `python-tests`, and STEP level for the same reason: the DISK non-skip
-      # proof step above runs pytest over one file, well below the floor.
-      - name: Run Python tests
-        env:
-          MIRAGE_STRICT_SKIPS: '1'
-        run: |
-          pytest -v tests/ \
-            --ignore=tests/testdata \
-            --ignore=tests/modules \
-            --ignore=tests/subworkflows \
-            --ignore=tests/integration
+    uses: ./.github/workflows/_test-suite.yml
+    with:
+      ref: ${{ needs.validate.outputs.sha }}
+      python-matrix: '["3.10"]'
+      upload-coverage: false
+    permissions:
+      contents: read
 
   # ===========================================================================
-  # Gate job B - the Nextflow stub leg, mirroring ci.yml's `nextflow-stub`,
-  # INCLUDING its version matrix. `manifest.nextflowVersion` is `>=25.04.0`, and
-  # this repo documents that NF25 and NF26 differ on config-scope `log` binding
-  # and on CLI param stringification — so a gate that blocks a version tag while
-  # exercising only `latest-everything` never tests the minimum the manifest
-  # promises. It ran exactly that way until 2026-08-31.
-  # ===========================================================================
-  test-nextflow:
-    name: Gate - NF ${{ matrix.nextflow-version }} stub
-    needs: validate
-    runs-on: ubuntu-latest
-    # ci.yml budgets 30 minutes for the same step list.
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        nextflow-version: ['25.04.0', 'latest-everything']
-    steps:
-      - name: Checkout the pinned release commit
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.validate.outputs.sha }}
-
-      - name: Set up Nextflow
-        # Cache, install, and provision the pinned nf-schema plugin -- the same
-        # composite action ci.yml's Nextflow jobs use. The plugin provisioning
-        # is not optional and was absent from this workflow entirely until
-        # 2026-08-31; it is now structurally impossible for one workflow to have
-        # it and the other not.
-        uses: ./.github/actions/setup-nextflow
-        with:
-          nextflow-version: ${{ matrix.nextflow-version }}
-
-      - name: Generate test data
-        uses: ./.github/actions/generate-testdata
-
-      - name: Check all profiles parse without the gitignored site config
-        # Guards against the strict-parser regression class: a committed profile
-        # must never includeConfig a gitignored/missing file (breaks every
-        # profile in CI). Runs with conf/ieo.config absent (it already is here).
-        run: |
-          bash tests/check_profiles_parse.sh
-
-      - name: Check param surface consistency (config <-> schema <-> code)
-        # Fails if a param is declared/used but undocumented in nextflow_schema.json
-        # (or vice-versa) — keeps the parameter surface from drifting.
-        run: |
-          python3 tests/check_param_consistency.py
-
-      - name: Run pipeline validation tests
-        run: |
-          bash tests/run_validation_tests.sh
-
-      - name: lib/ probe — assert lib/*.groovy behaviour
-        # The ONLY unit-test surface lib/*.groovy has: nf-test's assertion
-        # context cannot see lib/ classes, so the assertions live inside the
-        # script. A failing assert exits nonzero and fails this gate job. A
-        # release could previously ship a broken lib/ class, green.
-        run: |
-          nextflow run tests/lib_probe.nf -lib lib
-
-      - name: Run pipeline with test profile (stub mode)
-        # Stub blocks only `touch` outputs — no container engine needed. Running
-        # container-free keeps this gate green without pulling per-process
-        # images, which on a fresh tag do not exist yet (publish-images runs
-        # after this gate, by design).
-        run: |
-          nextflow run . \
-            -profile test \
-            -stub \
-            --outdir test_results_stub
-
-      - name: Run pipeline with SHIPPED defaults (stub mode)
-        # `-profile test` pins BOTH pixel_size (-> 0.325) and seg_method
-        # (-> 'stardist') away from what actually ships ('auto' / 'instantseg'),
-        # each for its own documented reason (conf/test.config) -- which means
-        # the exact combination that ships was never executed by this gate.
-        # `shipped_defaults_test` overrides both back and repoints `input` at
-        # the one fixture pair this repo generates with a real OME
-        # PhysicalSizeX/Y (tests/testdata/shipped_defaults_input.csv), because
-        # every other fixture is scale-less on purpose and `auto` would
-        # (correctly) hard-fail at PREFLIGHT_SCALE against it.
-        run: |
-          nextflow run . \
-            -profile shipped_defaults_test \
-            -stub \
-            --outdir test_results_shipped_defaults
-
-      - name: Verify work-directory cleanup and final-outputs-only publishing
-        # A shell script, not a pytest and not an nf-test, and it needs its own
-        # step or it runs nowhere. `cleanup` is a Nextflow session-teardown
-        # behaviour, invisible to a static guard over the sources and gone by
-        # the time nf-test's assertion context runs. The script's fourth case is
-        # the load-bearing one -- cleanup must never fire on a FAILED run, or a
-        # real failure becomes undiagnosable.
-        run: |
-          bash tests/cleanup_work.sh
-
-      - name: Upload stub test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-stub-results-nf-${{ matrix.nextflow-version }}
-          path: |
-            test_results_stub/
-            test_results_shipped_defaults/
-            .nextflow.log
-
-  # ===========================================================================
-  # Gate job C - the nf-test stub suite, mirroring ci.yml's `nf-test-stub`.
-  # ~16 minutes. A release gate is rare and 214 cases of channel wiring is what
-  # a version tag ought to cost; the timeout below is sized for it.
-  # ===========================================================================
-  test-nf-test:
-    name: Gate - nf-test (stub)
-    needs: validate
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - name: Checkout the pinned release commit
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.validate.outputs.sha }}
-
-      - name: Set up Nextflow and nf-test
-        # The action pins Nextflow to the supported release by default: nf-test
-        # 0.9.0's generated test wrappers do not compile under edge Nextflow's
-        # strict parser. latest-everything full-pipeline compatibility is
-        # covered by the test-nextflow job's matrix above.
-        uses: ./.github/actions/setup-nf-test
-        with:
-          nf-test-version: ${{ env.NFTEST_VERSION }}
-
-      - name: Generate test data
-        uses: ./.github/actions/generate-testdata
-
-      - name: Run nf-test stub suite
-        # Container-free (-profile test) and stub-only (--tag stub): stub blocks
-        # need no images. This is CI's blocking nf-test gate, and it was absent
-        # from the release gate entirely.
-        run: |
-          nf-test test --tag stub --profile test --verbose
-
-      - name: Upload nf-test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-nf-test-stub-results
-          path: |
-            .nf-test/
-            tests/output/
-
-  # ===========================================================================
-  # Gate job D - the DEEPCELL token-leak guard, mirroring ci.yml's
-  # `security-tests`. It needs its own job for the reason ci.yml documents at
-  # length: tests/modules/segment_deepcell_token.nf.test needs
-  # `-profile test,singularity`, Nextflow rejects a duplicate `-profile`, and so
-  # the `--tag stub --profile test` sweep can never collect it. Verified there
-  # by dry-run: 0 deepcell tests matched. The second step asserts the guard was
-  # COLLECTED, not merely that nf-test exited 0.
-  # ===========================================================================
-  test-security:
-    name: Gate - Security tests
-    needs: validate
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout the pinned release commit
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.validate.outputs.sha }}
-
-      - name: Set up Nextflow and nf-test
-        # Same pin as test-nf-test, and for the same reason -- it is the
-        # action's default: nf-test's generated wrappers do not compile under
-        # edge Nextflow's strict parser.
-        uses: ./.github/actions/setup-nf-test
-        with:
-          nf-test-version: ${{ env.NFTEST_VERSION }}
-
-      - name: Generate test data
-        uses: ./.github/actions/generate-testdata
-
-      - name: Token-leak guard
-        # Asserts DEEPCELL_ACCESS_TOKEN is forwarded BY NAME and its VALUE never
-        # reaches .command.run, which is group-readable on a typical shared HPC
-        # filesystem and is retained across -resume. The variable must be set in
-        # the environment invoking nf-test: the test asserts on its presence
-        # first, because without it SEGMENT never reaches the guarded branch and
-        # the whole case would pass while checking nothing.
-        env:
-          DEEPCELL_ACCESS_TOKEN: dummy-token-value
-        run: |
-          nf-test test tests/modules/segment_deepcell_token.nf.test \
-            --profile test,singularity --verbose
-
-      - name: Assert the guard actually executed
-        # A tag typo, a renamed file, or a --profile change would make nf-test
-        # exit 0 having run nothing — which is the exact failure this job was
-        # added to close, so it must not be able to recur here.
-        env:
-          DEEPCELL_ACCESS_TOKEN: dummy-token-value
-        run: |
-          n=$(nf-test test tests/modules/segment_deepcell_token.nf.test \
-                --profile test,singularity --dry-run 2>&1 \
-              | grep -ci "DEEPCELL_ACCESS_TOKEN" || true)
-          echo "collected $n case(s)"
-          test "$n" -ge 1
-
-  # ===========================================================================
-  # Gate job E - ruff, mirroring ci.yml's `ruff` job. `ruff check` only, not
-  # `ruff format`: the repo is not format-normalized yet.
-  # ===========================================================================
-  test-ruff:
-    name: Gate - Ruff lint
-    needs: validate
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout the pinned release commit
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.validate.outputs.sha }}
-
-      - name: Set up Python and install ruff
-        # Pinned to the version used locally (see ruff.toml) so CI and local
-        # `ruff check .` agree exactly.
-        uses: ./.github/actions/setup-python-env
-        with:
-          python-version: '3.10'
-          requirements: 'requirements/lint.txt'
-
-      - name: Run ruff check
-        run: |
-          ruff check .
-
-      - name: Run actionlint
-        # Parity with ci.yml's `ruff` job, which is where workflow lint lives --
-        # see the comment there for why it is not in the advisory `lint` job.
-        # tests/test_release_workflow_graph.py's BLOCKING_CHECKS asserts this
-        # gate runs every check ci.yml blocks on, actionlint included; the shared
-        # action is what makes the two sides impossible to drift apart.
-        uses: ./.github/actions/actionlint
-
-  # ===========================================================================
-  # Job 2 - THE GATE, as one job downstream can depend on. Mirrors ci.yml's
-  # `all-tests`: it needs the same five jobs and, like it, treats anything that
-  # is not `success` as a failure. `skipped` is NOT a pass here — a gate job
-  # that silently stops running must block the release, not wave it through.
+  # THE GATE, part 2 - one job everything downstream can depend on.
+  #
+  # It reads ONE result now, not five: `test-suite` is a reusable-workflow call,
+  # and a caller job's result is the called workflow's conclusion, so a failure in
+  # any of its five jobs lands here. The five are still enumerated one by one --
+  # in `_test-suite.yml`'s own `suite-gate` job, which is where they now live.
+  # That enumeration is not optional there and is not duplicated here: a called
+  # workflow whose jobs were ALL SKIPPED concludes `success`, so this line alone
+  # would wave a suite that stopped running straight through.
+  #
+  # `skipped` is NOT a pass here either -- anything that is not a success fails
+  # the release. A gate job that silently stops running must block the release,
+  # not be waved through. Mirrors ci.yml's `all-tests`, which now has exactly the
+  # same shape for the same reason.
   # ===========================================================================
   test:
     name: Test Gate
-    needs: [test-python, test-nextflow, test-nf-test, test-security, test-ruff]
+    needs: [test-suite]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
     steps:
       - name: Check all gate jobs passed
         run: |
-          if [ "${{ needs.test-python.result }}" != "success" ]; then
-            echo "::error::Python tests failed"
-            exit 1
-          fi
-          if [ "${{ needs.test-nextflow.result }}" != "success" ]; then
-            echo "::error::Nextflow stub tests failed"
-            exit 1
-          fi
-          if [ "${{ needs.test-nf-test.result }}" != "success" ]; then
-            echo "::error::nf-test stub suite failed"
-            exit 1
-          fi
-          if [ "${{ needs.test-security.result }}" != "success" ]; then
-            echo "::error::Security tests failed"
-            exit 1
-          fi
-          if [ "${{ needs.test-ruff.result }}" != "success" ]; then
-            echo "::error::Ruff lint failed"
+          if [ "${{ needs.test-suite.result }}" != "success" ]; then
+            echo "::error::The shared test suite did not pass (result: ${{ needs.test-suite.result }})"
             exit 1
           fi
           echo "All release gate checks passed."

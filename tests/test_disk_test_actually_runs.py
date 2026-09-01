@@ -5,14 +5,25 @@ importorskip("torch")/importorskip("kornia"). Before this task CI had no torch, 
 those cases skipped silently -- and a silent skip is how an unimplemented front-end
 shipped in the first place.
 
-SCOPE IS PER-FILE, DELIBERATELY. An earlier version of this guard concatenated
+SCOPE IS PER-JOB, DELIBERATELY. An earlier version of this guard concatenated
 *every* file under `.github/workflows/` and asserted against the union. That is a
 mask, not a scope: deleting BOTH torch and kornia installs from
 `.github/workflows/ci.yml` -- the workflow whose `python-tests` job is CI's blocking
 gate -- left `release.yml`'s copy standing, and every assertion here passed (10
 passed). In that state the DISK cases importorskip away in the gate that actually
-runs on every push, which is precisely the regression this file exists to catch. Each
-workflow that runs the pytest suite is therefore checked ON ITS OWN.
+runs on every push, which is precisely the regression this file exists to catch.
+Every job that runs the pytest suite is therefore checked ON ITS OWN.
+
+WHY THAT NOW RESOLVES TO ONE JOB, AND WHY THAT IS NOT A WEAKENING. Since
+2026-09-01 (CI redesign Phase 5) the suite runs in ONE place --
+`.github/workflows/_test-suite.yml`'s `python-tests` job -- which `ci.yml` and
+`release.yml` both call as a reusable workflow. The union-vs-per-file failure this
+file was written against was two COPIES disagreeing; there is no second copy to
+disagree. The per-job form is kept, unchanged, because it is the form that stays
+correct if a second pytest job ever appears: `jobs_running_the_pytest_suite()`
+discovers by COMMAND across every workflow, so the day one does, it is checked on
+its own without an edit here. If that discovery ever returns nothing, the
+non-vacuity assertion in it fails rather than this file going quietly green.
 
 THE VERSIONS ARE NO LONGER READ OUT OF THE WORKFLOW. They live in
 `requirements/torch-cpu.txt` and `requirements/kornia.txt`, which are the SAME files
@@ -109,11 +120,17 @@ def jobs_running_the_pytest_suite():
     Discovered by looking for a `pytest ... tests/` invocation in the job's own
     `run:` bodies and in any local composite action it uses — never by filename
     and never by job name.
+
+    COMMENT-BLIND (`ci_actions.job_run_scripts`, not `job_resolved_run_text`).
+    Both questions this file asks — "does this job run the suite" and "does it
+    carry the non-skip proof" — are command-runs claims, and on the raw view a
+    comment quoting the command answers them. A commented-out proof step is the
+    likelier way this coverage is lost than a deleted one.
     """
     hits = []
     for wf in workflow_files():
         for name, job in ci_actions.load_jobs(wf).items():
-            if _RUNS_THE_SUITE_RE.search(ci_actions.job_resolved_run_text(job)):
+            if _RUNS_THE_SUITE_RE.search(ci_actions.job_run_scripts(job)):
                 hits.append((wf, name, job))
     # Non-vacuity: an empty list would make every check below pass having
     # examined nothing, which is the failure mode this whole file is about.
@@ -231,7 +248,7 @@ def test_every_pytest_workflow_proves_the_disk_case_is_not_skipped():
         # the workflow today, but reading only `wf.read_text()` is what made this
         # file's install checks go blind when the installs moved, and there is no
         # reason to leave the same trap set for the next move.
-        text = ci_actions.job_resolved_run_text(job)
+        text = ci_actions.job_run_scripts(job)
         where = f"{wf.relative_to(REPO)}: job `{name}`"
         if not _IMPORT_PROOF_RE.search(text):
             missing.append(
