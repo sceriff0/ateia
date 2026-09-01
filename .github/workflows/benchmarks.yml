@@ -1,4 +1,4 @@
-name: stare-bench
+name: benchmarks
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     branches: [benchmarking]
 
 jobs:
-  stare-bench:
+  benchmarks:
     runs-on: ubuntu-latest
     # 15, down from 60. The 60 was sized for the stare_bench unit rung, which ran the
     # DISK+LightGlue COARSE front-end on CPU (23m33s locally). That rung is deleted; what
