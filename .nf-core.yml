@@ -1,3 +1,38 @@
+# nf-core/tools configuration.
+#
+# THE `nf-core pipelines lint` JOB WAS DELETED FROM CI ON 2026-09-01 (CI redesign,
+# Phase 7). This file stays because `repository_type` and the `lint:` opt-outs are
+# still the honest record of which nf-core conventions MIRAGE has decided not to
+# follow, and because the tool's OTHER subcommands read it. But the lint block below
+# has never been evaluated by anything, and the next person to try should know why
+# before spending an afternoon on it.
+#
+# MEASURED, against a clean `nextflow config` cache, on this tree:
+#
+#   nf-core 2.14.1   ->  ValueError: not enough values to unpack (expected 2, got 1)
+#   nf-core 3.0.2    ->  same
+#   nf-core 3.2.1    ->  same
+#   nf-core 3.4.1    ->  same   (what the old `nf-core<3.5` CI pin resolved to)
+#   nf-core 4.1.0    ->  same
+#
+# 2.14.1 is the version `nf_core_version` below claims, so this file has been
+# describing a lint run that could never have happened. Every one of the five dies
+# in `nf_core/utils.py` on
+#     self.pipeline_prefix, self.pipeline_name = manifest.name.split("/")
+# because MIRAGE's `manifest.name` is `mirage` and the tool requires `<org>/<name>`.
+# It is not the `lint:` block below, and it is not the 3.0 `nf-core lint` ->
+# `nf-core pipelines lint` rename.
+#
+# Forced past it (manifest.name temporarily set to `bolt3x/mirage`), 3.4.1 then:
+#   * needs `pre-commit` on PATH, and crashes with FileNotFoundError without it;
+#   * WRITES a `modules.json` into the working tree -- the linter is not read-only;
+#   * aborts CRITICAL on `Default parameters are invalid: '50000000' is not of type
+#     'integer', 'null'`, its own re-derivation of a schema that nf-schema accepts.
+#
+# So making the job block would mean changing the pipeline's published identity for
+# a linter this file already opts out of six rule families from. It was deleted
+# instead. A check that can never fail is worse than no check, because it occupies
+# the slot.
 repository_type: pipeline
 nf_core_version: "2.14.1"
 lint:

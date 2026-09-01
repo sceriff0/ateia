@@ -102,33 +102,10 @@ def _strip_hash_comments(text: str) -> str:
     )
 
 
-def _shell_commands_only(script: str) -> str:
-    """`script` with every TRAILING shell comment removed as well.
-
-    `tests/ci_actions.py`'s comment-blindness drops whole-LINE `#` comments, which is
-    the right scope for it and not enough here: `true  # bash /usr/local/bin/...`
-    leaves the needle on a line that is otherwise a real command, and a text guard
-    reading it reports that CI still runs a command CI has stopped running. Measured
-    on this exact file while writing it.
-
-    Quote-aware, so a `#` inside a string (a colour, a URL fragment) is kept. This is
-    a heuristic, not a shell parser, and it is applied only to the narrow question
-    "is this command still invoked".
-    """
-    out = []
-    for line in script.splitlines():
-        kept: list[str] = []
-        in_single = in_double = False
-        for char in line:
-            if char == "'" and not in_double:
-                in_single = not in_single
-            elif char == '"' and not in_single:
-                in_double = not in_double
-            elif char == "#" and not in_single and not in_double:
-                break
-            kept.append(char)
-        out.append("".join(kept))
-    return "\n".join(out)
+# Trailing-comment stripping lives in the shared resolver, not here -- see
+# ci_actions.strip_shell_comments, and this repo's rule about seven guards each
+# carrying a private parse of the same files.
+_shell_commands_only = ci_actions.strip_shell_comments
 
 
 # AN IMPORT MUST START A STATEMENT. Both patterns are matched against a chunk that

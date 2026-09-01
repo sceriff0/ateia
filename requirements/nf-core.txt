@@ -1,6 +1,0 @@
-# nf-core's structural linter. ADVISORY ONLY — the workflow runs it with `|| true` and the
-# job is deliberately excluded from the `all-tests` gate, because a job that always exits 0
-# is a fake gate.
-#
-# Capped rather than pinned; the cap is the one the workflow has always carried.
-nf-core<3.5

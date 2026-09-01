@@ -672,9 +672,11 @@ BLOCKING_CHECKS = [
     ("token-guard collection assertion", "--dry-run"),
     ("Nextflow plugin provisioning", "nextflow plugin install"),
     # Added 2026-09-01 with the composite actions. actionlint is BLOCKING and it
-    # lives in ci.yml's `ruff` job (which IS in the `all-tests` gate's `needs:`),
-    # not in the advisory `lint` job that runs `|| true`. Both needles resolve
-    # through .github/actions/** like the rest of this table.
+    # lives in the shared suite's `ruff` job, which every gate requires. It was
+    # deliberately NOT put in ci.yml's old advisory `lint` job -- that job ran
+    # `nf-core lint ... || true` and could never fail, and Phase 7 deleted it
+    # outright. Both needles resolve through .github/actions/** like the rest of
+    # this table.
     ("actionlint (workflow + composite-action syntax)", "rhysd/actionlint"),
 ]
 
@@ -896,6 +898,39 @@ def test_no_gate_aggregator_treats_skipped_as_a_pass(path):
         )
 
 
+@pytest.mark.parametrize("path", workflow_files(), ids=lambda p: p.name)
+def test_every_gate_aggregator_reads_every_job_it_needs(path):
+    """A job in the gate's `needs:` that the gate never CHECKS is not gated.
+
+    `needs:` alone gives you two of the three things you want -- ordering, and a
+    skip when the dependency fails outright -- and not the third: with
+    `if: always()`, which every aggregator here carries so that it can report
+    rather than vanish, a FAILED dependency no longer stops the job. The result
+    check in the script is the whole gate at that point, so a job added to `needs:`
+    without a matching `!= "success"` branch is required in appearance and
+    advisory in fact.
+
+    THIS IS THE `alls-green` PROPERTY, and adopting `alls-green` was considered and
+    declined to get it. That action derives the check from `toJSON(needs)`, which
+    would make the mistake unmakeable -- but it also removes the `run:` step that
+    reads `needs.<job>.result`, and THAT is how `result_aggregator_jobs` discovers
+    a gate at all. Every gate assertion in this file is built on that discovery
+    (the `skipped` scan, the connectivity scan, `shared_gate_suite`), so swapping
+    the shell check for a third-party action would blind them while looking like an
+    improvement. Asserting the property directly costs one test and no dependency.
+    """
+    for job_id, job in result_aggregator_jobs(path).items():
+        text = run_text(job)
+        unread = [dep for dep in needs_of(job) if f"needs.{dep}.result" not in text]
+        assert not unread, (
+            f"{path.name}: job `{job_id}` lists {unread} in `needs:` but never reads "
+            f"`needs.<job>.result` for them. With `if: always()` on the aggregator "
+            "that dependency cannot fail the gate at all -- it is required in "
+            "appearance and advisory in fact. Add a branch for each, or take it out "
+            "of `needs:` and put the job in a workflow nothing is gated on."
+        )
+
+
 def test_no_workflow_job_sets_continue_on_error():
     """`continue-on-error: true` makes a job or step report a green tick whatever
     it did, so the run summary stops saying whether the suite got better or worse.
@@ -908,6 +943,17 @@ def test_no_workflow_job_sets_continue_on_error():
     nightly suite that is expected to be red is exactly where someone reaches for
     `continue-on-error` to quieten it, and quietening it is the one thing that
     would make the move pointless.
+
+    STEP LEVEL IS FORBIDDEN TOO, AND THAT WAS RE-DECIDED IN PHASE 7 rather than
+    inherited. The CI redesign's `|| true` register argued for narrowing this to
+    JOB level, on the ground that job-level `continue-on-error` makes
+    `needs.<job>.result` read `success` (it lies to the gate) while step-level does
+    not (it is "a different thing and is safe"). Half of that is right: step-level
+    is strictly narrower. It is still a green tick over a step that failed, which is
+    the same defect one size down -- and there is no step in this repository that
+    wants one. Narrowing a guard for a use nobody has is how a guard becomes
+    decorative; the `allowed` dict below is the escape hatch, and it costs a written
+    reason rather than a silent licence.
 
     If a legitimate use ever appears, allow-list it BY JOB ID here with the reason
     written down, rather than deleting the scan.
@@ -1009,17 +1055,17 @@ def test_no_workflow_branches_on_the_workflow_call_event_name():
 
 # Jobs deliberately outside their workflow's gate DAG. BY (file, job id), with the
 # reason, because an unexplained one is exactly the defect.
-GATE_DISCONNECTED_JOBS = {
-    ("ci.yml", "lint"): (
-        "nf-core structural lint. Its one substantive step ends in `|| true`, so "
-        "the lint itself can never fail the run -- keeping it out of `all-tests` "
-        "is what stops it being a fake gate. NOTE THE RESIDUAL, honestly: its "
-        "setup steps (checkout, setup-nextflow, setup-python-env) are NOT behind "
-        "`|| true`, so an infrastructure failure there still reddens the run. "
-        "Phase 7 of the redesign owns the `|| true`; this entry is not a claim "
-        "that the hole is closed."
-    ),
-}
+# EMPTY AS OF 2026-09-01 (CI redesign, Phase 7), and that is the point rather than
+# an oversight. The single entry was ("ci.yml", "lint") -- the nf-core structural
+# lint, whose one substantive step ended in `|| true` and therefore could never fail.
+# Phase 7 deleted the JOB: no released nf-core/tools version can lint this repository
+# (2.14.1 through 4.1.0 all die on `manifest.name` having no `/`; see .nf-core.yml's
+# header for the measurement), so there was nothing to un-swallow.
+#
+# Every job in every gated workflow is now wired to its gate. Leave this dict empty
+# if you can: an entry here is a job that cannot fail the MERGE and can still fail
+# the RUN, which is how a green gate comes to report a red commit.
+GATE_DISCONNECTED_JOBS: dict[tuple[str, str], str] = {}
 
 # The advisory nf-test suites, keyed on the COMMAND, never on a job or file name.
 # Naming the job would let a rename hide a deletion, and naming the file would go

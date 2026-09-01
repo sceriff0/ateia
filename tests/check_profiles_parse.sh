@@ -22,7 +22,16 @@ if [ -f conf/ieo.config ]; then
     mv conf/ieo.config /tmp/ieo.config.guard.bak
     moved=1
 fi
-restore() { [ "$moved" = 1 ] && mv /tmp/ieo.config.guard.bak conf/ieo.config 2>/dev/null || true; }
+# NOT `[ "$moved" = 1 ] && mv ... || true`. That was the classic `A && B || C`
+# trap: the `|| true` existed only to stop the `&&` returning 1 when the file was
+# never moved, and it swallowed a FAILED `mv` at the same time -- which would
+# leave the developer's conf/ieo.config sitting in /tmp with the guard reporting
+# success. The `if` says the same thing and hides nothing.
+restore() {
+    if [ "$moved" = 1 ]; then
+        mv /tmp/ieo.config.guard.bak conf/ieo.config
+    fi
+}
 trap restore EXIT
 
 echo "Profile parse guard (conf/ieo.config temporarily absent)"

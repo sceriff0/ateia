@@ -39,11 +39,13 @@
 #     exercised on the same commit.
 # The two narrowings that used to be listed beside it are gone, because they are
 # now the ABSENCE OF A JOB from `_test-suite.yml` rather than a claim about this
-# file: `nf-core` structural lint is not in it (it runs `|| true` and can never
-# fail, so it gates nothing anywhere), and neither are the nf-test REAL and
-# INTEGRATION suites (they live in `.github/workflows/nightly.yml`, whose header
-# records why the real suite is currently red; gating a version tag on an
-# advisory suite would block every release).
+# file: `nf-core` structural lint is not in it -- it ran `|| true`, could never
+# fail, and Phase 7 deleted the job entirely once the measurement showed no
+# released nf-core/tools version can lint this repo (see `.nf-core.yml`) -- and
+# neither are the nf-test REAL and INTEGRATION suites (they live in
+# `.github/workflows/nightly.yml`, whose header records why the real suite is
+# currently red; gating a version tag on an advisory suite would block every
+# release).
 #
 # Two entry points:
 #   * workflow_dispatch (input: version) -> validate (pins main's SHA) -> the

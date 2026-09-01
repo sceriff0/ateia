@@ -17,13 +17,22 @@
 # WHAT IS AND IS NOT IN HERE. Everything ci.yml's `all-tests` gate required on
 # 2026-09-01 is here, job for job: python-tests, nextflow-stub, nf-test-stub,
 # security-tests, ruff. Deliberately absent:
-#   * `nf-core` structural lint -- it runs `|| true` and can never fail, so it
-#     is not a gate anywhere. It stays a standalone advisory job in ci.yml.
+#   * `nf-core` structural lint -- it ran `|| true` and could never fail, and
+#     Phase 7 (2026-09-01) DELETED the job outright rather than repairing it: no
+#     released nf-core/tools version, 2.14.1 through 4.1.0, can lint this
+#     repository at all. `.nf-core.yml`'s header carries the measurement.
 #   * the nf-test REAL and INTEGRATION suites -- they live in nightly.yml, whose
 #     header records why the real suite is currently red. Gating a version tag on
 #     an advisory suite would block every release.
 # Both of those were "deliberate narrowings" in release.yml's header, i.e. prose.
 # They are now the absence of a job from this file, which is checkable.
+#
+# ALSO IN HERE, AND DELIBERATELY NOT SPLIT OUT: `ruff` (Python lint) and, inside
+# it, `actionlint` (workflow lint). Phase 7 considered giving them a `lint-python`
+# / `lint-workflows` home of their own and declined: this file exists because
+# release.yml held a hand-maintained COPY of the gate jobs, and a lint job outside
+# it would have to be either duplicated there or dropped from the release gate.
+# One of those is the defect this file deleted and the other is a hole in it.
 #
 # -----------------------------------------------------------------------------
 # THE `ref` INPUT IS NOT OPTIONAL, AND THE REPO ALREADY LEARNED WHY
@@ -265,6 +274,17 @@ jobs:
         uses: codecov/codecov-action@v4
         with:
           files: ./coverage.xml
+          # `fail_ci_if_error: false` STAYS, and it stays HERE rather than moving to
+          # a job of its own. It is on the CI redesign's `|| true` register as "not a
+          # `|| true`, but the same family", with the disposition "kept, and moved to
+          # its own non-required job so the tolerance is a property of the job graph".
+          # Phase 7 kept the tolerance and declined the move: failing a required gate
+          # on codecov.io's availability is wrong either way, the step already cannot
+          # fail the job, and a separate job would have to receive coverage.xml as an
+          # uploaded artifact -- a second job and an artifact round-trip to relocate a
+          # flag that is already visible on the line it governs. The property the move
+          # was for is instead an INPUT, `upload-coverage`, which each caller sets
+          # explicitly, so whether the upload happens is a fact about the call site.
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
@@ -479,9 +499,15 @@ jobs:
         env:
           DEEPCELL_ACCESS_TOKEN: dummy-token-value
         run: |
+          # `|| n=0`, not `|| true`: `grep -c` exits 1 to mean ZERO MATCHES, and zero
+          # is the answer this step exists to reject. The real assertion is the
+          # `test "$n" -ge 1` two lines down -- nothing is being swallowed here, and
+          # writing it as the assignment it actually is keeps the string `|| true`
+          # out of a file where every other occurrence would have to be classified
+          # by hand.
           n=$(nf-test test tests/modules/segment_deepcell_token.nf.test \
                 --profile test,singularity --dry-run 2>&1 \
-              | grep -ci "DEEPCELL_ACCESS_TOKEN" || true)
+              | grep -ci "DEEPCELL_ACCESS_TOKEN") || n=0
           echo "collected $n case(s)"
           test "$n" -ge 1
 
@@ -515,11 +541,12 @@ jobs:
           ruff check .
 
       - name: Run actionlint
-        # WORKFLOW LINT LIVES IN THIS JOB, AND THAT IS DELIBERATE. ci.yml's
-        # `lint` job runs `nf-core lint ... || true` and is excluded from the
-        # `all-tests` gate for exactly that reason, so a check placed there can
-        # never fail a build -- and an advisory linter is a job nobody reads.
-        # This job is inside the blocking suite, so actionlint blocks.
+        # WORKFLOW LINT LIVES IN THIS JOB, AND THAT IS DELIBERATE. It used to sit
+        # next to ci.yml's `lint` job, which ran `nf-core lint ... || true` and was
+        # excluded from the `all-tests` gate for exactly that reason -- a check
+        # placed there could never fail a build, and an advisory linter is a job
+        # nobody reads. (That job is gone entirely as of Phase 7.) This job is
+        # inside the blocking suite, so actionlint blocks.
         #
         # It matters more now than it did: the setup steps live in
         # `.github/actions/**` and the suite itself is a reusable workflow, so a
