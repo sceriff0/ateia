@@ -278,6 +278,18 @@ jobs:
           # The exact immutable tag the modules pull, plus a moving major-line tag for humans.
           # `:latest` is deliberately absent -- the pipeline never pulls it.
           tags: ${{ env.IMAGE_NAMESPACE }}/mirage-${{ matrix.dir }}:${{ needs.setup.outputs.version }}
-          # Per-image GitHub Actions layer cache.
+          # Per-image GitHub Actions layer cache. THE `scope=` IS LOAD-BEARING,
+          # not decoration: without it all eleven images share one cache scope
+          # and evict each other against the repository-wide 10 GB budget, so
+          # every build is effectively cold. It is the buildx equivalent of rule
+          # 2 in `.github/actions/setup-nextflow/action.yml`, where the three
+          # caching rules for this repository are written out. `mode=max` belongs
+          # on `cache-to` only -- it is what tells buildx to export intermediate
+          # layers, and it is meaningless on `cache-from`.
+          #
+          # If layer thrashing is ever observed, the migration is to
+          # `type=registry,ref=<image>:buildcache,mode=max`, which is not subject
+          # to the Actions cache budget. No source settles a threshold for that,
+          # so migrate reactively rather than pre-emptively.
           cache-from: type=gha,scope=${{ matrix.dir }}
           cache-to: type=gha,scope=${{ matrix.dir }},mode=max
