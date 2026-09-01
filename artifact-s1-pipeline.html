@@ -1,9 +1,4 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MIRAGE Supplementary Figure S1 — Pipeline</title>
+<title>MIRAGE Pipeline S1</title>
 <style>
   /* ======================================================================
      MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4)
@@ -246,8 +241,7 @@
   .pcol h4:first-child{margin-top:0;}
 
 </style>
-</head>
-<body>
+
 
 <div class="sheet">
 
@@ -257,10 +251,10 @@
   </div>
   <nav class="figset" aria-label="Supplementary figure set">
     <span class="self">S1 · pipeline</span>
-    <a href="registration-schematic.html">S2 · registration</a>
-    <a href="qc-schematic.html">S3 · quality control</a>
-    <a href="zarr-schematic.html">S4 · lazy reads</a>
-    <a href="benchmark-schematic.html">S5 · benchmark arms</a>
+    <span>S2 · registration</span>
+    <span>S3 · quality control</span>
+    <span>S4 · lazy reads</span>
+    <span>S5 · benchmark arms</span>
   </nav>
   <p class="standfirst">A step-gated Nextflow DSL2 workflow that aligns multiplexed immunofluorescence slides,
     segments every cell, quantifies each marker per compartment, and exports QuPath-compatible GeoJSON, a
@@ -705,7 +699,7 @@
         <code>arms.yaml</code> registers the <b>real study slides</b> once per configuration to answer
         <i>which configuration do we ship, and what does a real slide cost?</i> Neither replaces the other:
         the sweep's registration offset is injected and known, so its accuracy numbers describe a synthetic
-        difficulty, not tissue. The arm design is <a href="benchmark-schematic.html">S5</a>.</p></div>
+        difficulty, not tissue. The arm design is <span>S5</span>.</p></div>
     <div class="bnote">The sweep harness drives the pipeline as a black box. The <b>arm</b> harness no longer
       can: <code>registration_method=ashlar</code> is a third backend <i>inside</i> the pipeline (two modules and
       three params), because scoring it out-of-band produced numbers in a different metric family that shared no
@@ -851,5 +845,4 @@
     and verified against a stub run.</span>
   </p>
 </div>
-</body>
-</html>
+

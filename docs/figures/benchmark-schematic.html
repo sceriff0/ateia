@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIRAGE Supplementary Figure S5 — Benchmark arms</title>
+<style>
+  /* ======================================================================
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4)
+     ----------------------------------------------------------------------
+     DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
+     this set has to survive being detached from the repository — attached to
+     a submission, mailed, opened from file:// — so it may not reference an
+     external stylesheet, not even a sibling one. This block is therefore
+     repeated verbatim in docs/figures/pipeline-schematic.html,
+     docs/figures/registration-schematic.html, docs/figures/qc-schematic.html
+     and docs/figures/zarr-schematic.html, and is ported (with the slate
+     counterpart the figures deliberately lack) to docs/stylesheets/extra.css.
+     Change one, change all five.
+
+     SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
+     paper ground.
+
+     ONE FONT STACK, shared with docs/stylesheets/extra.css so the site and
+     the figures really do read as one artefact (that file's header claimed
+     they did while leading with a different family).
+
+     ONE BREAKPOINT LADDER for the whole set: 1040 · 880 · 760 · 640 · 520.
+     No figure introduces a sixth rung.
+
+     ONE SIZING SCALE: .tag/.tag-def/.tag-alt .53rem / 1px 4px · .pp span
+     .62rem / 1px 5px · table.pr td.k .7rem, td.v/td.val .68rem ·
+     .masthead h1 max-width 72ch.
+
+     OVERFLOW DISCIPLINE: every grid track is minmax(0,…) and every grid or
+     flex item carries min-width:0. Without it a track's automatic minimum is
+     min-content, so one long identifier (GENERATE_POSTPROCESSING_QC) widens
+     its column and pushes the whole grid outside the panel border instead of
+     wrapping.
+     ====================================================================== */
+  :root{
+    --paper:#ffffff; --panel:#ffffff; --sub:#f6f7f8; --sub-2:#eef0f2;
+    --ink:#0f1113; --ink-2:#3c4147; --ink-3:#767c83;
+    --rule:#c3c8cd; --rule-2:#e5e8ea; --bar:#1b1e22;
+    --serif:Georgia,"Times New Roman",Cambria,"Noto Serif",serif;
+    --sans:"Inter","Helvetica Neue",Helvetica,Arial,"Segoe UI",system-ui,sans-serif;
+    --mono:"JetBrains Mono","SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+  .sheet{max-width:1060px;margin:0 auto;padding:40px 26px 72px;}
+
+  .masthead{border-bottom:2px solid var(--ink);padding-bottom:12px;}
+  .masthead .kick{font-size:.71rem;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);font-weight:700;}
+  .masthead h1{font-weight:700;font-size:1.32rem;letter-spacing:-.01em;margin:.3em 0 0;max-width:72ch;line-height:1.26;text-wrap:balance;}
+  .standfirst{font-family:var(--serif);font-size:.95rem;color:var(--ink-2);margin:12px 0 30px;max-width:82ch;}
+
+  /* Figure-set navigation. Relative filenames, so the strip works both from
+     file:// on a detached copy sitting beside its siblings and from the built
+     MkDocs site, which copies docs/figures/ through verbatim. */
+  .figset{display:flex;gap:0;flex-wrap:wrap;align-items:center;margin:12px 0 0;
+    font-family:var(--mono);font-size:.63rem;letter-spacing:.05em;text-transform:uppercase;}
+  .figset a,.figset span{border:1px solid var(--rule);padding:4px 9px;margin:0 -1px 0 0;
+    color:var(--ink-2);text-decoration:none;white-space:nowrap;}
+  .figset a:hover{border-color:var(--ink);color:var(--ink);}
+  .figset .self{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:700;}
+
+  .panel{position:relative;background:var(--panel);border:1px solid var(--rule);padding:20px 20px 18px;margin:0 0 20px;}
+  .panel > .plabel{position:absolute;top:-1px;left:-1px;background:var(--ink);color:#fff;font-weight:700;
+    font-size:.85rem;line-height:1;padding:6px 9px;}
+  .panel-head{margin:2px 0 16px 26px;}
+  .panel-head h2{font-size:1.02rem;font-weight:700;letter-spacing:-.01em;margin:0;}
+  .panel-head p{font-size:.85rem;color:var(--ink-2);margin:3px 0 0;max-width:84ch;}
+
+  code{font-family:var(--mono);font-size:.82em;background:var(--sub);border:1px solid var(--rule-2);border-radius:2px;padding:.5px 4px;}
+  .tbl-scroll{overflow-x:auto;}
+
+  /* parameter chips */
+  .pp{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px;min-width:0;}
+  .pp span{font-family:var(--mono);font-size:.62rem;background:var(--sub);border:1px solid var(--rule-2);padding:1px 5px;
+    color:var(--ink-2);max-width:100%;min-width:0;overflow-wrap:anywhere;}
+  .pp b{color:var(--ink);font-weight:700;}
+  .tag{font-family:var(--mono);font-size:.53rem;text-transform:uppercase;letter-spacing:.04em;padding:1px 4px;
+    font-weight:700;border:1px solid var(--rule);color:var(--ink-2);background:var(--sub-2);white-space:nowrap;}
+  .tag-on{border-color:var(--ink);color:var(--ink);background:#fff;}
+  .tag-def{font-family:var(--mono);font-size:.53rem;background:var(--ink);color:#fff;padding:1px 4px;font-weight:700;white-space:nowrap;}
+  .tag-alt{font-family:var(--mono);font-size:.53rem;background:var(--sub);color:var(--ink-2);border:1px solid var(--rule);padding:1px 4px;white-space:nowrap;}
+
+  /* parameter tables (td.v in S1/S3, td.val in S2 — same scale) */
+  table.pr{border-collapse:collapse;width:100%;font-size:.78rem;}
+  table.pr td{padding:3.5px 4px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
+  table.pr tr:last-child td{border-bottom:none;}
+  table.pr td.k{font-family:var(--mono);font-size:.7rem;font-weight:700;white-space:nowrap;}
+  table.pr td.v,table.pr td.val{font-family:var(--mono);font-size:.68rem;color:var(--ink-2);white-space:nowrap;
+    padding-right:8px;font-variant-numeric:tabular-nums;}
+  table.pr td.v.w{white-space:normal;overflow-wrap:anywhere;}
+  table.pr td.d{color:var(--ink-2);}
+  .nul{color:var(--ink-3);font-style:italic;}
+
+  .caption{font-family:var(--serif);font-size:.83rem;color:var(--ink-2);line-height:1.62;border-top:1px solid var(--rule);padding-top:16px;margin-top:8px;}
+  .caption b{color:var(--ink);}
+  .footnote{font-family:var(--sans);font-size:.72rem;color:var(--ink-3);margin-top:14px;display:block;}
+
+
+  /* a — samplesheet */
+  table.ss{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:.72rem;font-variant-numeric:tabular-nums;}
+  table.ss caption{font-family:var(--mono);font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);text-align:left;padding:0 0 6px;}
+  table.ss th{text-align:left;font-weight:700;color:var(--ink-2);border-bottom:1.5px solid var(--ink);padding:5px 8px;white-space:nowrap;}
+  table.ss td{padding:5px 8px;border-bottom:1px solid var(--rule-2);white-space:nowrap;}
+  table.ss tr:last-child td{border-bottom:none;}
+  .t{font-weight:700;color:var(--ink);} .f{color:var(--ink-3);}
+  .nuc{font-weight:700;text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:2px;}
+  .ssnote{font-family:var(--serif);font-size:.78rem;color:var(--ink-2);margin-top:9px;}
+
+  /* b — step gate */
+  .gate{display:flex;border:1px solid var(--rule);flex-wrap:wrap;}
+  .gate .g{flex:1 1 150px;min-width:0;padding:12px 14px;border-right:1px solid var(--rule);border-top:3px solid var(--ink);overflow-wrap:anywhere;}
+  .gate .g:last-child{border-right:none;}
+  .gate .g .k{font-family:var(--mono);font-size:.63rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);}
+  .gate .g .v{font-weight:700;margin-top:2px;}
+  .gate .g .d{font-size:.8rem;color:var(--ink-2);margin-top:3px;}
+  .gnote{font-family:var(--mono);font-size:.73rem;color:var(--ink-2);margin-top:11px;display:flex;gap:14px;flex-wrap:wrap;}
+  .gnote b{color:var(--ink);}
+
+  /* c — pipeline lanes (overflow discipline: see the shared base above) */
+  .flow{display:grid;grid-template-columns:minmax(0,1fr) 16px minmax(0,1fr) 16px minmax(0,1fr) 16px minmax(0,1fr);
+    gap:3px;align-items:start;}
+  @media(max-width:1040px){.flow{grid-template-columns:minmax(0,1fr);}}
+  .lane{border:1px solid var(--rule);min-width:0;}
+  .lane > h3{margin:0;font-family:var(--mono);font-size:.68rem;font-weight:700;letter-spacing:.03em;
+    padding:8px 9px;background:var(--bar);color:#fff;display:flex;justify-content:space-between;align-items:center;gap:5px;
+    min-width:0;overflow-wrap:anywhere;}
+  .lane > h3 span:last-child{font-weight:400;color:#c7cacd;white-space:nowrap;flex:none;}
+  .lane .body{padding:9px;display:flex;flex-direction:column;gap:8px;background:var(--sub);min-width:0;}
+  .mod{background:var(--panel);border:1px solid var(--rule);border-left:2.5px solid var(--ink);padding:8px 9px;min-width:0;}
+  .mod .n{font-family:var(--mono);font-weight:700;font-size:.71rem;display:flex;flex-wrap:wrap;gap:5px;align-items:center;
+    min-width:0;overflow-wrap:anywhere;}
+  .mod .x{font-size:.75rem;color:var(--ink-2);margin-top:4px;overflow-wrap:anywhere;}
+  .arrow{display:flex;align-items:center;justify-content:center;padding-top:40px;color:var(--ink-3);font-size:1rem;}
+  @media(max-width:1040px){.arrow{padding:2px;transform:rotate(90deg);}}
+  .ckpt{font-family:var(--mono);font-size:.61rem;color:var(--ink-2);border:1px dashed var(--rule);padding:5px 7px;
+    background:var(--panel);min-width:0;overflow-wrap:anywhere;}
+  .grp{border:1px dashed var(--ink-3);background:var(--sub-2);padding:7px;display:flex;flex-direction:column;gap:7px;min-width:0;}
+  .grp .bh{font-family:var(--mono);font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);}
+  .grp .opt{background:var(--panel);border:1px solid var(--rule);padding:6px 7px;min-width:0;}
+  .grp .opt .oh{font-family:var(--mono);font-weight:700;font-size:.66rem;display:flex;justify-content:space-between;gap:5px;
+    flex-wrap:wrap;align-items:center;min-width:0;overflow-wrap:anywhere;}
+  .grp .opt .ox{font-size:.7rem;color:var(--ink-2);margin-top:2px;overflow-wrap:anywhere;}
+  .after{display:flex;gap:12px;flex-wrap:wrap;margin-top:14px;}
+  .after .mod{flex:1 1 260px;min-width:0;}
+
+  /* e — outputs */
+  .outs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;}
+  @media(max-width:880px){.outs{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  @media(max-width:520px){.outs{grid-template-columns:minmax(0,1fr);}}
+  .out{border:1px solid var(--rule);border-top:2.5px solid var(--ink);background:var(--panel);padding:11px 12px;min-width:0;}
+  .out .p{font-family:var(--mono);font-size:.66rem;font-weight:700;word-break:break-all;}
+  .out .role{font-family:var(--mono);font-size:.55rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin-top:5px;}
+  .out ul{margin:6px 0 0;padding-left:14px;font-size:.75rem;color:var(--ink-2);}
+  .out li{margin:2px 0;}
+  .outnote{font-family:var(--serif);font-size:.78rem;color:var(--ink-2);margin-top:11px;}
+
+  /* d — segmentation backends */
+  table.bk{border-collapse:collapse;width:100%;font-size:.75rem;}
+  table.bk th{text-align:left;font-weight:700;font-size:.78rem;color:var(--ink);border-bottom:1.5px solid var(--ink);
+    padding:6px 9px;vertical-align:bottom;}
+  table.bk th:first-child{width:110px;}
+  table.bk td{padding:6px 9px;border-bottom:1px solid var(--rule-2);vertical-align:top;color:var(--ink-2);}
+  table.bk tr:last-child td{border-bottom:none;}
+  table.bk td.rk{font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.04em;
+    color:var(--ink-3);font-weight:700;white-space:nowrap;}
+  table.bk td.rk .sm{text-transform:none;letter-spacing:0;font-weight:400;font-size:.9em;}
+  table.bk td.hi{background:var(--sub);color:var(--ink);}
+  table.bk b{color:var(--ink);}
+  /* Two columns, not four: each of these holds a three-column parameter table
+     whose key alone runs to ~175px (seg_cellsam_bbox_threshold). At four
+     columns the track is 232px and the table overflowed the panel at every
+     viewport width. minmax(0,…) + the td overrides below keep it contained. */
+  .bkp{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 22px;margin-top:20px;}
+  @media(max-width:640px){.bkp{grid-template-columns:minmax(0,1fr);}}
+  .bkp > div{min-width:0;}
+  /* Parameter names here are long and the track is narrow, so they wrap rather
+     than push the table wide. The two-column .pgrid in panel i is roughly twice
+     as wide and keeps the nowrap default. */
+  .bkp table.pr td.k,.bkp table.pr td.v{white-space:normal;overflow-wrap:anywhere;}
+
+  /* f — resources */
+  .rescols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 22px;align-items:start;}
+  .rescols > div{min-width:0;}
+  @media(max-width:880px){.rescols{grid-template-columns:minmax(0,1fr);}}
+  .rh{font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);
+    margin:0 0 5px;padding-bottom:3px;border-bottom:1px solid var(--ink);}
+  table.rs{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:.66rem;font-variant-numeric:tabular-nums;}
+  table.rs th{text-align:left;font-weight:700;color:var(--ink-2);border-bottom:1.5px solid var(--ink);padding:4px 6px;white-space:nowrap;}
+  table.rs th.n,table.rs td.n{text-align:right;}
+  table.rs td{padding:3px 6px;border-bottom:1px solid var(--rule-2);white-space:nowrap;}
+  table.rs tr:last-child td{border-bottom:none;}
+  table.rs td.lbl{color:var(--ink-3);}
+  .own{font-family:var(--mono);font-size:.52rem;text-transform:uppercase;letter-spacing:.03em;padding:0 3px;
+    border:1px solid var(--rule);color:var(--ink-2);}
+  .own-w{border-color:var(--ink);color:var(--ink);font-weight:700;}
+  .resnote{font-family:var(--serif);font-size:.78rem;color:var(--ink-2);margin-top:12px;}
+
+  /* g — add_cycle */
+  .cyc{border:1px solid var(--rule);background:var(--sub);padding:14px 15px;}
+  .cyc .cmd{font-family:var(--mono);font-size:.72rem;color:var(--ink);font-weight:700;overflow-x:auto;
+    border-left:2.5px solid var(--ink);padding-left:10px;}
+  .cyc .steps{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px;}
+  .cyc .st{flex:1 1 150px;min-width:0;background:var(--panel);border:1px solid var(--rule);border-top:2.5px solid var(--ink);padding:9px 10px;overflow-wrap:anywhere;}
+  .cyc .st .h{font-family:var(--mono);font-weight:700;font-size:.7rem;}
+  .cyc .st .d{font-size:.75rem;color:var(--ink-2);margin-top:3px;}
+  .cyc .st .r{display:inline-block;font-family:var(--mono);font-size:.54rem;background:var(--ink);color:#fff;padding:1px 5px;margin-top:6px;font-weight:700;}
+
+  /* h — benchmark */
+  .bnote{border-left:3px solid var(--ink);background:var(--sub);padding:9px 12px;font-family:var(--mono);font-size:.73rem;color:var(--ink-2);margin-bottom:16px;}
+  .bnote b{color:var(--ink);}
+  .harness{display:flex;flex-wrap:wrap;gap:5px;align-items:center;font-family:var(--mono);font-size:.67rem;margin-bottom:18px;}
+  .harness .h{border:1px solid var(--rule);background:var(--panel);padding:5px 8px;white-space:nowrap;}
+  .harness .h.pipe{border:1.5px solid var(--ink);color:var(--ink);font-weight:700;}
+  .harness .a{color:var(--ink-3);}
+  .sigs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+  @media(max-width:880px){.sigs{grid-template-columns:minmax(0,1fr);}}
+  .sig{border:1px solid var(--rule);border-top:2.5px solid var(--ink);padding:11px 12px;background:var(--panel);min-width:0;overflow-wrap:anywhere;}
+  .sig h4{margin:0 0 3px;font-size:.87rem;}
+  .sig .src{font-family:var(--mono);font-size:.6rem;color:var(--ink-3);margin-bottom:7px;}
+  .sig ul{margin:0;padding-left:15px;font-size:.77rem;color:var(--ink-2);}
+  .sig li{margin:2px 0;}
+  table.dl{border-collapse:collapse;width:100%;font-size:.75rem;margin-top:16px;}
+  table.dl th{text-align:left;font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--ink-3);border-bottom:1.5px solid var(--ink);padding:5px 7px;}
+  table.dl td{padding:4px 7px;border-bottom:1px solid var(--rule-2);vertical-align:top;color:var(--ink-2);}
+  table.dl tr:last-child td{border-bottom:none;}
+  table.dl td.k{font-family:var(--mono);font-size:.68rem;font-weight:700;color:var(--ink);white-space:nowrap;}
+
+  /* i — parameters */
+  .pgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 26px;}
+  @media(max-width:760px){.pgrid{grid-template-columns:minmax(0,1fr);}}
+  .pcol{min-width:0;}
+  /* Below the 880 rung the two .pgrid tracks are too narrow for the longest keys
+     (spatialdata_residual_join_max_px) to stay on one line. */
+  @media(max-width:880px){table.pr td.k,table.pr td.v{white-space:normal;overflow-wrap:anywhere;}}
+  .pcol h4{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);
+    margin:14px 0 4px;padding-bottom:3px;border-bottom:1px solid var(--ink);}
+  .pcol h4:first-child{margin-top:0;}
+
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  <div class="masthead">
+    <div class="kick">Supplementary Figure S5</div>
+    <h1>Ranking three registration backends on real tissue: a factored arm design, the shared metric that makes it answerable, and the stage vocabulary that does not align</h1>
+  </div>
+  <nav class="figset" aria-label="Supplementary figure set">
+    <a href="pipeline-schematic.html">S1 · pipeline</a>
+    <a href="registration-schematic.html">S2 · registration</a>
+    <a href="qc-schematic.html">S3 · quality control</a>
+    <a href="zarr-schematic.html">S4 · lazy reads</a>
+    <span class="self">S5 · benchmark arms</span>
+  </nav>
+  <p class="standfirst">Two harnesses answer two questions. <code>sweep.yaml</code> rescales <b>synthetic</b> images
+    across a size × channel matrix to fit the cost model that sizes the resource directives. <code>arms.yaml</code>
+    registers the <b>real study slides</b> once per configuration to decide what to ship. This figure is the second.
+    Its central problem is not compute: it is that a cross-backend ranking needs one metric all three backends can be
+    scored on, and the obvious column — "the final stage" — does not mean the same thing in each.</p>
+
+  <!-- a — THE NAIVE EXPECTATION -->
+  <section class="panel">
+    <span class="plabel">a</span>
+    <div class="panel-head"><h2>The comparison you cannot afford to run</h2>
+      <p>The instinctive design is a full cross-product: every backend × every knob × every segmenter, then read off
+        the best number. On real whole-slide images that design is unaffordable and, worse, confounded.</p></div>
+    <div class="gate">
+      <div class="g"><div class="k">the instinct</div><div class="v">cross everything</div><div class="d">3 backends × their knobs × 3 QC segmenters × 3 segmentation backends, per patient.</div></div>
+      <div class="g"><div class="k">why it is unaffordable</div><div class="v">the expensive half repeats</div><div class="d">Crossing a cheap axis against an expensive one re-pays for the expensive one at every level of the cheap one.</div></div>
+      <div class="g"><div class="k">why it is confounded</div><div class="v">segmentation arms differ</div><div class="d">Comparing segmenters across runs that also <i>registered</i> differently measures the two together.</div></div>
+    </div>
+    <div class="gnote">
+      <span>observed on real slides: <b>REGISTER 483 GB</b></span>
+      <span><b>MERGE_AND_PYRAMID 6.5 h</b></span>
+      <span>every count below is <b>per patient</b> — read them as cohort multipliers</span>
+    </div>
+  </section>
+
+  <!-- b — FACTORED, NOT CROSSED -->
+  <section class="panel">
+    <span class="plabel">b</span>
+    <div class="panel-head"><h2>Factored, never crossed — each stage paid for once</h2>
+      <p>Three arms, each answering one question, each resuming from work an earlier arm already did. The step gate
+        (<code>--start</code> / <code>--stop</code>, figure <a href="pipeline-schematic.html">S1</a> panel b) is what
+        makes the factoring possible: an arm runs only the step it varies.</p></div>
+    <div class="harness">
+      <span class="h">arms.yaml</span><span class="a">→</span><span class="h">build_arm_plan.py</span><span class="a">→</span>
+      <span class="h">arms.csv</span><span class="a">→</span><span class="h">run_arms.sh</span><span class="a">→</span>
+      <span class="h pipe">16 runs / patient</span><span class="a">→</span><span class="h">make_tables.py</span><span class="a">→</span><span class="h">paper_data/*.csv</span>
+    </div>
+    <div class="sigs">
+      <div class="sig"><h4>Arm 1 — registration</h4><div class="src">--start registration --stop registration</div>
+        <ul>
+          <li><b>9 arms</b>: 6 VALIS + 2 ASHLAR + 1 STARE</li>
+          <li>All resume from <b>one</b> shared preprocessing run (<code>preprocess_shared</code>)</li>
+          <li>Nothing downstream of registration is run — it cannot change the staged registration QC</li>
+          <li><code>reg_qc=2</code> still segments the native slides, but inside the registration step</li>
+        </ul></div>
+      <div class="sig"><h4>Arm 2 — segmentation</h4><div class="src">--start segmentation</div>
+        <ul>
+          <li><b>3 arms</b>: instantseg / stardist / cellsam</li>
+          <li>All resume from <b>one</b> registration arm's <code>csv/registered.csv</code></li>
+          <li><code>from_arm = valis_high_micro2</code> — the configuration intended to ship</li>
+          <li>So the segmenter comparison is not confounded by differing registration</li>
+        </ul></div>
+      <div class="sig"><h4>Arm 3 — compute profile</h4><div class="src">no step gate; full pipeline, traced</div>
+        <ul>
+          <li><b>1 arm</b> (<code>compute_all</code>), <code>repeats: 1</code></li>
+          <li>The only arm that measures what the other two skip: SEGMENT, quantification, export, MERGE_AND_PYRAMID</li>
+          <li>Rows join the synthetic sweep's tables as <code>varied_axis=real_compute</code></li>
+          <li>Two patients bracketing the size range give a 2-point anchor against the synthetic fits</li>
+        </ul></div>
+    </div>
+    <div class="tbl-scroll"><table class="dl">
+      <thead><tr><th>runs per patient</th><th>n</th><th>what it buys</th></tr></thead>
+      <tbody>
+        <tr><td class="k">preprocess_shared</td><td>1</td><td>Paid once; all 11 registration-step runs resume from it.</td></tr>
+        <tr><td class="k">registration arms</td><td>9</td><td>6 VALIS (mode × depth) + 2 ASHLAR (tile) + 1 STARE.</td></tr>
+        <tr><td class="k">QC-segmenter cross</td><td>2</td><td>The reference arm re-scored with stardist and cellsam (panel f).</td></tr>
+        <tr><td class="k">segmentation arms</td><td>3</td><td>Three backends on one shared registration.</td></tr>
+        <tr><td class="k">compute profile</td><td>1</td><td>Full traced run for the per-process cost breakdown.</td></tr>
+        <tr><td class="k"><b>total</b></td><td><b>16</b></td><td>A full cross of the same axes would be several times this.</td></tr>
+      </tbody></table></div>
+  </section>
+
+  <!-- c — THE REGISTRATION ARM -->
+  <section class="panel">
+    <span class="plabel">c</span>
+    <div class="panel-head"><h2>The registration arm — three backends, one metric</h2>
+      <p>A cross-backend ranking is answerable at all only because the seg-overlap scorer is method-agnostic:
+        <code>bin/warp_seg_qc.py</code> takes <code>--method</code> and builds its warper from a VALIS pickle
+        <i>or</i> a STARE-style M0 + mesh manifest. ASHLAR joins the table because
+        <code>bin/ashlar_solve.py</code> rewrites its per-tile placements into that same manifest.</p></div>
+    <div class="grp">
+      <div class="bh">9 registration arms — a grid, and two single points</div>
+      <div class="opt"><div class="oh"><span>VALIS — 6 arms</span><span class="tag-def">the grid</span></div>
+        <div class="ox"><code>memory_mode</code> × <code>reg_micro_reg</code> = 2 × 3. <b>Not a 2×2.</b>
+          <code>reg_micro_reg</code> is a <i>depth</i> (0 none, 1 micro-rigid, 2 + micro non-rigid), and
+          <code>memory_mode</code> low/high are <b>different feature matchers</b> — BRISK/RANSAC versus
+          SuperPoint/SuperGlue — not one matcher at two resolutions.</div>
+        <div class="pp" style="margin-top:6px"><span>memory_mode <b>low, high</b></span><span>reg_micro_reg <b>0, 1, 2</b></span></div></div>
+      <div class="opt"><div class="oh"><span>ASHLAR — 2 arms</span><span class="tag-alt">external baseline</span></div>
+        <div class="ox">A backend, not a cell of the grid above: it has neither VALIS-only param and carries
+          <b>NA</b> for both. Fans out over <code>tile_size</code> because that is its fairness knob (panel e).
+          Arm names embed the tile (<code>ashlar_tile1024</code>) because the consumer falls back to parsing the
+          directory name when the manifest is missing — two arms differing only by an unread column would render
+          as one duplicated box.</div>
+        <div class="pp" style="margin-top:6px"><span>tile_size <b>1024, 4096</b></span><span>overlap <b>0.1</b></span><span>max_shift_um <b>30</b></span></div></div>
+      <div class="opt"><div class="oh"><span>STARE — 1 arm</span><span class="tag-alt">at its defaults</span></div>
+        <div class="ox">The other in-house backend, one point of comparison against the whole VALIS grid. Also
+          carries NA for <code>memory_mode</code> and <code>reg_micro_reg</code>.</div>
+        <div class="pp" style="margin-top:6px"><span>tiled_defaults</span></div></div>
+    </div>
+    <div class="bnote">BLANK IS NOT ZERO. <b>VALIS_ONLY</b> = <code>memory_mode</code>, <code>reg_micro_reg</code>;
+      <b>ASHLAR_ONLY</b> = <code>reg_ashlar_tile</code>, <code>reg_ashlar_overlap</code>,
+      <code>reg_ashlar_max_shift_um</code>. Each is written blank on every arm of the other backends, so the
+      consumer can tell <i>not applicable</i> from <i>at default</i> — and so <code>run_arms.sh</code>'s
+      blank-guard never passes a VALIS run <code>--reg_ashlar_tile ""</code>, which schema validation rejects.</div>
+  </section>
+
+  <!-- d — THE STAGE VOCABULARY -->
+  <section class="panel">
+    <span class="plabel">d</span>
+    <div class="panel-head"><h2>The backends do not share a stage vocabulary</h2>
+      <p>Every arm emits accuracy per <i>transform stage</i>, and the ranking reduces each run to its final,
+        most-registered stage. But the stage names come from <code>lib/WarpBackends.groovy</code>, and the three
+        backends do not use the same ones. Only <code>native</code> and <code>rigid</code> are shared as both a
+        spelling <i>and</i> a meaning.</p></div>
+    <div class="tbl-scroll"><table class="dl">
+      <thead><tr><th>backend</th><th>stage vocabulary</th><th>terminal stage</th><th>rank</th></tr></thead>
+      <tbody>
+        <tr><td class="k">valis</td><td><code>native</code> → <code>rigid</code> → <code>non_rigid</code> → <code>micro</code></td><td class="k">micro</td><td>3</td></tr>
+        <tr><td class="k">tiled (STARE)</td><td><code>native</code> → <code>rigid</code> → <code>refined</code></td><td class="k">refined</td><td>2</td></tr>
+        <tr><td class="k">ashlar</td><td><code>native</code> → <code>rigid</code> → <code>refined</code></td><td class="k">refined</td><td>2</td></tr>
+      </tbody></table></div>
+    <div class="bnote">A LIVE BUG, NOT A GAP WAITING FOR ASHLAR. <code>_STAGE_RANK</code> was missing
+      <code>refined</code>. An unranked stage maps to <b>−1</b> via <code>.fillna(-1)</code> — the <i>same</i> rank
+      as <code>native</code>, which is also unranked when missing — so <code>sort_values("_rank").groupby(…).tail(1)</code>
+      picked STARE's terminal stage by nothing but the stable-sort tie-break happening to place it after
+      <code>native</code>. Every STARE run in the paper tables was one upstream reordering — a different glob order,
+      a pandas version whose sort is not stable here — away from reporting its <b>unregistered</b> accuracy as its
+      headline number. Nothing failed, and nothing would have.</div>
+    <div class="sigs">
+      <div class="sig"><h4>The fix</h4><div class="src">benchmarks/analysis/lib/quality.py</div>
+        <ul><li><code>native 0 · rigid 1 · non_rigid 2 · refined 2 · micro 3</code></li>
+          <li><code>non_rigid</code> and <code>refined</code> share rank 2 deliberately: both are "one non-rigid
+            step past rigid", in different backends' spellings</li>
+          <li>Ranked, not derived — the order is a fact about the backends, not about any one table</li></ul></div>
+      <div class="sig"><h4>The guard</h4><div class="src">benchmarks/tests/test_stage_rank_covers_every_backend.py</div>
+        <ul><li>Reads the stage vocabularies <b>out of</b> <code>WarpBackends.groovy</code> rather than restating them</li>
+          <li>A fourth backend with a new stage name fails this test instead of silently degrading the table</li>
+          <li>Includes a test that the scanner itself still finds the vocabularies — a guard that cannot fire is not a guard</li></ul></div>
+      <div class="sig"><h4>The consequence for reading the table</h4><div class="src">paper_data/registration_accuracy.csv</div>
+        <ul><li>Each arm is ranked on <b>its own</b> final stage — the stage column is not a shared axis</li>
+          <li>Read ASHLAR against VALIS's <code>rigid</code> for the like-for-like number</li>
+          <li>Read it against <code>micro</code> to quantify what non-rigid buys</li>
+          <li>Reporting only the second <b>overstates</b> VALIS's advantage</li></ul></div>
+    </div>
+  </section>
+
+  <!-- e — FAIRNESS KNOB -->
+  <section class="panel">
+    <span class="plabel">e</span>
+    <div class="panel-head"><h2>Tile size is a fairness knob, not a cost knob</h2>
+      <p>Most benchmark knobs trade compute for accuracy within one method. Grid granularity does not: it changes how
+        much <i>freedom</i> a piecewise method has, so setting it differently across backends silently decides the
+        result before any slide is read.</p></div>
+    <div class="cyc">
+      <div class="st"><div class="h">ASHLAR computes one shift per tile</div><div class="d">Its transform is piecewise
+        translational, so a finer grid buys it more local freedom — strictly more expressive, not merely slower.</div><span class="r">reg_ashlar_tile</span></div>
+      <div class="st"><div class="h">STARE solves a mesh per tile</div><div class="d">The direct analogue: tile core
+        size sets both the fan-out and the mesh resolution.</div><span class="r">reg_tiled_tile</span></div>
+      <div class="st"><div class="h">So they must be bracketed, not fixed</div><div class="d">ASHLAR is swept at
+        <b>1024</b> and <b>4096</b> — the two ends of STARE's swept range <b>[1024, 2048, 4096]</b> — rather than
+        pinned at one value.</div><span class="r">a list, not a scalar</span></div>
+      <div class="st"><div class="h">Otherwise the comparison is pre-decided</div><div class="d">ASHLAR at a fine grid
+        against STARE at a coarse one is not a backend comparison; it is a granularity comparison wearing one.</div><span class="r">the trap</span></div>
+    </div>
+    <div class="bnote">CARRIED INTO THE TABLES. <code>reg_ashlar_tile</code> is in both
+      <code>make_tables.py</code>'s <code>CONFIG_COLS</code> and <code>run_cost_summary</code>'s carry list —
+      without it, two ASHLAR arms differing only by tile size collapse into indistinguishable rows.</div>
+  </section>
+
+  <!-- f — QC SEGMENTER CROSS -->
+  <section class="panel">
+    <span class="plabel">f</span>
+    <div class="panel-head"><h2>Who found the nuclei? — a robustness axis, not a quality claim</h2>
+      <p>The registration accuracy is measured on segmented nuclei, and <code>SEG_QC_SEGMENT</code> is
+        <code>SEGMENT</code> under an alias — so <code>params.seg_method</code> chooses the <i>measuring instrument</i>.
+        Varying it leaves the registration byte-identical and changes only how it is observed.</p></div>
+    <div class="gate">
+      <div class="g"><div class="k">what changes</div><div class="v">the instrument</div><div class="d">instantseg → stardist → cellsam, on an identical registration.</div></div>
+      <div class="g"><div class="k">what it can say</div><div class="v">is the verdict stable?</div><div class="d">If the arm ranking survives a change of segmenter, the headline number is robust.</div></div>
+      <div class="g"><div class="k">what it cannot say</div><div class="v">nothing about registration quality</div><div class="d">A better segmenter does not make a registration better. This is never a quality claim.</div></div>
+    </div>
+    <div class="gnote">
+      <span><b>cross: reference</b> → 2 extra runs (the reference arm only)</span>
+      <span><b>cross: all</b> → every arm × 3</span>
+      <span>reference_arm = <b>valis_high_micro2</b></span>
+      <span>start at <b>reference</b>: if stable there, crossing all buys a denser null result</span>
+    </div>
+  </section>
+
+  <!-- g — SCORING WITHOUT GROUND TRUTH -->
+  <section class="panel">
+    <span class="plabel">g</span>
+    <div class="panel-head"><h2>Scoring segmentation on tissue with no ground truth</h2>
+      <p>Real study slides have no annotated masks, so the segmentation arm cannot be scored against truth. Two
+        reference-free signals are used instead, and they answer different questions.</p></div>
+    <div class="sigs">
+      <div class="sig"><h4>agreement</h4><div class="src">→ paper_data/segmentation_agreement.csv</div>
+        <ul><li>Cross-method cell-count ratio and instance F1</li><li>Needs no new code and no ground truth</li>
+          <li>Answers "do the backends agree, and where do they not?"</li>
+          <li><b>Cannot rank</b> — three backends agreeing can be three backends wrong together</li></ul></div>
+      <div class="sig"><h4>cse</h4><div class="src">CellSegmentationEvaluator · optional</div>
+        <ul><li>A reference-free <i>quality</i> score, so it can rank rather than only compare</li>
+          <li><b>Off by default</b>: needs the <code>segeval</code> container published and
+            <code>skip_seg_quality_eval=false</code></li>
+          <li>Its QualityScore drifts with any downsample factor applied</li></ul></div>
+      <div class="sig"><h4>the compute profile</h4><div class="src">→ runs_master.csv · scaling_fits.csv</div>
+        <ul><li>Per-process peak RAM and wall-time from the Nextflow trace</li>
+          <li>Real-tissue rows sit beside the synthetic sweep's, tagged <code>varied_axis=real_compute</code></li>
+          <li>The only check that the synthetic scaling fits transfer to tissue at all</li></ul></div>
+    </div>
+  </section>
+
+  <!-- h — KNOBS -->
+  <section class="panel">
+    <span class="plabel">h</span>
+    <div class="panel-head"><h2>Every knob in <code>arms.yaml</code></h2>
+      <p>Values verbatim from <code>benchmarks/configs/arms.yaml</code>. <code>build_arm_plan.py</code> checks the
+        baseline block against <code>nextflow.config</code> exactly as the sweep's baseline guard does, so an arm can
+        never quietly pin a parameter the pipeline no longer has.</p></div>
+    <div class="pgrid">
+      <div class="pcol">
+        <h4>baseline — checked against nextflow.config</h4>
+        <table class="pr">
+          <tr><td class="k">reg_qc</td><td class="v">2</td><td class="d"><b>required</b>; an arm at reg_qc&lt;2 produces no accuracy row at all</td></tr>
+          <tr><td class="k">seg_method</td><td class="v">instantseg</td><td class="d">the QC segmenter unless crossed</td></tr>
+          <tr><td class="k">memory_mode</td><td class="v">high</td><td class="d">VALIS matcher</td></tr>
+          <tr><td class="k">reg_micro_reg</td><td class="v">2</td><td class="d">micro-reg depth</td></tr>
+          <tr><td class="k">registration_method</td><td class="v">valis</td><td class="d">baseline backend</td></tr>
+        </table>
+        <h4>registration arms</h4>
+        <table class="pr">
+          <tr><td class="k">valis.memory_mode</td><td class="v">[low, high]</td><td class="d">two different matchers</td></tr>
+          <tr><td class="k">valis.reg_micro_reg</td><td class="v">[0, 1, 2]</td><td class="d">a depth, not a flag</td></tr>
+          <tr><td class="k">tiled.enabled</td><td class="v">true</td><td class="d">1 arm at defaults</td></tr>
+          <tr><td class="k">ashlar.enabled</td><td class="v">true</td><td class="d">external baseline</td></tr>
+          <tr><td class="k">ashlar.tile_size</td><td class="v">[1024, 4096]</td><td class="d">brackets STARE's swept range</td></tr>
+          <tr><td class="k">ashlar.overlap_fraction</td><td class="v">0.1</td><td class="d">within-cycle stitching only</td></tr>
+          <tr><td class="k">ashlar.maximum_shift_um</td><td class="v">30</td><td class="d">µm; too small degrades <b>silently</b></td></tr>
+        </table>
+      </div>
+      <div class="pcol">
+        <h4>qc_segmenter_cross</h4>
+        <table class="pr">
+          <tr><td class="k">cross</td><td class="v">reference</td><td class="d">reference | all | none</td></tr>
+          <tr><td class="k">reference_arm</td><td class="v w">valis_high_micro2</td><td class="d">must name an arm the grid produces</td></tr>
+          <tr><td class="k">seg_method</td><td class="v w">[instantseg, stardist, cellsam]</td><td class="d">stardist and cellsam need site weights</td></tr>
+        </table>
+        <h4>segmentation_arms</h4>
+        <table class="pr">
+          <tr><td class="k">from_arm</td><td class="v w">valis_high_micro2</td><td class="d">the configuration intended to ship</td></tr>
+          <tr><td class="k">seg_method</td><td class="v w">[instantseg, stardist, cellsam]</td><td class="d">3 runs / patient</td></tr>
+          <tr><td class="k">score_with</td><td class="v w">[agreement, cse]</td><td class="d">cse is opt-in</td></tr>
+        </table>
+        <h4>compute_profile</h4>
+        <table class="pr">
+          <tr><td class="k">patients</td><td class="v">[]</td><td class="d">empty = all; prefer smallest + largest</td></tr>
+          <tr><td class="k">repeats</td><td class="v">1</td><td class="d">&gt;1 buys per-process variance at full real-slide cost</td></tr>
+        </table>
+        <h4>consumer contract — do not repackage</h4>
+        <table class="pr">
+          <tr><td class="k">seg QC</td><td class="v w">&lt;root&gt;/&lt;arm&gt;/&lt;patient&gt;/qc/registration/*_seg_qc.json</td><td class="d">read by registration_arms.R</td></tr>
+          <tr><td class="k">VALIS summary</td><td class="v w">&lt;root&gt;/&lt;arm&gt;/&lt;patient&gt;/registered/summary/*.csv</td><td class="d">VALIS arms only</td></tr>
+          <tr><td class="k">arms.csv</td><td class="v w">&lt;root&gt;/arms.csv</td><td class="d">written by build_arm_plan.py</td></tr>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- i — LIMITS -->
+  <section class="panel">
+    <span class="plabel">i</span>
+    <div class="panel-head"><h2>What this benchmark cannot tell you</h2>
+      <p>Stated so a reader does not infer completeness from the size of the table.</p></div>
+    <div class="outs">
+      <div class="out"><div class="p">no ground truth</div><div class="role">registration &amp; segmentation</div>
+        <ul><li>Every accuracy number is a <b>reference-free proxy</b> — seg-overlap of matched nuclei, not landmark error</li>
+          <li>Public-landmark TRE (ANHIR / ACROBAT) is a separate external check, not part of these arms</li></ul></div>
+      <div class="out"><div class="p">no non-rigid ASHLAR</div><div class="role">the baseline's ceiling</div>
+        <ul><li>ASHLAR attempts <b>no non-rigid warp at all</b> — only a piecewise translation per tile</li>
+          <li>Its arm cannot be read as "ASHLAR's best" against VALIS's best; it has no non-rigid mode to lose in</li></ul></div>
+      <div class="out"><div class="p">one cohort, one site</div><div class="role">generalization</div>
+        <ul><li><code>maximum_shift_um = 30</code> must exceed the real cross-cycle drift <b>for your cohort</b></li>
+          <li>Set too small it does not error — LayerAligner substitutes a model prediction and degrades silently</li></ul></div>
+      <div class="out"><div class="p">a ranking, not a significance test</div><div class="role">statistics</div>
+        <ul><li><code>repeats: 1</code> by default: no per-process variance, no error bars on cost</li>
+          <li>Arm ordering on a handful of patients is a point estimate, not a tested difference</li></ul></div>
+    </div>
+    <div class="bnote">AND ONE THING THE PIPELINE ITSELF DOES NOT DO: ASHLAR is a benchmark baseline, not a
+      production backend. <code>mode=add_cycle</code> rejects every method except <code>valis</code> — an
+      <b>allowlist</b>, since the earlier denylist named only <code>tiled</code> and would have let an
+      <code>ashlar</code> run register silently with VALIS under ASHLAR's name.</div>
+  </section>
+
+  <p class="caption"><b>Supplementary Figure S5. The real-sample arm benchmark.</b>
+    <b>(a)</b> A full cross-product of backends, knobs and segmenters is both unaffordable on whole-slide images —
+    REGISTER has been observed at 483 GB and MERGE_AND_PYRAMID at 6.5 h — and confounded, because comparing
+    segmenters across runs that also registered differently measures the two together.
+    <b>(b)</b> The design is therefore <i>factored</i>: three arms, 16 runs per patient, each expensive stage paid
+    for once. Nine registration arms resume from a single shared preprocessing run; three segmentation arms resume
+    from a single registration; one untruncated traced run supplies the per-process cost profile.
+    <b>(c)</b> Ranking three backends against one another is possible only because the seg-overlap scorer is
+    method-agnostic — it builds its warper from a VALIS pickle or an M0 + mesh manifest — and because ASHLAR's
+    per-tile placements are rewritten into that same manifest rather than scored out of band in a different metric
+    family. Parameters belonging to one backend are written blank, never zero, on the others.
+    <b>(d)</b> The backends do not share a stage vocabulary: VALIS emits native/rigid/non_rigid/micro, the manifest
+    backends native/rigid/refined. <code>refined</code> was absent from the rank table, so it collapsed to the same
+    rank as the unregistered <code>native</code> stage and the terminal stage was selected by a sort tie-break alone;
+    every STARE row was one upstream reordering away from publishing its unregistered accuracy as its headline
+    number. The rank table now covers both vocabularies and a test derives the expected stage names from
+    <code>lib/WarpBackends.groovy</code> so a fourth backend fails loudly instead of degrading the table.
+    <b>(e)</b> Grid granularity is a fairness knob rather than a cost knob — a finer grid makes a piecewise method
+    strictly more expressive — so ASHLAR is swept at both ends of STARE's range instead of pinned.
+    <b>(f)</b> Varying the QC segmenter leaves the registration identical and changes only the instrument observing
+    it; it is a robustness axis on the headline number and never a quality claim.
+    <b>(g)</b> With no annotated masks, segmentation is scored by cross-method agreement, which compares but cannot
+    rank, and optionally by a reference-free quality score, which can.
+    <b>(i)</b> Every number here is a reference-free proxy on one cohort at a single repeat: a ranking, not a
+    significance test.</p>
+
+  <div class="footnote">MIRAGE — Nextflow DSL2 whole-slide image processing pipeline.
+    Arm design: <code>benchmarks/configs/arms.yaml</code> · plan: <code>benchmarks/build_arm_plan.py</code> ·
+    launcher: <code>benchmarks/run_arms.sh</code> · analysis: <code>benchmarks/analysis/</code> ·
+    runbook: <code>docs/benchmarks_real.md</code>.</div>
+
+</div>
+</body>
+</html>
