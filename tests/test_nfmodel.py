@@ -9,6 +9,7 @@ import re
 from tests.nfmodel import (
     REPO_ROOT,
     block_extent,
+    include_aliases,
     nf_files,
     param_refs,
     processes,
@@ -16,6 +17,7 @@ from tests.nfmodel import (
     strip_comments,
     strip_comments_and_strings,
     with_name_blocks,
+    workflows,
 )
 
 
@@ -207,6 +209,58 @@ def test_every_module_local_process_is_modelled():
     model finds fewer processes than files, it is silently skipping some."""
     files = [p for p in (REPO_ROOT / "modules" / "local").rglob("*.nf")]
     assert len(processes()) >= len(files)
+
+
+def test_workflows_sees_every_subworkflow_file():
+    """A subworkflow name is a pipeline name. Anything resolving an
+    UPPER_SNAKE_CASE name against `processes()` alone -- e.g. the
+    docs/figures guard -- reports SEG_QC and VALIS_ADAPTER as nonexistent
+    unless the model can see them, and would then be "fixed" by allow-listing
+    real names."""
+    files = list((REPO_ROOT / "subworkflows").rglob("*.nf"))
+    assert files
+    found = workflows()
+    assert len(found) >= len(files), (
+        f"{len(found)} named workflows found across {len(files)} subworkflow "
+        "files -- the model is skipping some"
+    )
+    for expected in ("SEG_QC", "VALIS_ADAPTER", "REGISTER_PATIENT", "MIRAGE"):
+        assert expected in found, f"{expected} is declared but the model missed it"
+
+
+def test_workflows_ignores_one_named_only_in_a_comment(tmp_path):
+    """Same blind spot `processes()` closes, on the workflow keyword."""
+    d = tmp_path / "subworkflows"
+    d.mkdir()
+    (d / "x.nf").write_text(
+        "// the workflow GHOST { ... } below was removed\n"
+        "/* workflow ALSO_GHOST { */\n"
+        "workflow REAL {\n    take:\n    ch\n}\n"
+    )
+    (tmp_path / "workflows").mkdir()
+    assert set(workflows(root=tmp_path)) == {"REAL"}
+
+
+def test_include_aliases_resolves_a_name_that_is_declared_nowhere():
+    """SEG_QC_SEGMENT runs, appears in the trace and is selectable by
+    `withName:`, yet no file declares `process SEG_QC_SEGMENT`. A resolver
+    without this reports a live task as a typo."""
+    aliases = include_aliases()
+    assert aliases.get("SEG_QC_SEGMENT") == "SEGMENT"
+    assert "SEG_QC_SEGMENT" not in processes()
+
+
+def test_include_aliases_ignores_an_alias_inside_a_comment(tmp_path):
+    d = tmp_path / "subworkflows"
+    d.mkdir()
+    (d / "x.nf").write_text(
+        "// include { SEGMENT as GHOST } from '../m'\n"
+        "include { SEGMENT as REAL_ALIAS } from '../m'\n"
+    )
+    (tmp_path / "modules").mkdir()
+    (tmp_path / "workflows").mkdir()
+    (tmp_path / "main.nf").write_text("workflow {}\n")
+    assert include_aliases(root=tmp_path) == {"REAL_ALIAS": "SEGMENT"}
 
 
 def test_with_name_blocks_finds_the_qc_selector():
