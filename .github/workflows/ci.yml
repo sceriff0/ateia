@@ -1,3 +1,64 @@
+# =============================================================================
+# CI (the blocking gate)
+# =============================================================================
+# EVERY JOB IN THIS FILE IS IN THE `all-tests` GATE. No exceptions, as of
+# 2026-09-01 (CI redesign, Phase 7). A run's conclusion is the WORST conclusion of
+# any job in it, gate membership or not, so a non-required job that fails still
+# paints the commit, the badge and the PR checks list red. This workflow used to
+# carry two such jobs -- `nf-test-real` and `nf-test-integration` -- and on every
+# push to main or dev it reported `failure` while the gate itself was green.
+# Training people to ignore red is the failure mode the redesign exists to remove,
+# so both moved to `.github/workflows/nightly.yml`, which carries the record of WHY
+# the real suite is red rather than letting the next person re-derive it.
+#
+# THE LAST EXCEPTION, `lint`, WAS DELETED IN PHASE 7 rather than repaired, and the
+# measurement is worth keeping because it is the opposite of what the redesign
+# expected. The job ran `nf-core lint --dir . || true`, which cannot fail. The
+# question was which nf-core/tools version lints this repository; the answer,
+# measured against a clean cache on 2026-09-01, is NONE:
+#
+#   2.14.1 (the version .nf-core.yml itself declares)  ValueError: not enough
+#   3.0.2                                              values to unpack
+#   3.2.1                                              (expected 2, got 1)
+#   3.4.1 (what the `nf-core<3.5` pin resolves to)     -- identical, every version
+#   4.1.0
+#
+# All five die in nf_core/utils.py on
+# `self.pipeline_prefix, self.pipeline_name = manifest.name.split("/")`: MIRAGE's
+# `manifest.name` is `mirage`, and every released version of the tool requires
+# `<org>/<name>`. Forced past that with a prefixed name, 3.4.1 then needs
+# `pre-commit` on PATH, WRITES a `modules.json` into the working tree, and aborts
+# CRITICAL on a schema disagreement (`'50000000' is not of type 'integer', 'null'`).
+# So the job had never linted anything, and making it lint would mean changing the
+# pipeline's identity for a linter whose conventions .nf-core.yml already opts out
+# of six families of. `.nf-core.yml` keeps the finding next to the config.
+#
+# So: a green run of this workflow means a green gate. Keep it that way -- an
+# advisory job belongs in nightly.yml, not here with a missing `needs:` entry, and
+# never behind `continue-on-error`. tests/test_release_workflow_graph.py asserts
+# both halves.
+#
+# -----------------------------------------------------------------------------
+# THE TEST SUITE LIVES IN `_test-suite.yml`, AND SO DOES THE RELEASE GATE'S
+# -----------------------------------------------------------------------------
+# As of 2026-09-01 (Phase 5) the five blocking suites -- python-tests,
+# nextflow-stub, nf-test-stub, security-tests, ruff -- are NOT written here. They
+# are one reusable workflow, `.github/workflows/_test-suite.yml`, which this file
+# and `release.yml` both call.
+#
+# That is the fix for a specific defect, not a tidy-up. release.yml used to hold
+# a hand-maintained copy of these five jobs, and the copy had diverged: the
+# release gate ran 5 of the 13 checks this file blocks on while its header
+# claimed parity. The copy was repaired in 2026-08-31 and then kept honest by a
+# 693-line guard test that compared command strings across the two files. There
+# is now one file, so the comparison has nothing to compare and the guard is
+# smaller: what it asserts instead is that both gates reach the same reusable
+# workflow, which is a fact about `needs:` and `uses:` rather than about prose.
+#
+# `_test-suite.yml`'s header records what the check names become and which two
+# names to require if branch protection is ever turned on (there is none today --
+# measured, see that header).
+# =============================================================================
 name: CI
 
 on:
@@ -18,767 +79,112 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  NFTEST_VERSION: '0.9.0'
-  # Nextflow plugins (nf-schema, which enforces nextflow_schema.json) are
-  # downloaded from the plugin registry on first use. Point every job at one
-  # cacheable directory instead of ~/.nextflow/plugins so the download happens
-  # once, not once per job per push. This is the same NXF_PLUGINS_DIR mechanism
-  # docs/usage.md documents for air-gapped clusters, so CI exercises it.
-  NXF_PLUGINS_DIR: ${{ github.workspace }}/.nextflow-plugins
+# NO WORKFLOW-LEVEL `env:`. This file used to set `NFTEST_VERSION` (for the nf-test
+# jobs, gone to nightly.yml in Phase 4) and `NXF_PLUGINS_DIR` (for the `lint` job,
+# deleted in Phase 7, and the only thing left here that invoked Nextflow). Nothing
+# written in this file now runs Nextflow, nf-test or Python at all: every job is a
+# `uses:` of a reusable workflow, plus the gate. `env:` does NOT cross a
+# workflow_call boundary, so `_test-suite.yml` declares its own copy of
+# NXF_PLUGINS_DIR where it is actually read; leaving a second one here would be a
+# copy that drifts, in the file where nothing reads it.
 
 jobs:
   # ============================================================================
-  # Python unit tests
+  # The blocking test suite (reusable workflow)
   # ============================================================================
-  python-tests:
-    name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        # 3.9 was dropped 2026-08-17. Nothing that ships runs it: every container image
-        # is Python 3.10 or newer (containers/convert is 3.10, containers/spatialdata is
-        # 3.12). Carrying it cost real fidelity -- it was the sole reason CI's dask had to
-        # be pinned two years behind the version production runs, and the sole reason
-        # anndata was installed "optionally" with a `|| echo` fallback.
-        python-version: ['3.10', '3.11']
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # `cache: 'pip'` keys on the hash of **/requirements.txt -- which includes
-      # containers/tiled/requirements.txt, the file that DOCUMENTS the torch/kornia split
-      # (they are installed by an inline `pip install` below, not from any requirements
-      # file, because torch needs a CPU --index-url and kornia must follow it). So the
-      # ~190 MB torch wheel is cached, but the key rotates only when some requirements.txt
-      # changes -- NOT when the inline pins below change. If you bump torch or kornia here,
-      # touch containers/tiled/requirements.txt's comment in the same commit or the first
-      # run after the bump restores a cache built for the old wheel.
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: 'pip'
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
-          # There is deliberately NO `pip install -r requirements.txt` here.
-          # requirements.txt is an UNPINNED developer-convenience superset --
-          # stardist, csbdeep, basicpy, aicsimageio, dask[distributed] and a
-          # `git+https://github.com/vanvalenlab/deepcell-types@master` clone --
-          # and it was installed in this BLOCKING gate with `|| true`, so total
-          # failure was swallowed. It does fail: deepcell-types declares
-          # `requires-python >=3.11`, so on the 3.10 leg pip resolves nothing and
-          # installs NOTHING (measured, 2026-08-31: `ERROR: Package
-          # 'deepcell-types' requires a different Python: 3.10.13 not in
-          # '>=3.11'`), while on the 3.11 leg it would resolve numpy 2.x BEFORE
-          # the pinned line below downgrades it -- an unpinned imaging stack
-          # entering the gate ahead of the pins that exist to hold it.
-          #
-          # Nothing in the suite needs those packages. Every MODULE-SCOPE
-          # `pytest.importorskip` under tests/ targets anndata, cv2, kornia,
-          # numpy, pandas, scipy, skimage, tifffile, torch, yaml or zarr, and the
-          # pinned lines below install all of them. The single test that touches
-          # stardist/csbdeep does so through a per-test `skipif`
-          # (tests/test_segment_lazy_dapi_read.py:422) whose own docstring calls
-          # it "deliberately additive", alongside a structural counterpart that
-          # always runs. Measured in a venv built from the lines below alone:
-          # 1116 passed / 10 skipped, identical to the suite's baseline.
-          #
-          # `pyyaml` is on the next line EXPLICITLY because of this: it used to
-          # be declared ONLY in requirements.txt, and tests/test_ci_job_hygiene.py
-          # `importorskip`s it at MODULE scope -- so a swallowed `-r` failure
-          # silently deleted both of that file's guards. It survived only
-          # transitively, as a dependency of dask.
-          #
-          # scikit-learn is PINNED, not floating. The vendored CSE subset in bin/utils/cse/
-          # builds its PCA model by ASSIGNING fitted attributes by hand
-          # (functions.py:650 getPCAmodel), so it is only valid against the sklearn internal
-          # contract it was written for. Left unpinned, pip resolved 1.7.2 on the 3.10 leg
-          # and 1.9.0 on the 3.11 leg (1.9.0 dropped 3.10), and 1.9.0 made QualityScore come
-          # out `nan` while every other metric still matched the golden file to ~1e-8 --
-          # so the same unpinned spec passed one matrix leg and failed the other.
-          # This value tracks containers/segeval/requirements.txt, the production image.
-          # NOTE: nothing currently ENFORCES that they stay equal --
-          # tests/test_container_harmonisation.py reads only containers/*/requirements.txt
-          # and does not parse this workflow. Keep them in step by hand until it does.
-          pip install pytest pytest-cov pandas scikit-learn==1.5.2 xmltodict pyyaml
-          # The imaging stack (numpy/scipy/scikit-image/tifffile/zarr/numcodecs) is
-          # pinned to containers/tiled/requirements.txt — the production image that
-          # actually runs the tiled path — and installed together in one command so
-          # there is no resolver window where an unpinned package can drag in a
-          # version incompatible with the others. This used to be two separate `pip
-          # install`s (an unpinned tifffile/numpy/scikit-image/scipy first, then
-          # zarr/numcodecs pinned "LAST so it wins"), which let CI resolve a tifffile
-          # requiring zarr>=3.2 and then force-downgrade zarr back to 2.18.3 afterward
-          # — an inconsistent install that read a blank thumbnail (intensity
-          # p1/p50/p99.9 = 0.0/0.0/0.0) and failed unrelated tiled tests with
-          # `RuntimeError: ORB found no features.` tests/test_ci_stack_pinned.py
-          # guards this pin against re-diverging from containers/tiled/requirements.txt.
-          #
-          # zarr/numcodecs must be pinned together: tests/test_tiled_stitch_streaming.py
-          # imports bin/utils/tiled_io.py, which imports zarr, and a newer numcodecs
-          # drops blosc.cbuffer_sizes that zarr 2.18 imports — so the test module fails
-          # at COLLECTION with `from zarr.meta import Metadata2, Metadata3`, taking the
-          # whole job down rather than failing one test.
-          # imagecodecs supplies the zstd/LZW codecs tifffile calls through. Its
-          # absence is not an ImportError at import time — it surfaces only when
-          # something WRITES with a codec, as `ModuleNotFoundError: No module named
-          # 'compression'` from inside tifffile. That failed 34 tests in
-          # tests/test_merge_pyramid_streaming.py (every case that writes with
-          # compression='zstd'/'zlib') while the whole imaging stack imported fine,
-          # and it passed on developer machines that happen to carry imagecodecs.
-          pip install numpy==1.26.4 scipy==1.15.3 scikit-image==0.25.2 tifffile==2025.5.10 zarr==2.18.3 numcodecs==0.13.1 imagecodecs==2025.3.30
-          # torch + kornia power STARE's DISK+LightGlue COARSE front-end
-          # (bin/utils/coarse_align.py). Without them tests/test_coarse_frontend.py's DISK
-          # case importorskips and proves nothing -- which is how an unimplemented
-          # front-end shipped once already. tests/test_disk_test_actually_runs.py asserts
-          # these two lines exist.
-          #
-          # CPU wheel and torch-before-kornia, matching containers/tiled/Dockerfile: kornia
-          # pulls the ~2.5 GB CUDA wheel from PyPI if torch is not already satisfied.
-          pip install torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
-          pip install kornia==0.7.3
-          # matplotlib is a hard dependency of the CSE evaluation path, not a
-          # plotting nicety: the vendored CSE source runs `import matplotlib.pyplot`
-          # at the top of functions.py's foreground_separation(), which
-          # single_method_eval.py calls on the main path. Without it
-          # bin/seg_quality_eval.py exits 1 and tests/test_seg_quality_eval_cli.py
-          # fails. See containers/segeval/requirements.txt, which is the authority
-          # for this pin and explains it at length.
-          #
-          # Pinned to segeval's version, NOT to containers/tiled's — the tiled image
-          # neither pins nor imports matplotlib, and pinning it there would assert a
-          # dependency it does not have. tests/test_ci_stack_pinned.py encodes that
-          # split.
-          pip install matplotlib==3.8.4
-          # dask[array] powers bin/convert_image.py's lazy read: BioImage.dask_data is a
-          # dask array, and tests/test_convert_lazy_read.py +
-          # tests/test_convert_streaming_write.py drive the real converter with one, so
-          # `import dask.array` must succeed here. It is imported UNCONDITIONALLY in both
-          # test modules (no importorskip) so dropping this line fails the gate rather
-          # than silently deleting those tests from it.
-          #
-          # Pinned to the version production actually runs: containers/stardist and
-          # containers/cellsam both pin dask==2026.7.1, and containers/convert -- the image
-          # that runs convert_image.py -- now pins it too. It requires Python >=3.10, which
-          # is why the 3.9 matrix leg above had to go first; numpy==1.26.4 pinned above
-          # satisfies dask[array] 2026.7.1's numpy>=1.24.
-          pip install 'dask[array]==2026.7.1'
-          # bin/utils/qc.py imports cv2 at module scope (tests/test_registration_qc_lazy_read.py
-          # is the first test module to import qc.py at all), and this runner has no display
-          # libs, so -headless, not opencv-python (containers/regqc/requirements.txt's runtime
-          # pin). Pinned to the same 4.10.0.82 release that container installs, and to a build
-          # compatible with numpy==1.26.4 above -- opencv-python-headless>=5 requires numpy>=2
-          # and would break the pin this whole install line exists to protect.
-          pip install opencv-python-headless==4.10.0.82
-          # anndata powers tests/test_join_flowpath.py. It used to be installed with a
-          # `|| echo` fallback because anndata had dropped Python 3.9 and this matrix
-          # covered it -- which meant those tests silently vanished from one leg of the
-          # gate. 3.9 is gone, anndata installs on every remaining leg, so the fallback
-          # is gone with it and a failed install now fails the job.
-          #
-          # Capped below 0.12: anndata >= 0.12 requires zarr >= 3, and zarr 3 removes the
-          # store API tifffile's aszarr relies on (`Unsupported type for store_like:
-          # 'ZarrTiffStore'`), which breaks the tiled streaming/fanout tests. 0.11.x works
-          # with zarr 2 and is all these tests need — they only build in-memory AnnData.
-          pip install 'anndata<0.12'
-
-      - name: Generate test data
-        run: |
-          python tests/testdata/generate_complete_testdata.py
-
-      # A skip is not a pass. tests/test_coarse_frontend.py's DISK+LightGlue cases
-      # guard themselves with importorskip("torch")/importorskip("kornia"), so a
-      # missing, broken or CUDA-only install turns them into silent skips -- which is
-      # how an unimplemented front-end shipped once already. This step proves both
-      # libraries import in the SAME interpreter pytest runs in, and then proves the
-      # file reports ZERO skips. tests/test_disk_test_actually_runs.py asserts this
-      # step exists in every workflow that runs the pytest suite.
-      - name: Assert the DISK front-end test is not skipped
-        run: |
-          set -euo pipefail
-          python -c "import torch, kornia; print(torch.__version__, kornia.__version__)"
-          pytest tests/test_coarse_frontend.py -rs -q | tee coarse_frontend.log
-          if grep -qi 'skipped' coarse_frontend.log; then
-            echo "::error::tests/test_coarse_frontend.py reported a SKIP -- the DISK+LightGlue case did not run"
-            exit 1
-          fi
-
-      # MIRAGE_STRICT_SKIPS turns on tests/conftest.py's session floor: any skip
-      # not in tests/expected_skips.txt fails the job by name, and the collected
-      # count must clear tests/collected_floor.txt. Without it a degraded
-      # environment deselects most of the suite and still exits 0 -- release.yml
-      # shipped for months missing three packages, and of the 43 tests that
-      # stopped passing, 30 were silent.
-      #
-      # STEP level, not job level, ON PURPOSE. The "Assert the DISK front-end
-      # test is not skipped" step above runs pytest over a single file, which
-      # collects far below the floor; a job-level env would fail it.
-      - name: Run Python unit tests
-        env:
-          MIRAGE_STRICT_SKIPS: '1'
-        run: |
-          pytest -v tests/ --ignore=tests/testdata --ignore=tests/modules --ignore=tests/subworkflows --ignore=tests/integration \
-            --cov=bin --cov-report=xml --cov-report=term-missing
-
-      - name: Upload coverage
-        if: matrix.python-version == '3.10'
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./coverage.xml
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
-
-  # ============================================================================
-  # Nextflow stub tests + validation (fast, every push/PR)
-  # ============================================================================
-  nextflow-stub:
-    name: NF ${{ matrix.nextflow-version }} stub
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        nextflow-version: ['25.04.0', 'latest-everything']
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Cache Nextflow
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.nextflow
-            ~/.nf-test
-          key: ${{ runner.os }}-nextflow-${{ matrix.nextflow-version }}-${{ hashFiles('**/*.nf') }}
-          restore-keys: |
-            ${{ runner.os }}-nextflow-${{ matrix.nextflow-version }}-
-            ${{ runner.os }}-nextflow-
-
-      - name: Install Nextflow
-        uses: nf-core/setup-nextflow@v2
-        with:
-          version: ${{ matrix.nextflow-version }}
-
-      - name: Cache Nextflow plugins
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/.nextflow-plugins
-          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
-          restore-keys: |
-            ${{ runner.os }}-nf-plugins-
-
-      - name: Provision Nextflow plugins
-        # Install the pinned nf-schema explicitly so a registry outage fails in
-        # a step that names it, instead of halfway into a pipeline run. The
-        # version is read out of nextflow.config rather than duplicated here, so
-        # CI and the pipeline cannot pin different versions. No-op when the
-        # cache above already restored it.
-        run: |
-          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
-
-      - name: Install Python for test data generation
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: 'pip'
-
-      - name: Generate test data
-        run: |
-          # Pinned to containers/tiled/requirements.txt (the production tiled-path
-          # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
-          # `pip install` of a guarded imaging package, in every job, to match.
-          pip install numpy==1.26.4 tifffile==2025.5.10
-          python tests/testdata/generate_complete_testdata.py
-
-      - name: Check all profiles parse without the gitignored site config
-        # Guards against the strict-parser regression class: a committed profile
-        # must never includeConfig a gitignored/missing file (breaks every
-        # profile in CI). Runs with conf/ieo.config absent (it already is in CI).
-        run: |
-          bash tests/check_profiles_parse.sh
-
-      - name: Check param surface consistency (config <-> schema <-> code)
-        # Fails if a param is declared/used but undocumented in nextflow_schema.json
-        # (or vice-versa) — keeps the parameter surface from drifting.
-        run: |
-          python3 tests/check_param_consistency.py
-
-      - name: Run pipeline validation tests
-        run: |
-          bash tests/run_validation_tests.sh
-
-      - name: lib/ probe — assert lib/*.groovy behaviour
-        # The unit-test surface for lib/*.groovy. Assertions live inside the
-        # script because nf-test's assertion context cannot see lib/ classes.
-        # A failing assert exits nonzero and fails this blocking job.
-        run: |
-          nextflow run tests/lib_probe.nf -lib lib
-
-      - name: Run pipeline with test profile (stub mode)
-        # Stub blocks only `touch` outputs — no container engine needed. Running
-        # container-free keeps stub CI green without pulling per-process images
-        # (real container behaviour is exercised by the nf-test real suite).
-        run: |
-          nextflow run . \
-            -profile test \
-            -stub \
-            --outdir test_results_stub
-
-      - name: Run pipeline with SHIPPED defaults (stub mode)
-        # `-profile test` pins BOTH pixel_size (-> 0.325) and seg_method
-        # (-> 'stardist') away from what actually ships ('auto' / 'instantseg'),
-        # each for its own documented reason (conf/test.config) -- which means
-        # the exact combination that ships was never executed by CI, stub or
-        # real. `shipped_defaults_test` overrides both back and repoints `input`
-        # at the one fixture pair this repo generates with a real OME
-        # PhysicalSizeX/Y (tests/testdata/shipped_defaults_input.csv), because
-        # every other fixture is scale-less on purpose and `auto` would
-        # (correctly) hard-fail at PREFLIGHT_SCALE against it.
-        run: |
-          nextflow run . \
-            -profile shipped_defaults_test \
-            -stub \
-            --outdir test_results_shipped_defaults
-
-      - name: Verify work-directory cleanup and final-outputs-only publishing
-        # A shell script, not a pytest and not an nf-test, and it needs its own
-        # step or it runs nowhere -- the same gap the security-tests job exists to
-        # close for the DEEPCELL guard.
-        #
-        # It cannot be either of those: `cleanup` is a Nextflow session-teardown
-        # behaviour, invisible to a static guard over the sources and gone by the
-        # time nf-test's assertion context runs. The script's fourth case is the
-        # load-bearing one -- cleanup must never fire on a FAILED run, or a real
-        # failure becomes undiagnosable.
-        run: |
-          bash tests/cleanup_work.sh
-
-      - name: Upload stub test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: stub-results-nf-${{ matrix.nextflow-version }}
-          path: |
-            test_results_stub/
-            test_results_shipped_defaults/
-            .nextflow.log
-
-  # ============================================================================
-  # nf-test stub suite (fast, every push/PR)
-  # ============================================================================
-  nf-test-stub:
-    name: nf-test (stub)
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Cache Nextflow
-        uses: actions/cache@v4
-        with:
-          path: ~/.nextflow
-          key: ${{ runner.os }}-nextflow-${{ hashFiles('**/*.nf') }}
-          restore-keys: |
-            ${{ runner.os }}-nextflow-
-
-      - name: Install Nextflow
-        # Pinned to the supported release: nf-test 0.9.0's generated test
-        # wrappers do not compile under edge Nextflow's strict parser.
-        # latest-everything full-pipeline compatibility is covered by the
-        # nextflow-stub job's matrix.
-        uses: nf-core/setup-nextflow@v2
-        with:
-          version: '25.04.0'
-
-      - name: Cache Nextflow plugins
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/.nextflow-plugins
-          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
-          restore-keys: |
-            ${{ runner.os }}-nf-plugins-
-
-      - name: Provision Nextflow plugins
-        # Install the pinned nf-schema explicitly so a registry outage fails in
-        # a step that names it, instead of halfway into a pipeline run. The
-        # version is read out of nextflow.config rather than duplicated here, so
-        # CI and the pipeline cannot pin different versions. No-op when the
-        # cache above already restored it.
-        run: |
-          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
-
-      - name: Install Python for test data generation
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: 'pip'
-
-      - name: Generate test data
-        run: |
-          # Pinned to containers/tiled/requirements.txt (the production tiled-path
-          # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
-          # `pip install` of a guarded imaging package, in every job, to match.
-          pip install numpy==1.26.4 tifffile==2025.5.10
-          python tests/testdata/generate_complete_testdata.py
-
-      - name: Install nf-test
-        uses: nf-core/setup-nf-test@v1
-        with:
-          version: ${{ env.NFTEST_VERSION }}
-
-      - name: Run nf-test stub suite
-        # Container-free (-profile test) and stub-only (--tag stub): stub blocks
-        # need no images. Real cases are tagged "real" and run in the nf-test
-        # real job once GHCR images are published (avoids pulling images that do
-        # not exist yet on a PR).
-        run: |
-          nf-test test --tag stub --profile test --verbose
-
-      - name: Upload nf-test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nf-test-stub-results
-          path: |
-            .nf-test/
-            tests/output/
-
-  # ============================================================================
-  # nf-test real suite (runs on push to main/dev only)
-  # ============================================================================
-  nf-test-real:
-    name: nf-test (real)
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
-    # ADVISORY, and advisory by ONE mechanism only: this job is absent from the
-    # `all-tests` gate's `needs:` list. Registration, segmentation model-loading,
-    # and most test-staging bugs are fixed (suite went 26 -> ~20 failing); the
-    # remaining failures are the synthetic-data segmentation wall: StarDist's
-    # built-in 2D_versatile_fluo detects 0 nuclei in the smooth synthetic test
-    # blobs even at a low prob_thresh, so cell/quant/geojson assertions can't
-    # pass on this fixture data. Tracked for a follow-up (bundle a tiny real
-    # nuclei crop, or switch those assertions to "runs without error"). Add this
-    # job to `all-tests`'s `needs:` once green.
-    #
-    # `continue-on-error: true` used to sit here as a SECOND advisory mechanism,
-    # and it was the dishonest one: it made 129 real cases show a green tick
-    # whatever they did, so the run summary said nothing about whether the suite
-    # got better or worse. Without it the job reports its true colour and stays
-    # non-blocking, because nothing needs it. Nothing stopped it coming back until
-    # tests/test_release_workflow_graph.py grew a scan for it across every workflow.
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Cache Nextflow
-        uses: actions/cache@v4
-        with:
-          path: ~/.nextflow
-          key: ${{ runner.os }}-nextflow-real-${{ hashFiles('**/*.nf') }}
-          restore-keys: |
-            ${{ runner.os }}-nextflow-
-
-      - name: Install Nextflow
-        # Pinned to the supported release: nf-test 0.9.0's generated test
-        # wrappers do not compile under edge Nextflow's strict parser.
-        # latest-everything full-pipeline compatibility is covered by the
-        # nextflow-stub job's matrix.
-        uses: nf-core/setup-nextflow@v2
-        with:
-          version: '25.04.0'
-
-      - name: Cache Nextflow plugins
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/.nextflow-plugins
-          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
-          restore-keys: |
-            ${{ runner.os }}-nf-plugins-
-
-      - name: Provision Nextflow plugins
-        # Install the pinned nf-schema explicitly so a registry outage fails in
-        # a step that names it, instead of halfway into a pipeline run. The
-        # version is read out of nextflow.config rather than duplicated here, so
-        # CI and the pipeline cannot pin different versions. No-op when the
-        # cache above already restored it.
-        run: |
-          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
-
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
-
-      - name: Install Python for test data generation
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: 'pip'
-
-      - name: Generate test data
-        run: |
-          # Pinned to containers/tiled/requirements.txt (the production tiled-path
-          # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
-          # `pip install` of a guarded imaging package, in every job, to match.
-          pip install numpy==1.26.4 tifffile==2025.5.10
-          python tests/testdata/generate_complete_testdata.py
-
-      - name: Install nf-test
-        uses: nf-core/setup-nf-test@v1
-        with:
-          version: ${{ env.NFTEST_VERSION }}
-
-      - name: Run nf-test real suite
-        run: |
-          nf-test test --profile test,docker --tag real --verbose
-
-      - name: Upload nf-test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nf-test-real-results
-          path: |
-            .nf-test/
-            tests/output/
-
-  # ============================================================================
-  # nf-test integration suite (manual trigger only)
-  # ============================================================================
-  nf-test-integration:
-    name: nf-test (integration)
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    if: github.event_name == 'workflow_dispatch'
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Nextflow
-        # Pinned to the supported release: nf-test 0.9.0's generated test
-        # wrappers do not compile under edge Nextflow's strict parser.
-        # latest-everything full-pipeline compatibility is covered by the
-        # nextflow-stub job's matrix.
-        uses: nf-core/setup-nextflow@v2
-        with:
-          version: '25.04.0'
-
-      - name: Cache Nextflow plugins
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/.nextflow-plugins
-          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
-          restore-keys: |
-            ${{ runner.os }}-nf-plugins-
-
-      - name: Provision Nextflow plugins
-        # Install the pinned nf-schema explicitly so a registry outage fails in
-        # a step that names it, instead of halfway into a pipeline run. The
-        # version is read out of nextflow.config rather than duplicated here, so
-        # CI and the pipeline cannot pin different versions. No-op when the
-        # cache above already restored it.
-        run: |
-          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
-
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
-
-      - name: Install Python for test data generation
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: 'pip'
-
-      - name: Generate test data
-        run: |
-          # Pinned to containers/tiled/requirements.txt (the production tiled-path
-          # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
-          # `pip install` of a guarded imaging package, in every job, to match.
-          pip install numpy==1.26.4 tifffile==2025.5.10
-          python tests/testdata/generate_complete_testdata.py
-
-      - name: Install nf-test
-        uses: nf-core/setup-nf-test@v1
-        with:
-          version: ${{ env.NFTEST_VERSION }}
-
-      - name: Run nf-test integration suite
-        run: |
-          nf-test test --profile test,docker --tag integration --verbose
-
-      - name: Upload nf-test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nf-test-integration-results
-          path: |
-            .nf-test/
-            tests/output/
-
-  # ============================================================================
-  # Security tests (blocking)
-  # ============================================================================
-  # tests/modules/segment_deepcell_token.nf.test is deliberately NOT tagged
-  # "stub" — it needs `-profile test,singularity` and Nextflow rejects a
-  # duplicate `-profile` flag, so the nf-test-stub job's
-  # `--tag stub --profile test` sweep can never collect it. That was correct and
-  # documented; what was missing is that NOTHING ELSE collected it either.
-  # Verified 2026-08-25: `nf-test test --tag stub --profile test --dry-run`
-  # matched 0 deepcell tests. The guard existed and ran nowhere.
+  # Five jobs on five runners: python-tests (matrixed 3.10 + 3.11),
+  # nextflow-stub (matrixed 25.04.0 + latest-everything), nf-test-stub,
+  # security-tests, ruff. See `.github/workflows/_test-suite.yml`.
   #
-  # It needs no Singularity binary. segment_deepcell_token_singularity.config
-  # points SEGMENT's container at a local placeholder .sif (tracked in git, not
-  # generated), which skips the `singularity pull`, and the test only inspects
-  # the `.command.run` Nextflow writes before exec. Confirmed locally on a host
-  # with neither `singularity` nor `apptainer` on PATH.
-  security-tests:
-    name: Security tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Nextflow
-        # Same pin as nf-test-stub: nf-test's generated wrappers do not compile
-        # under edge Nextflow's strict parser.
-        uses: nf-core/setup-nextflow@v2
-        with:
-          version: '25.04.0'
-
-      - name: Cache Nextflow plugins
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/.nextflow-plugins
-          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
-          restore-keys: |
-            ${{ runner.os }}-nf-plugins-
-
-      - name: Provision Nextflow plugins
-        run: |
-          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
-
-      - name: Install Python for test data generation
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: 'pip'
-
-      - name: Generate test data
-        run: |
-          # Same pin as every other job — guarded by tests/test_ci_stack_pinned.py.
-          pip install numpy==1.26.4 tifffile==2025.5.10
-          python tests/testdata/generate_complete_testdata.py
-
-      - name: Install nf-test
-        uses: nf-core/setup-nf-test@v1
-        with:
-          version: ${{ env.NFTEST_VERSION }}
-
-      - name: Token-leak guard
-        # Asserts DEEPCELL_ACCESS_TOKEN is forwarded BY NAME and its VALUE never
-        # reaches .command.run, which is group-readable on a typical shared HPC
-        # filesystem and is retained across -resume. The variable must be set in
-        # the environment invoking nf-test: the test asserts on its presence
-        # first, because without it SEGMENT never reaches the guarded branch and
-        # the whole case would pass while checking nothing.
-        env:
-          DEEPCELL_ACCESS_TOKEN: dummy-token-value
-        run: |
-          nf-test test tests/modules/segment_deepcell_token.nf.test \
-            --profile test,singularity --verbose
-
-      - name: Assert the guard actually executed
-        # A tag typo, a renamed file, or a --profile change would make nf-test
-        # exit 0 having run nothing — which is the exact failure this job was
-        # added to close, so it must not be able to recur here.
-        env:
-          DEEPCELL_ACCESS_TOKEN: dummy-token-value
-        run: |
-          n=$(nf-test test tests/modules/segment_deepcell_token.nf.test \
-                --profile test,singularity --dry-run 2>&1 \
-              | grep -ci "DEEPCELL_ACCESS_TOKEN" || true)
-          echo "collected $n case(s)"
-          test "$n" -ge 1
+  # `ref: ${{ github.sha }}` IS LOAD-BEARING, not decoration. A called workflow
+  # does its own checkout and sees the CALLER's `github.ref`, not whatever the
+  # caller checked out -- the property containers.yml's `workflow_call` block
+  # documents at length after it built ten container images from the wrong tree.
+  # Passing the SHA pins this run to one commit: on a pull_request `github.sha`
+  # is the merge commit the run is about, and on a push it is the pushed commit.
+  # release.yml passes the SHA `validate` pinned, for the same reason.
+  #
+  # `secrets:` names ONE secret rather than `inherit`. The suite needs the
+  # Codecov token and nothing else; `inherit` would hand a test suite every
+  # secret its caller holds, which for release.yml is the Docker Hub push
+  # credentials.
+  test-suite:
+    name: Test suite
+    uses: ./.github/workflows/_test-suite.yml
+    with:
+      ref: ${{ github.sha }}
+    permissions:
+      contents: read
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   # ============================================================================
-  # Python lint (blocking) — ruff check only, not ruff format. The repo is not
-  # format-normalized yet, so format enforcement is deliberately out of scope;
-  # this job only fails the build on actual lint errors (pyflakes/pycodestyle/
-  # import-sort per ruff.toml).
+  # Container images — build only what this change touched, and prove it runs
   # ============================================================================
-  ruff:
-    name: Ruff lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: 'pip'
-
-      - name: Install ruff
-        # Pinned to the version used locally (see ruff.toml) so CI and local
-        # `ruff check .` agree exactly.
-        run: |
-          pip install ruff==0.16.0
-
-      - name: Run ruff check
-        run: |
-          ruff check .
-
-  # ============================================================================
-  # Linting (nf-core structure lint — advisory, not a merge gate)
-  # ============================================================================
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Nextflow
-        # Pin to the supported release for deterministic lint (matches the rest
-        # of the suite); avoids edge-Nextflow surprises in advisory linting.
-        uses: nf-core/setup-nextflow@v2
-        with:
-          version: '25.04.0'
-
-      - name: Install nf-core tools
-        run: |
-          pip install 'nf-core<3.5'
-
-      - name: Run nf-core lint
-        run: |
-          nf-core lint --dir . || true  # nf-core lint is advisory, not blocking
+  # ADDED 2026-09-01 (CI redesign, Phase 6). Until then NOTHING built a container
+  # image on a pull request: `build-images.yml` triggered on a push to main and on
+  # a manual dispatch only. So a Dockerfile could stop building and the PR that
+  # broke it was green; the failure surfaced on main, or on the release path, where
+  # it costs a half-published image set. containers/regqc carried a
+  # `pip install git+https://github.com/sceriff0/cudipy.git` for months after that
+  # repository ceased to exist, and nothing in CI could have noticed.
+  #
+  # `scope: changed` is what makes this affordable: `containers.yml` diffs the
+  # change against its base and builds only the images whose build context (or a
+  # requirements file their Dockerfile actually COPYs) moved. A PR that touches no
+  # image resolves to an empty matrix and its `build` job legitimately skips.
+  #
+  # IT IS IN THE `all-tests` GATE, and that is a deliberate departure from the
+  # redesign spec, which said not to make the build a required check because an
+  # empty matrix hard-fails and the gate would have to tolerate a skip. It does not
+  # have to here: what the gate depends on is THIS job -- the caller -- which has no
+  # `if:` and never skips. The skip happens one level down, on `containers.yml`'s
+  # matrix job, and a called workflow's conclusion is `success` when a job inside it
+  # skips. So `all-tests` keeps "anything that is not a success fails", and a
+  # Dockerfile that stops building blocks the merge instead of being noticed later.
+  # (`containers.yml`'s own `resolve` job never skips, which is what stops the
+  # "every job skipped concludes success" hazard `_test-suite.yml`'s `suite-gate`
+  # exists for.)
+  containers:
+    name: Container images
+    uses: ./.github/workflows/containers.yml
+    with:
+      # Same reason as `test-suite` above: a called workflow does its own checkout
+      # against the CALLER's github.ref, so the commit has to be handed over.
+      ref: ${{ github.sha }}
+      scope: changed
+      # No `version:` -- an empty version is how a caller says "build, never push".
+      # containers.yml's resolver reads that, not github.event_name.
+    permissions:
+      contents: read
 
   # ============================================================================
   # All tests passed gate
   # ============================================================================
   all-tests:
     name: All Tests
-    # `lint` (nf-core structure lint) is deliberately NOT in this list: it
-    # always exits 0 (`|| true`, kept advisory on purpose — see the lint job
-    # above), so including it here would be a fake gate that can never fail.
-    # `ruff` is the real, blocking Python lint gate.
-    needs: [python-tests, nextflow-stub, nf-test-stub, security-tests, ruff]
+    # NOTHING IN THIS FILE IS OUTSIDE THIS LIST any more. The one job that was --
+    # `lint`, which ran `nf-core lint --dir . || true` and therefore could not fail
+    # -- was deleted in Phase 7 rather than repaired; this file's header carries the
+    # version-by-version measurement that settled it.
+    #
+    # The five blocking suites
+    # this list used to name one by one -- python-tests, nextflow-stub,
+    # nf-test-stub, security-tests, ruff -- are now the five jobs of
+    # `_test-suite.yml`, and `test-suite` below is the one job whose result
+    # reports all of them. That is not a loosening: `_test-suite.yml`'s own
+    # `suite-gate` job enumerates the five and fails on anything that is not a
+    # success, because a called workflow whose jobs were all skipped concludes
+    # `success` and this line alone would wave that through.
+    #
+    # nightly.yml holds the two advisory suites (`nf-test-real`,
+    # `nf-test-integration`); when the real suite goes green it comes back into
+    # the shared suite, not into this list directly.
+    #
+    # `containers` joined the list in Phase 6. It is the CALLER job, which has no
+    # `if:` and therefore never skips, so requiring `success` from it does not
+    # depend on whether there was anything to build -- see that job's header.
+    needs: [test-suite, containers]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -787,31 +193,19 @@ jobs:
         # `skipped` is NOT a pass. Every branch here used to read
         # `!= "success" && != "skipped"`, which was harmless only because
         # nothing in the needs list can skip today -- the moment anyone adds a
-        # `paths:` or `if:` filter to one of those five jobs, this gate goes
-        # decorative for it and reports green having verified nothing. A needed
-        # job that stops running must block the merge, not be waved through.
+        # `paths:` or `if:` filter to a needed job, this gate goes decorative
+        # for it and reports green having verified nothing. A needed job that
+        # stops running must block the merge, not be waved through.
         # Guarded by tests/test_release_workflow_graph.py, which scans EVERY
         # workflow -- it read release.yml's copy of this gate only, so this one
         # could be (and was) reverted with the whole suite still green.
         run: |
-          if [ "${{ needs.python-tests.result }}" != "success" ]; then
-            echo "Python tests did not pass (result: ${{ needs.python-tests.result }})"
+          if [ "${{ needs.test-suite.result }}" != "success" ]; then
+            echo "The shared test suite did not pass (result: ${{ needs.test-suite.result }})"
             exit 1
           fi
-          if [ "${{ needs.nextflow-stub.result }}" != "success" ]; then
-            echo "Nextflow stub tests did not pass (result: ${{ needs.nextflow-stub.result }})"
-            exit 1
-          fi
-          if [ "${{ needs.nf-test-stub.result }}" != "success" ]; then
-            echo "nf-test stub did not pass (result: ${{ needs.nf-test-stub.result }})"
-            exit 1
-          fi
-          if [ "${{ needs.security-tests.result }}" != "success" ]; then
-            echo "Security tests did not pass (result: ${{ needs.security-tests.result }})"
-            exit 1
-          fi
-          if [ "${{ needs.ruff.result }}" != "success" ]; then
-            echo "Ruff lint did not pass (result: ${{ needs.ruff.result }})"
+          if [ "${{ needs.containers.result }}" != "success" ]; then
+            echo "The container build did not pass (result: ${{ needs.containers.result }})"
             exit 1
           fi
           echo "All required tests passed!"

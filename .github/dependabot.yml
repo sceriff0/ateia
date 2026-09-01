@@ -2,9 +2,18 @@
 # Grouped, weekly PRs keep noise low while closing the "deps silently rot" gap.
 version: 2
 updates:
-  # GitHub Actions used across .github/workflows/*.yml
+  # GitHub Actions used across .github/workflows/*.yml AND .github/actions/*/action.yml.
+  #
+  # BOTH ENTRIES ARE NEEDED. `directory: "/"` means `.github/workflows/` to this
+  # ecosystem and NOTHING ELSE -- a local composite action is a separate manifest that
+  # Dependabot only reads when its directory is listed. Since 2026-09-01 the pins for
+  # actions/cache, actions/setup-python, nf-core/setup-nextflow and nf-core/setup-nf-test
+  # live in `.github/actions/**`, so without the glob below those four would have quietly
+  # stopped being updated at the moment they stopped being duplicated.
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "weekly"
     groups:
@@ -17,10 +26,17 @@ updates:
       - "dependencies"
       - "github-actions"
 
-  # Python runtime deps (requirements.txt). The git+ pin (deepcell-types@master)
-  # is not version-managed by Dependabot — that is expected.
+  # Python pins. /requirements is where they live: constraints.txt is the version
+  # authority shared by every container image and every CI job, and the per-image and
+  # per-job files sit beside it. It used to point at "/" -- the root requirements.txt --
+  # which is an unpinned superset CI explicitly refuses to install, so Dependabot was
+  # watching a file whose contents reached nothing.
+  #
+  # Inline `RUN pip install pkg==x` in a Dockerfile is still invisible to Dependabot.
+  # That is one of the reasons the pins were moved into files; where an inline pin has to
+  # stay (containers/convert, the numpy-2 / bioio island), it is out of scope for this bot.
   - package-ecosystem: "pip"
-    directory: "/"
+    directory: "/requirements"
     schedule:
       interval: "weekly"
     groups:
@@ -32,3 +48,21 @@ updates:
     labels:
       - "dependencies"
       - "python"
+
+  # Container base images (`FROM ...`) across containers/*/Dockerfile. Nothing watched
+  # these before, so a base image could sit on an unpatched tag indefinitely -- the images
+  # are only rebuilt on a push to main touching containers/** or requirements/**.
+  - package-ecosystem: "docker"
+    directories:
+      - "/containers/*"
+    schedule:
+      interval: "weekly"
+    groups:
+      docker:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: ":arrow_up:"
+    labels:
+      - "dependencies"
+      - "docker"

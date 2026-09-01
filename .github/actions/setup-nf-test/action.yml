@@ -1,0 +1,54 @@
+# =============================================================================
+# Set up Nextflow + nf-test (composite action)
+# =============================================================================
+# `.github/actions/setup-nextflow` plus `nf-core/setup-nf-test`. Six jobs across
+# ci.yml and release.yml need exactly this pair and nothing else, and every one
+# of them pinned Nextflow to '25.04.0' for the same recorded reason: nf-test
+# 0.9.0's generated test wrappers do not compile under edge Nextflow's strict
+# parser. That reason now lives once, here, next to the default.
+#
+# `nf-test-version` is a REQUIRED input rather than being read from
+# `env.NFTEST_VERSION` inside this file. The env context a composite action sees
+# is not reliably the calling workflow's, so the caller evaluates it — in its
+# own context, where NFTEST_VERSION is defined — and passes the value in.
+# =============================================================================
+name: 'Set up nf-test'
+description: 'Install Nextflow (via the setup-nextflow composite action) and nf-test.'
+
+inputs:
+  nextflow-version:
+    description: >-
+      Nextflow version to install. Defaults to the supported release: nf-test
+      0.9.0's generated wrappers do not compile under edge Nextflow's strict
+      parser, so no caller should pass 'latest-everything' here.
+      latest-everything pipeline compatibility is covered by the nextflow-stub
+      job's own matrix.
+    required: false
+    default: '25.04.0'
+  nf-test-version:
+    description: 'nf-test version to install (the caller passes env.NFTEST_VERSION).'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Nextflow
+      uses: ./.github/actions/setup-nextflow
+      with:
+        nextflow-version: ${{ inputs.nextflow-version }}
+
+    # `~/.nf-test` IS NOT CACHED HERE, and must not be added back. Phase 2 moved
+    # it out of setup-nextflow's key (which knows the Nextflow version and nothing
+    # about nf-test) into a version-aware key here; Phase 3 then read the pinned
+    # action's own source and found the move unnecessary AND still unsafe:
+    # `nf-core/setup-nf-test@v1` already restores and saves `~/.nf-test/nf-test`
+    # and `~/.nf-test/nf-test.jar` under its own key, so a cache here is a second
+    # entry for the same bytes -- and on a version bump the `restore-keys:` prefix
+    # this step carried would hand the new run the OLD binary, their restore would
+    # miss, and their install path's `fs.move(...)` (no `overwrite: true`) fails
+    # with "dest already exists". Every nf-test job in the repo goes red.
+    # tests/test_ci_cache_keys.py fails on both halves of that shape.
+    - name: Install nf-test
+      uses: nf-core/setup-nf-test@v1
+      with:
+        version: ${{ inputs.nf-test-version }}

@@ -427,7 +427,7 @@
           <div class="mod"><div class="n">SEG_QUALITY_EVAL → MERGE_SEG_EVAL <span class="tag">opt-in</span></div>
             <div class="x">Reference-free segmentation scoring (CSE) — grades the mask with no ground truth.
               <b>Off by default</b>, and the reason is supply chain, not science: it is the one QC stage needing
-              the <code>segeval</code> image, and <code>build-images.yml</code> pushes only on a release or a
+              the <code>segeval</code> image, and <code>containers.yml</code> pushes only on a release or a
               manual dispatch, never on a push to main — so a default-on stage would fail every run of a fresh
               clone against a container that does not exist yet. Enable with the <code>seg_quality</code>
               profile. One of only two processes keeping a <i>retry-then-drop</i> policy: losing the score
@@ -525,7 +525,7 @@
         <table class="pr">
           <tr><td class="k">seg_method</td><td class="v">instantseg</td><td class="d">backend selector</td></tr>
           <tr><td class="k">seg_gpu</td><td class="v">true</td><td class="d">adds --gres + --nv / --gpus all</td></tr>
-          <tr><td class="k">gpu_type</td><td class="v">nvidia_h200:1</td><td class="d">SLURM GRES string</td></tr>
+          <tr><td class="k">gpu_type</td><td class="v">1</td><td class="d">SLURM GRES string — bare <code>1</code> = any one GPU</td></tr>
         </table>
       </div>
       <div class="bkc">
@@ -688,7 +688,7 @@
           <code>label 'process_single'</code>; only <code>memory</code> is overridden here, because it runs Bio-Formats
           under a JVM and does not fit the single tier's 12 GB on a real slide.
           ‡ doubling ramp (32/64/128/256) rather than linear. § derived from a parameter, not a constant:
-          <code>reg_tiled_tile</code>&nbsp;+&nbsp;2·<code>reg_tiled_halo</code> for REG_TILE and
+          <code>reg_tiled_tile</code>&nbsp;+&nbsp;2·<code>reg_tiled_halo</code> for TILED_REG_TILE and
           <code>reg_tiled_out_tile</code> for STITCH, each the measured linear fit doubled and floored at 4 GB;
           <code>reg_tiled_coarse_max_dim</code> for COARSE, whose matcher is a U-Net and therefore
           linear in thumbnail AREA (<code>GB ≈ 1.1 + 7.3·Mpx</code>, ×1.5, floored at 4 GB) — 48 GB at the

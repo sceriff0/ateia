@@ -37,8 +37,12 @@ nextflow -q run . -profile test -stub -w "$WORK" --outdir "$OUT" >/dev/null
 status=0
 for i in $(seq 1 "$RUNS"); do
     log=$(nextflow run . -profile test -stub -w "$WORK" --outdir "$OUT" -resume -ansi-log false 2>&1)
-    cached=$(grep -c 'Cached process'   <<<"$log" || true)
-    rerun=$(grep -c 'Submitted process' <<<"$log" || true)
+    # `|| cached=0`, not `|| true`: `grep -c` exits 1 to mean ZERO MATCHES, which
+    # here is data rather than an error -- a resume that cached nothing is exactly
+    # what this script is looking for. Written as the assignment it actually is, so
+    # that the file contains no `|| true` for a reader to have to classify.
+    cached=$(grep -c 'Cached process'   <<<"$log") || cached=0
+    rerun=$(grep -c 'Submitted process' <<<"$log") || rerun=0
     names=$(grep 'Submitted process' <<<"$log" | sed 's/.*> //' | sed 's/ (.*//' | sed 's/.*://' | sort -u | tr '\n' ' ')
     echo "resume $i: CACHED=$cached RESUBMITTED=$rerun  [$names]"
 

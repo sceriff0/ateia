@@ -9,6 +9,7 @@ import re
 from tests.nfmodel import (
     REPO_ROOT,
     block_extent,
+    include_aliases,
     nf_files,
     param_refs,
     processes,
@@ -16,6 +17,7 @@ from tests.nfmodel import (
     strip_comments,
     strip_comments_and_strings,
     with_name_blocks,
+    workflows,
 )
 
 
@@ -209,6 +211,58 @@ def test_every_module_local_process_is_modelled():
     assert len(processes()) >= len(files)
 
 
+def test_workflows_sees_every_subworkflow_file():
+    """A subworkflow name is a pipeline name. Anything resolving an
+    UPPER_SNAKE_CASE name against `processes()` alone -- e.g. the
+    docs/figures guard -- reports SEG_QC and VALIS_ADAPTER as nonexistent
+    unless the model can see them, and would then be "fixed" by allow-listing
+    real names."""
+    files = list((REPO_ROOT / "subworkflows").rglob("*.nf"))
+    assert files
+    found = workflows()
+    assert len(found) >= len(files), (
+        f"{len(found)} named workflows found across {len(files)} subworkflow "
+        "files -- the model is skipping some"
+    )
+    for expected in ("SEG_QC", "VALIS_ADAPTER", "REGISTER_PATIENT", "MIRAGE"):
+        assert expected in found, f"{expected} is declared but the model missed it"
+
+
+def test_workflows_ignores_one_named_only_in_a_comment(tmp_path):
+    """Same blind spot `processes()` closes, on the workflow keyword."""
+    d = tmp_path / "subworkflows"
+    d.mkdir()
+    (d / "x.nf").write_text(
+        "// the workflow GHOST { ... } below was removed\n"
+        "/* workflow ALSO_GHOST { */\n"
+        "workflow REAL {\n    take:\n    ch\n}\n"
+    )
+    (tmp_path / "workflows").mkdir()
+    assert set(workflows(root=tmp_path)) == {"REAL"}
+
+
+def test_include_aliases_resolves_a_name_that_is_declared_nowhere():
+    """SEG_QC_SEGMENT runs, appears in the trace and is selectable by
+    `withName:`, yet no file declares `process SEG_QC_SEGMENT`. A resolver
+    without this reports a live task as a typo."""
+    aliases = include_aliases()
+    assert aliases.get("SEG_QC_SEGMENT") == "SEGMENT"
+    assert "SEG_QC_SEGMENT" not in processes()
+
+
+def test_include_aliases_ignores_an_alias_inside_a_comment(tmp_path):
+    d = tmp_path / "subworkflows"
+    d.mkdir()
+    (d / "x.nf").write_text(
+        "// include { SEGMENT as GHOST } from '../m'\n"
+        "include { SEGMENT as REAL_ALIAS } from '../m'\n"
+    )
+    (tmp_path / "modules").mkdir()
+    (tmp_path / "workflows").mkdir()
+    (tmp_path / "main.nf").write_text("workflow {}\n")
+    assert include_aliases(root=tmp_path) == {"REAL_ALIAS": "SEGMENT"}
+
+
 def test_with_name_blocks_finds_the_qc_selector():
     blocks = with_name_blocks()
     assert blocks, "no withName: blocks found"
@@ -379,12 +433,14 @@ def test_flat_tree_scanners_are_really_flat():
 # A THIRD kind, and like FLAT_TREE_SCANNERS it is not debt and will never be
 # discharged.
 #
-# A guard over `.github/workflows/*.yml` parses YAML, not Nextflow. It is
-# discovered by the heuristic above only because a CI step's COMMAND STRING
-# mentions a `.nf` path -- `nextflow run tests/lib_probe.nf -lib lib`,
-# `tests/modules/segment_deepcell_token.nf.test` -- which is the needle the guard
-# looks FOR inside a workflow, never a file it opens. There is nothing in the
-# model for it to call: the model parses Nextflow sources, and this reads none.
+# A guard over this repository's CI YAML -- `.github/workflows/*.yml` and, since
+# the composite actions landed, `.github/actions/*/action.yml` -- parses YAML, not
+# Nextflow. It is discovered by the heuristic above only because a CI step's
+# COMMAND STRING or a cache key mentions a `.nf` path -- `nextflow run
+# tests/lib_probe.nf -lib lib`, `tests/modules/segment_deepcell_token.nf.test`,
+# `hashFiles('**/*.nf')` -- which is the needle the guard looks FOR inside the
+# YAML, never a file it opens. There is nothing in the model for it to call: the
+# model parses Nextflow sources, and this reads none.
 #
 # The mechanically-checked property that separates "names a .nf path in a string"
 # from "reads Nextflow source" is whether the file ever CONSTRUCTS a path to one.
@@ -392,12 +448,17 @@ def test_flat_tree_scanners_are_really_flat():
 # guard does not, and the check below fails the moment one appears -- at which
 # point the file is a real reader and belongs in the model.
 _WORKFLOW_YAML_REASON = (
-    "parses .github/workflows/*.yml as YAML; its `.nf` mentions are CI command "
-    "needles, never source it opens"
+    "parses this repo's CI YAML (.github/workflows/*.yml and "
+    ".github/actions/*/action.yml); its `.nf` mentions are needles it looks for "
+    "inside that YAML, never source it opens"
 )
 
 WORKFLOW_YAML_GUARDS = {
     "tests/test_release_workflow_graph.py": _WORKFLOW_YAML_REASON,
+    # Added 2026-09-01 with the CI redesign's Phase 3. It trips the heuristic on
+    # `hashFiles('**/*.nf')` -- the cache key it exists to FORBID, quoted in its
+    # docstring and in its failure message.
+    "tests/test_ci_cache_keys.py": _WORKFLOW_YAML_REASON,
 }
 
 # A path CONSTRUCTED to a Nextflow/Groovy source file -- `ROOT / "modules/local/x.nf"`,

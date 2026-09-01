@@ -337,9 +337,14 @@ Location: `.github/workflows/ci.yml`
    - Runs nf-test suite
    - Uploads test artifacts
 
-3. **lint**
-   - Runs nf-core lint
-   - Checks code style
+3. **ruff** (inside `_test-suite.yml`, blocking)
+   - Runs `ruff check .`
+   - Runs `actionlint` over `.github/workflows/**` and `.github/actions/**`
+
+There is no `nf-core lint` job. It ran `|| true` and could never fail, and it was
+deleted on 2026-09-01 once the measurement showed that no released nf-core/tools
+version -- 2.14.1 through 4.1.0 -- can lint this repository at all. `.nf-core.yml`'s
+header records the failure, version by version.
 
 ### Triggers
 

@@ -1,17 +1,18 @@
-# Python dependencies for the pipeline's bin/ scripts (development/local convenience).
-# The authoritative, reproducible environment is the per-process container images; this
-# list is a superset for running the scripts outside Nextflow. Nextflow itself is the
-# workflow engine and is installed separately (see docs/installation.md), not via pip.
-numpy
-scipy
-pandas
-aicsimageio
-tifffile
-stardist
-csbdeep
-scikit-image
-dask[distributed]
-tqdm
-basicpy
-PyYAML
-git+https://github.com/vanvalenlab/deepcell-types@master
+# requirements/ IS AUTHORITATIVE. This file is a shim, kept only so that
+# `pip install -r requirements.txt` at the repo root still does something sensible.
+#
+# The reproducible environments are:
+#   requirements/constraints.txt  the version authority shared by every container image
+#                                 and every CI job
+#   requirements/ci.txt           the environment the Python unit-test suite runs in
+#   requirements/<image>.txt      what containers/<image> installs
+#
+# WHAT THIS FILE USED TO BE, and why it is not that any more. It was an UNPINNED
+# developer-convenience superset -- stardist, csbdeep, basicpy, aicsimageio,
+# dask[distributed] and a `git+https://github.com/vanvalenlab/deepcell-types@master` clone
+# -- and CI installed it in the blocking gate with `|| true`, so total failure was
+# swallowed. It does fail: deepcell-types declares `requires-python >=3.11`, so on the 3.10
+# leg pip resolves nothing and installs NOTHING, while on 3.11 it would resolve numpy 2.x
+# ahead of the pins that exist to hold the imaging stack down. Nothing in the suite needs
+# those packages. Dependabot now watches /requirements, not this file.
+-r requirements/ci.txt

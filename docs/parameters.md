@@ -320,7 +320,7 @@ segmentation arm of `benchmarks/configs/arms.yaml` uses to rank backends on real
 tissue.
 
 It is **off by default** (`skip_seg_quality_eval = true`) for one operational
-reason: it needs the `segeval` image on Docker Hub, and `.github/workflows/build-images.yml`
+reason: it needs the `segeval` image on Docker Hub, and `.github/workflows/containers.yml`
 only *pushes* on a release or a manual `workflow_dispatch` — a push to `main`
 builds without publishing. A default-on stage whose container may not exist yet
 would fail every run of a fresh clone.

@@ -12,6 +12,11 @@
 # scikit-image 0.24.0 and tifffile 2023.4.12 — i.e. across a wider version spread than this
 # bump — so the QualityScore is not as brittle as the old comment feared. Run that test after
 # any further bump; it is what makes a real drift detectable rather than silent.
+#
+# COPY'd into containers/segeval/Dockerfile, and `-r`-included by requirements/ci.txt --
+# so this file is also the single authority for CI's matplotlib, scikit-learn and
+# xmltodict versions, which no image other than this one pins.
+-c constraints.txt
 
 numpy==1.26.4          # harmonised; <2.0 is also what the vendored subset expects
 scipy==1.15.3          # harmonised

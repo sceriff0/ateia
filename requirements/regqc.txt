@@ -1,0 +1,55 @@
+# REGISTRATION_QC / illumination tooling — COPY'd into containers/regqc/Dockerfile.
+#
+# opencv-python (NOT -headless) because this image has the display libs; CI installs the
+# headless build of the SAME release and names this file as its authority. See
+# requirements/constraints.txt's "deliberately not constrained here" block.
+-c constraints.txt
+
+# scipy is pinned HERE rather than in the Dockerfile's core `pip install`, and the move is the
+# point of this file's history. It used to sit in an EARLY Dockerfile layer at 1.15.3 while the
+# LAST pip step -- this file -- installed BaSiCPy, which caps scipy<1.13 and silently downgraded
+# it. tests/test_container_harmonisation.py's _installed() reads Dockerfile tokens first, so the
+# guard read 1.15.3 and passed while the published bolt3x/mirage-regqc:1.0.0 image shipped
+# something under 1.13. Naming scipy in the last pip step means the number the guard reads and
+# the number pip installs are the same line. BaSiCPy is gone (below), so the harmonised value
+# holds and `-c constraints.txt` above enforces it at BUILD time as well.
+scipy==1.15.3
+
+# dask arrives transitively (nd2 -> resource-backed-dask-array -> dask) and was the one
+# constrained package this file did not name. Named now so it is checked statically by
+# test_shared_packages_match_the_harmonised_version, not only by the constraints file.
+dask==2026.7.1
+
+h5py==3.11.0
+nd2==0.10.1
+nd2reader==3.3.0
+opencv-python==4.10.0.82
+pandas==2.3.3
+tifffile==2025.5.10
+imagecodecs==2025.3.30
+zarr==2.18.3
+numcodecs==0.13.1
+matplotlib==3.9.2
+
+# REMOVED 2026-09-01, and both removals are why this image builds again.
+#
+#   BaSiCPy==1.2.0 -- illumination correction does NOT run in this image. It runs in nf-core's
+#     BASICPY module, which pins its own container (modules/nf-core/basicpy/main.nf:5,
+#     docker.io/labsyspharm/basicpy-docker-mcmicro). mirage's own scripts around it --
+#     bin/tile_for_basic.py and bin/apply_basic_profiles.py -- import numpy, tifffile and local
+#     bin/utils modules only; they PREPARE input for and CONSUME output from that external
+#     module. nextflow.config records the in-process path as prior behaviour. The pip dependency
+#     was a leftover of that removal, and it was the whole cause of the failure: BaSiCPy declares
+#     scipy<1.13 in 1.2.0 and still in its current 2.0.0, so against the harmonised
+#     scipy==1.15.3 pip reported ResolutionImpossible and the image would not build at all.
+#
+#   dipy==1.9.0 -- nothing under bin/, lib/, modules/, conf/, workflows/ or subworkflows/
+#     references it: no import, no mention. It arrived beside the cudipy install that was itself
+#     deleted 2026-08-31 (its upstream repository no longer exists). containers/regqc/smoke.sh
+#     already states the governing rule -- "do not add a module this image's processes never
+#     import" -- and asserts exactly numpy, tifffile, cv2 and skimage.transform.
+#
+# A dependency nothing imports is the same defect as a bin/ module nothing imports, one layer
+# down; tests/test_no_dead_bin_modules.py exists for the latter. Deleting these two removes the
+# scipy cap at its source, so this image rejoins the harmonised set instead of being carved out
+# of it with a documented exemption.
