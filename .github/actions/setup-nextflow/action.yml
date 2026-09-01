@@ -1,0 +1,99 @@
+# =============================================================================
+# Set up Nextflow (composite action)
+# =============================================================================
+# ONE definition of the four-step Nextflow preamble that every Nextflow job in
+# this repo used to carry inline: cache ~/.nextflow, install the pinned
+# Nextflow, cache the plugins directory, provision nf-schema into it.
+#
+# Before this action those four steps existed as 30 instances across ci.yml and
+# release.yml, and they had already drifted: three jobs had no `Cache Nextflow`
+# step at all, five cache keys differed in ways nothing chose deliberately, and
+# release.yml carried none of the plugin provisioning until 2026-08-31 (its own
+# comment records that). One definition is what stops that recurring.
+#
+# THE CACHE KEY IS NOW DERIVED, not passed in. The five inline copies used five
+# different keys (`-nextflow-`, `-nextflow-real-`, `-nextflow-release-`, ...)
+# which only fragmented the cache: what lands in ~/.nextflow is a function of
+# the Nextflow VERSION and the pipeline sources, both of which are in the key
+# below. Sharing one key across ci.yml and release.yml is deliberate — GitHub
+# Actions caches are repository-scoped, so the release gate now warms on CI's
+# cache instead of paying a cold download.
+#
+# `~/.nf-test` rides along in the cached paths because the jobs that install
+# nf-test want it and `actions/cache` tolerates a path that does not exist as
+# long as at least one does (~/.nextflow always will).
+#
+# GUARDS THAT READ THIS FILE. Moving a step into a composite action moves it out
+# of `.github/workflows/*.yml`, which is where several guard tests used to stop
+# looking. tests/ci_actions.py resolves a workflow to the local actions it uses,
+# and tests/test_ci_stack_pinned.py, tests/test_ci_job_hygiene.py,
+# tests/test_disk_test_actually_runs.py and
+# tests/test_release_workflow_graph.py all go through it. In particular the
+# `nextflow plugin install` line below is one of the release gate's parity
+# needles (test_release_workflow_graph.BLOCKING_CHECKS) — it is asserted here,
+# not in the workflows, so do not inline it back into one of them.
+# =============================================================================
+name: 'Set up Nextflow'
+description: >-
+  Cache and install Nextflow, then cache and provision the nf-schema plugin
+  version pinned in nextflow.config.
+
+inputs:
+  nextflow-version:
+    description: >-
+      Nextflow version to install. '25.04.0' is the supported release and the
+      minimum `manifest.nextflowVersion` promises; 'latest-everything' is the
+      edge leg of the stub matrix.
+    required: false
+    default: '25.04.0'
+  plugins:
+    description: >-
+      Cache and provision Nextflow plugins (nf-schema). 'false' only for a job
+      that never runs the pipeline — the nf-core structural lint job is the one
+      such job, and giving it a plugin download would add a network dependency
+      it does not use.
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Cache Nextflow
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.nextflow
+          ~/.nf-test
+        key: ${{ runner.os }}-nextflow-${{ inputs.nextflow-version }}-${{ hashFiles('**/*.nf') }}
+        restore-keys: |
+          ${{ runner.os }}-nextflow-${{ inputs.nextflow-version }}-
+          ${{ runner.os }}-nextflow-
+
+    - name: Install Nextflow
+      uses: nf-core/setup-nextflow@v2
+      with:
+        version: ${{ inputs.nextflow-version }}
+
+    - name: Cache Nextflow plugins
+      if: inputs.plugins == 'true'
+      uses: actions/cache@v4
+      with:
+        # Matches the NXF_PLUGINS_DIR the calling workflow sets at `env:` level,
+        # so nf-schema is downloaded once per repository rather than once per
+        # job per push. Same mechanism docs/usage.md documents for air-gapped
+        # clusters, so CI exercises it rather than only describing it.
+        path: ${{ github.workspace }}/.nextflow-plugins
+        key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
+        restore-keys: |
+          ${{ runner.os }}-nf-plugins-
+
+    - name: Provision Nextflow plugins
+      # Install the pinned nf-schema explicitly so a registry outage fails in a
+      # step that names it, instead of halfway into a pipeline run. The version
+      # is read out of nextflow.config rather than duplicated here, so CI and
+      # the pipeline cannot pin different versions. No-op when the cache above
+      # already restored it.
+      if: inputs.plugins == 'true'
+      shell: bash
+      run: |
+        nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"

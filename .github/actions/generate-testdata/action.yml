@@ -1,0 +1,48 @@
+# =============================================================================
+# Generate the test fixtures (composite action)
+# =============================================================================
+# `tests/testdata/` is gitignored with a small enumerated exception, so a fixture
+# exists in CI only because `tests/testdata/generate_complete_testdata.py` wrote
+# it. Ten jobs across ci.yml and release.yml therefore ran that script, and eight
+# of them prefixed it with the same two-package install — the duplication this
+# action removes.
+#
+# `setup-python: 'false'` is for the one shape that differs: the python-tests /
+# test-python jobs have already installed requirements/ci.txt (a superset of
+# requirements/testdata.txt) into a matrixed interpreter, and re-running
+# actions/setup-python here would pin that job's Python back to 3.10 and undo
+# the 3.11 matrix leg.
+# =============================================================================
+name: 'Generate test data'
+description: 'Generate the gitignored tests/testdata/ fixtures, optionally installing Python first.'
+
+inputs:
+  python-version:
+    description: 'Python version to install (ignored when setup-python is false).'
+    required: false
+    default: '3.10'
+  setup-python:
+    description: >-
+      Install Python and requirements/testdata.txt first. 'false' when the
+      calling job has already installed a superset into the interpreter it
+      wants — see the note above.
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Install Python for test data generation
+      # numpy and tifffile at the harmonised versions, taken from
+      # requirements/constraints.txt -- the same file every container image
+      # reads. No version is named here; there is nothing to keep in step by hand.
+      if: inputs.setup-python == 'true'
+      uses: ./.github/actions/setup-python-env
+      with:
+        python-version: ${{ inputs.python-version }}
+        requirements: 'requirements/testdata.txt'
+
+    - name: Generate test data
+      shell: bash
+      run: |
+        python tests/testdata/generate_complete_testdata.py

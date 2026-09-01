@@ -37,13 +37,24 @@ SCOPE: every workflow under `.github/workflows/` and every directory under `cont
 both discovered by glob -- never a filename list. The hardcoded ancestor of this guard
 passed green while `release.yml` ran the identical unpinned install in its release gate.
 
-PHASE-2 NOTE. The old per-job checks read `run:` script bodies, so they would have gone
-silently vacuous the moment those scripts moved into a composite action under
-`.github/actions/**`. Assertion 1 still reads `run:` bodies -- it must, since that is where
-a `pip install` can appear -- but it is a NEGATIVE rule: if the installs move, it goes on
-finding nothing to complain about, which is correct, while assertions 2 and 3 (the ones
-that carry the actual pins) read FILES and are unaffected by where the install command
-lives.
+PHASE-2 NOTE, WRITTEN BEFORE THE MOVE AND UPDATED AFTER IT. The old per-job checks read
+`run:` script bodies, so they would have gone silently vacuous the moment those scripts
+moved into a composite action under `.github/actions/**`. That move happened on
+2026-09-01. Two consequences, both handled:
+
+  * Assertion 1's SCOPE is now `.github/workflows/*.yml` AND `.github/actions/*/action.yml`
+    (`tests/ci_actions.scanned_files()`). It is a negative rule, so leaving it pointed at
+    the workflows alone would have kept it green while an unpinned `pip install numpy`
+    sat in an action -- green for the reason that makes a guard worthless.
+  * The non-vacuity check below no longer counts pip INVOCATIONS, because
+    `.github/actions/setup-python-env` runs one `pip install -r "$req"` in a loop over the
+    files its caller names. Counting invocations against a floor of 10 would fail on a
+    correct tree. It counts what the loop actually installs instead, resolved PER JOB
+    through `tests/ci_actions.py` -- which is a stronger statement than the old one, and
+    the one that would actually notice the installs leaving CI.
+
+Assertions 2 and 3 (the ones that carry the actual pins) read FILES and are unaffected by
+where the install command lives.
 
 Plain pytest, no pipeline-runtime imports, all paths derived from `__file__`.
 """
@@ -70,11 +81,24 @@ CONSTRAINTS = REQUIREMENTS_DIR / "constraints.txt"
 if str(Path(__file__).parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).parent))
 harmonisation = importlib.import_module("test_container_harmonisation")
+ci_actions = importlib.import_module("ci_actions")
 
 
 def workflow_files() -> list[Path]:
     files = sorted(WORKFLOWS_DIR.glob("*.yml")) + sorted(WORKFLOWS_DIR.glob("*.yaml"))
     assert files, f"no workflow files found under {WORKFLOWS_DIR.relative_to(ROOT)}"
+    return files
+
+
+def scanned_files() -> list[Path]:
+    """Every file a CI `pip install` can live in: workflows AND composite actions.
+
+    Widened 2026-09-01. `.github/actions/setup-python-env` is where every CI install now
+    happens; scanning only the workflows would leave assertion 1 -- a negative rule --
+    passing over a directory that no longer contains an install at all.
+    """
+    files = ci_actions.scanned_files()
+    assert files, "no workflow or composite-action files found under .github/"
     return files
 
 
@@ -192,23 +216,85 @@ def test_the_version_detector_actually_detects(body, expected):
     assert found == expected
 
 
-def test_the_workflows_actually_install_something():
+def test_the_scanned_files_actually_install_something():
     """An empty invocation set would make assertion 1 pass over nothing.
 
-    This is not hypothetical bookkeeping: if a future refactor moves the installs somewhere
-    this scanner cannot see, assertion 1 keeps passing while nothing is checked. Fail here
-    instead, loudly, with the count.
+    This is not hypothetical bookkeeping: a refactor that moves the installs somewhere this
+    scanner cannot see leaves assertion 1 passing while nothing is checked. Fail here
+    instead, loudly, with the count. It happened on 2026-09-01 -- the installs moved into
+    `.github/actions/**`, which is why `scanned_files()` reaches there now.
     """
     counts = {
-        wf.relative_to(ROOT).as_posix(): len(pip_invocations(wf.read_text()))
-        for wf in workflow_files()
+        p.relative_to(ROOT).as_posix(): len(pip_invocations(p.read_text()))
+        for p in scanned_files()
     }
     total = sum(counts.values())
-    assert total >= 10, (
-        "the workflows under .github/workflows/ contain almost no pip invocations "
+    assert total >= 1, (
+        "no file under .github/workflows/ or .github/actions/ contains a pip invocation "
         f"({counts}). Either the Python installs left CI, or they were reworded past "
         "_PIP_INSTALL_RE -- update the pattern rather than leaving the checks below to "
         "pass over an empty set."
+    )
+
+
+def test_ci_still_installs_the_files_it_is_supposed_to():
+    """The real non-vacuity floor, and the reason the invocation count above can be 1.
+
+    `.github/actions/setup-python-env` installs `pip install -r "$req"` in a loop, so
+    counting invocations no longer measures anything: one loop covers three files in
+    `python-tests` and one in `ruff`. What matters is which requirements/ files each JOB
+    ends up installing, which `tests/ci_actions.py` resolves through the `requirements:`
+    input at each call site.
+
+    PER JOB, not a union over the repository. A union is how a sibling job's install line
+    came to satisfy a check on behalf of the job that actually needed the package.
+    """
+    per_job = {}
+    for wf in workflow_files():
+        for name, job in ci_actions.load_jobs(wf).items():
+            installed = ci_actions.requirement_files_installed(job)
+            if installed:
+                per_job[f"{wf.relative_to(ROOT).as_posix()}::{name}"] = installed
+
+    distinct = {req for files in per_job.values() for req in files}
+    assert len(distinct) >= 5, (
+        "CI resolves to fewer than five distinct requirements/ files across every job, "
+        f"which means the installs have gone somewhere tests/ci_actions.py cannot follow: "
+        f"{per_job}"
+    )
+    for req in sorted(distinct):
+        assert (REQUIREMENTS_DIR / Path(req).name).is_file(), (
+            f"a CI job installs {req}, which does not exist. Either the file was deleted "
+            "or the call site names it wrongly -- and a `pip install -r` of a missing "
+            "file fails the job, so this is a red build waiting to happen."
+        )
+
+
+def test_no_workflow_step_that_installs_a_requirements_file_is_conditional():
+    """`tests/ci_actions.py` evaluates an `if:` inside a composite action and ignores one
+    on a workflow step -- it has no way to resolve `always()` or a matrix expression.
+
+    That asymmetry is safe only while no workflow step gates an install. Assert it, rather
+    than leaving the resolver quietly over-reporting the day someone adds `if:` to an
+    install step.
+    """
+    offenders = []
+    for wf in workflow_files():
+        for name, job in ci_actions.load_jobs(wf).items():
+            for step in ci_actions.steps_of(job):
+                if "if" not in step:
+                    continue
+                if ci_actions._requirements_from_step(step):
+                    offenders.append(
+                        f"{wf.relative_to(ROOT).as_posix()}::{name}: step "
+                        f"{step.get('name', step.get('uses', '?'))!r} installs a "
+                        f"requirements file behind `if: {step['if']}`"
+                    )
+    assert not offenders, (
+        "a workflow step installs a requirements/ file conditionally. "
+        "tests/ci_actions.requirement_files_installed does not evaluate workflow-level "
+        "`if:` expressions, so it would report that install as unconditional:\n  "
+        + "\n  ".join(offenders)
     )
 
 
@@ -224,12 +310,12 @@ def test_no_workflow_pins_a_package_version():
     separate times AFTER a real CI failure caused by the package it did not yet name.
     """
     offenders = []
-    for wf in workflow_files():
-        for args in pip_invocations(wf.read_text()):
+    for path in scanned_files():
+        for args in pip_invocations(path.read_text()):
             for tok in pinned_tokens(args):
-                offenders.append(f"{wf.relative_to(ROOT).as_posix()}: `pip install ... {tok}`")
+                offenders.append(f"{path.relative_to(ROOT).as_posix()}: `pip install ... {tok}`")
     assert not offenders, (
-        "workflow YAML names a package version. Every version string belongs in "
+        "workflow or composite-action YAML names a package version. Every version string belongs in "
         "requirements/ -- constraints.txt for anything a container image also installs, "
         "or the per-job file otherwise -- so the pin exists once and Dependabot can see "
         "it. Offenders:\n  " + "\n  ".join(offenders)
@@ -246,8 +332,8 @@ def test_every_workflow_install_goes_through_a_requirements_file():
     but pip's own bootstrap tooling.
     """
     offenders = []
-    for wf in workflow_files():
-        for args in pip_invocations(wf.read_text()):
+    for path in scanned_files():
+        for args in pip_invocations(path.read_text()):
             if goes_through_a_requirements_file(args):
                 continue
             named = {Requirement(t).name.lower() for t in requirement_tokens(args)
@@ -255,11 +341,11 @@ def test_every_workflow_install_goes_through_a_requirements_file():
             extra = sorted(named - _BOOTSTRAP_ONLY)
             if extra:
                 offenders.append(
-                    f"{wf.relative_to(ROOT).as_posix()}: `pip install {' '.join(extra)}` "
+                    f"{path.relative_to(ROOT).as_posix()}: `pip install {' '.join(extra)}` "
                     "with no -r/-c"
                 )
     assert not offenders, (
-        "workflow YAML installs packages without reading a requirements/ file, so those "
+        "workflow or composite-action YAML installs packages without reading a requirements/ file, so those "
         "packages are unpinned and invisible to Dependabot:\n  " + "\n  ".join(offenders)
     )
 

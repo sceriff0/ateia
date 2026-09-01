@@ -134,9 +134,13 @@ jobs:
               echo "::notice::Dispatched from '${{ github.ref_name }}', but a release always gates and tags MAIN. Nothing on '${{ github.ref_name }}' is released unless it is already merged to main."
             fi
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "version_no_v=${VERSION#v}" >> "$GITHUB_OUTPUT"
-          echo "gate_ref=$GATE_REF" >> "$GITHUB_OUTPUT"
+          # One grouped redirect rather than three: shellcheck SC2129, which
+          # actionlint reports as an error in ci.yml's blocking `ruff` job.
+          {
+            echo "version=$VERSION"
+            echo "version_no_v=${VERSION#v}"
+            echo "gate_ref=$GATE_REF"
+          } >> "$GITHUB_OUTPUT"
           echo "Release version: $VERSION (gating on ref: $GATE_REF)"
 
       - name: Validate version format (FAIL on bad format)
@@ -179,61 +183,32 @@ jobs:
       # job is container-free. Guarded by
       # tests/test_ci_job_hygiene.py::test_buildx_job_must_actually_use_buildx.
 
-      # `cache-dependency-path` is NOT optional now that the pins live in requirements/.
-      # `cache: 'pip'` defaults its key to the hash of `**/requirements.txt`, and after the
-      # move the only files matching that glob are the root shim and docs/requirements.txt
-      # -- neither of which changes when a pin does. The cache key would have gone stale
-      # exactly when it must rotate: the run after a bump would restore a cache built for
-      # the OLD wheels (~190 MB of torch among them). Keying on requirements/** rotates it
-      # on any pin change, including torch's and kornia's, which the old `**/requirements.txt`
-      # key never did.
-      - name: Install Python
-        uses: actions/setup-python@v5
+      # The same composite action ci.yml's `python-tests` job uses, with the same
+      # three requirements files in the same order -- which is now a structural
+      # guarantee rather than two copies of a comment that had to agree.
+      # requirements/ci.txt is the CI stack; torch-cpu.txt and kornia.txt are
+      # STARE's DISK+LightGlue COARSE front-end (bin/utils/coarse_align.py),
+      # without which tests/test_coarse_frontend.py's DISK cases importorskip and
+      # prove nothing. torch-cpu.txt's `--index-url .../whl/cpu` must not leak
+      # into another resolve, and kornia drags the ~2.5 GB CUDA wheel if torch is
+      # not already satisfied -- hence one invocation per line, torch first. See
+      # .github/actions/setup-python-env, and tests/test_disk_test_actually_runs.py
+      # which resolves this job through it.
+      - name: Install Python and the CI stack
+        uses: ./.github/actions/setup-python-env
         with:
           python-version: '3.10'
-          cache: 'pip'
-          cache-dependency-path: 'requirements/**'
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
-          # EVERY version string lives in requirements/, never here. That is not a style
-          # preference: the same pins used to be written twice -- once in this YAML and
-          # once in the production image -- and a 42 KB guard test existed only to prove
-          # the two copies were equal. requirements/ci.txt `-r`-includes
-          # requirements/segeval.txt and requirements/tiled.txt, the very files
-          # containers/segeval and containers/tiled build from, so there is one copy and
-          # nothing left to prove equal. Read requirements/ci.txt: it documents what this
-          # environment is, and the one place (anndata) where it honestly cannot match a
-          # shipped image.
-          #
-          # There is deliberately NO `pip install -r requirements.txt` (the ROOT file).
-          # It is an unpinned developer-convenience superset carrying a
-          # `git+https://github.com/vanvalenlab/deepcell-types@master` clone that does not
-          # install on Python 3.10 at all, and it was once installed in this BLOCKING gate
-          # with `|| true`, so total failure was swallowed. The root file is now a shim
-          # that points at requirements/ci.txt and says so.
-          #
-          # tests/test_ci_stack_pinned.py asserts that no workflow names a package version
-          # anywhere -- a closed rule with no package list to keep up to date.
-          pip install -r requirements/ci.txt
-          # torch + kornia power STARE's DISK+LightGlue COARSE front-end
-          # (bin/utils/coarse_align.py). Without them tests/test_coarse_frontend.py's DISK
-          # cases importorskip and prove nothing -- which is how an unimplemented front-end
-          # shipped once already. tests/test_disk_test_actually_runs.py asserts these two
-          # lines exist in every workflow that runs the suite.
-          #
-          # TWO SEPARATE INVOCATIONS, in this order, matching containers/tiled/Dockerfile
-          # exactly. requirements/torch-cpu.txt carries `--index-url .../whl/cpu`, which
-          # applies to the WHOLE resolve if the file is pulled in by `-r` from another
-          # requirements file -- so it must stay its own step. And kornia drags the ~2.5 GB
-          # CUDA wheel from PyPI if torch is not already satisfied, so torch goes first.
-          pip install -r requirements/torch-cpu.txt
-          pip install -r requirements/kornia.txt
+          upgrade-pip: 'true'
+          requirements: |
+            requirements/ci.txt
+            requirements/torch-cpu.txt
+            requirements/kornia.txt
 
       - name: Generate test data
-        run: |
-          python tests/testdata/generate_complete_testdata.py
+        # requirements/ci.txt above is a superset of requirements/testdata.txt.
+        uses: ./.github/actions/generate-testdata
+        with:
+          setup-python: 'false'
 
       # A skip is not a pass. tests/test_coarse_frontend.py's DISK+LightGlue cases
       # guard themselves with importorskip("torch")/importorskip("kornia"), so a
@@ -293,52 +268,18 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.sha }}
 
-      - name: Cache Nextflow
-        uses: actions/cache@v4
+      - name: Set up Nextflow
+        # Cache, install, and provision the pinned nf-schema plugin -- the same
+        # composite action ci.yml's Nextflow jobs use. The plugin provisioning
+        # is not optional and was absent from this workflow entirely until
+        # 2026-08-31; it is now structurally impossible for one workflow to have
+        # it and the other not.
+        uses: ./.github/actions/setup-nextflow
         with:
-          path: ~/.nextflow
-          key: ${{ runner.os }}-nextflow-release-${{ matrix.nextflow-version }}-${{ hashFiles('**/*.nf') }}
-          restore-keys: |
-            ${{ runner.os }}-nextflow-release-${{ matrix.nextflow-version }}-
-            ${{ runner.os }}-nextflow-
-
-      - name: Install Nextflow
-        uses: nf-core/setup-nextflow@v2
-        with:
-          version: ${{ matrix.nextflow-version }}
-
-      - name: Cache Nextflow plugins
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/.nextflow-plugins
-          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
-          restore-keys: |
-            ${{ runner.os }}-nf-plugins-
-
-      - name: Provision Nextflow plugins
-        # Install the pinned nf-schema explicitly so a registry outage fails in
-        # a step that names it, instead of halfway into a pipeline run. The
-        # version is read out of nextflow.config rather than duplicated here, so
-        # CI and the pipeline cannot pin different versions. No-op when the
-        # cache above already restored it. Every one of ci.yml's five Nextflow
-        # jobs has carried this step; this workflow had none.
-        run: |
-          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
-
-      - name: Install Python for test data generation
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: 'pip'
-          cache-dependency-path: 'requirements/**'
+          nextflow-version: ${{ matrix.nextflow-version }}
 
       - name: Generate test data
-        run: |
-          # numpy and tifffile at the harmonised versions, taken from
-          # requirements/constraints.txt -- the same file every container image reads. No
-          # version is named here; there is nothing to keep in step by hand.
-          pip install -r requirements/testdata.txt
-          python tests/testdata/generate_complete_testdata.py
+        uses: ./.github/actions/generate-testdata
 
       - name: Check all profiles parse without the gitignored site config
         # Guards against the strict-parser regression class: a committed profile
@@ -428,54 +369,17 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.sha }}
 
-      - name: Cache Nextflow
-        uses: actions/cache@v4
+      - name: Set up Nextflow and nf-test
+        # The action pins Nextflow to the supported release by default: nf-test
+        # 0.9.0's generated test wrappers do not compile under edge Nextflow's
+        # strict parser. latest-everything full-pipeline compatibility is
+        # covered by the test-nextflow job's matrix above.
+        uses: ./.github/actions/setup-nf-test
         with:
-          path: ~/.nextflow
-          key: ${{ runner.os }}-nextflow-release-nftest-${{ hashFiles('**/*.nf') }}
-          restore-keys: |
-            ${{ runner.os }}-nextflow-
-
-      - name: Install Nextflow
-        # Pinned to the supported release: nf-test 0.9.0's generated test
-        # wrappers do not compile under edge Nextflow's strict parser.
-        # latest-everything full-pipeline compatibility is covered by the
-        # test-nextflow job's matrix above.
-        uses: nf-core/setup-nextflow@v2
-        with:
-          version: '25.04.0'
-
-      - name: Cache Nextflow plugins
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/.nextflow-plugins
-          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
-          restore-keys: |
-            ${{ runner.os }}-nf-plugins-
-
-      - name: Provision Nextflow plugins
-        run: |
-          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
-
-      - name: Install Python for test data generation
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: 'pip'
-          cache-dependency-path: 'requirements/**'
+          nf-test-version: ${{ env.NFTEST_VERSION }}
 
       - name: Generate test data
-        run: |
-          # numpy and tifffile at the harmonised versions, taken from
-          # requirements/constraints.txt -- the same file every container image reads. No
-          # version is named here; there is nothing to keep in step by hand.
-          pip install -r requirements/testdata.txt
-          python tests/testdata/generate_complete_testdata.py
-
-      - name: Install nf-test
-        uses: nf-core/setup-nf-test@v1
-        with:
-          version: ${{ env.NFTEST_VERSION }}
+        uses: ./.github/actions/generate-testdata
 
       - name: Run nf-test stub suite
         # Container-free (-profile test) and stub-only (--tag stub): stub blocks
@@ -513,44 +417,16 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.sha }}
 
-      - name: Install Nextflow
-        # Same pin as test-nf-test: nf-test's generated wrappers do not compile
-        # under edge Nextflow's strict parser.
-        uses: nf-core/setup-nextflow@v2
+      - name: Set up Nextflow and nf-test
+        # Same pin as test-nf-test, and for the same reason -- it is the
+        # action's default: nf-test's generated wrappers do not compile under
+        # edge Nextflow's strict parser.
+        uses: ./.github/actions/setup-nf-test
         with:
-          version: '25.04.0'
-
-      - name: Cache Nextflow plugins
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/.nextflow-plugins
-          key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
-          restore-keys: |
-            ${{ runner.os }}-nf-plugins-
-
-      - name: Provision Nextflow plugins
-        run: |
-          nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
-
-      - name: Install Python for test data generation
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: 'pip'
-          cache-dependency-path: 'requirements/**'
+          nf-test-version: ${{ env.NFTEST_VERSION }}
 
       - name: Generate test data
-        run: |
-          # numpy and tifffile at the harmonised versions, taken from
-          # requirements/constraints.txt -- the same file every container image reads. No
-          # version is named here; there is nothing to keep in step by hand.
-          pip install -r requirements/testdata.txt
-          python tests/testdata/generate_complete_testdata.py
-
-      - name: Install nf-test
-        uses: nf-core/setup-nf-test@v1
-        with:
-          version: ${{ env.NFTEST_VERSION }}
+        uses: ./.github/actions/generate-testdata
 
       - name: Token-leak guard
         # Asserts DEEPCELL_ACCESS_TOKEN is forwarded BY NAME and its VALUE never
@@ -593,22 +469,25 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.sha }}
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: 'pip'
-          cache-dependency-path: 'requirements/**'
-
-      - name: Install ruff
+      - name: Set up Python and install ruff
         # Pinned to the version used locally (see ruff.toml) so CI and local
         # `ruff check .` agree exactly.
-        run: |
-          pip install -r requirements/lint.txt
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: '3.10'
+          requirements: 'requirements/lint.txt'
 
       - name: Run ruff check
         run: |
           ruff check .
+
+      - name: Run actionlint
+        # Parity with ci.yml's `ruff` job, which is where workflow lint lives --
+        # see the comment there for why it is not in the advisory `lint` job.
+        # tests/test_release_workflow_graph.py's BLOCKING_CHECKS asserts this
+        # gate runs every check ci.yml blocks on, actionlint included.
+        run: |
+          docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12
 
   # ===========================================================================
   # Job 2 - THE GATE, as one job downstream can depend on. Mirrors ci.yml's
@@ -891,14 +770,14 @@ jobs:
           name: release-archive
 
       - name: Upload archive to release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: mirage-*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update release body
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           body: |
             ## MIRAGE Pipeline Release ${{ needs.validate.outputs.version }}

@@ -35,14 +35,43 @@ skipped" while asserting nothing of the kind. So each in-scope workflow must als
 carry a step that (a) imports torch and kornia in the same interpreter pytest runs
 in and (b) runs tests/test_coarse_frontend.py and fails on any reported skip.
 
+SCOPE WIDENED 2026-09-01 (CI redesign, Phase 2), AND NARROWED IN THE SAME BREATH.
+The install steps moved into `.github/actions/setup-python-env`, so a scan that
+stops at `.github/workflows/*.yml` no longer sees a `pip install` line at all —
+it would have gone green over a workflow that installs nothing. Two changes:
+
+  * the install check is resolved through `tests/ci_actions.py`, which follows a
+    job's `uses: ./.github/actions/...` steps into the action and reads the
+    `requirements:` input the job passes. Remove that resolution and this file
+    reports "no torch/kornia install" for both workflows — verified by doing it.
+  * it is now checked PER JOB, not per FILE. Per-file was already the fix for one
+    round of this defect (a sibling FILE covering for the one that mattered); a
+    sibling JOB inside the same file could still do it, and after the move the
+    only thing tying a requirements file to a job is the `with:` block at the
+    call site. `.github/actions/setup-python-env` declares `requirements` with NO
+    DEFAULT for exactly this reason: a file cannot be installed without some job
+    naming it.
+
+The non-skip proof steps still live in the workflows, but they are read through
+the same resolver so that moving them later cannot silently blind this file.
+
 Plain pytest, no pipeline-runtime imports, all paths derived from `__file__`, per
 this repo's other guard tests.
 """
 
+import importlib
 import re
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+
+# The shared workflow/composite-action resolver. Imported rather than re-derived:
+# seven guards in this repo once carried seven private parses of the same files
+# and each had a different blind spot.
+if str(Path(__file__).parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent))
+ci_actions = importlib.import_module("ci_actions")
 WORKFLOWS = REPO / ".github" / "workflows"
 
 # `pytest ... tests/` -- the DIRECTORY form, i.e. the whole suite. The trailing
@@ -71,21 +100,25 @@ _NO_SKIP_PROOF_RE = re.compile(
 
 
 def workflow_files():
-    files = sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml"))
-    assert files, f"no workflow files under {WORKFLOWS}"
-    return files
+    return ci_actions.workflow_files()
 
 
-def workflows_running_the_pytest_suite():
-    """Every workflow that runs the Python unit-test suite, one entry per FILE.
+def jobs_running_the_pytest_suite():
+    """Every (workflow, job name, job) that runs the Python unit-test suite.
 
-    Discovered by looking for a `pytest ... tests/` invocation, never by filename.
+    Discovered by looking for a `pytest ... tests/` invocation in the job's own
+    `run:` bodies and in any local composite action it uses — never by filename
+    and never by job name.
     """
-    hits = [wf for wf in workflow_files() if _RUNS_THE_SUITE_RE.search(wf.read_text())]
-    # Non-vacuity: an empty list would make every parametrised check below pass
-    # having examined nothing, which is the failure mode this whole file is about.
+    hits = []
+    for wf in workflow_files():
+        for name, job in ci_actions.load_jobs(wf).items():
+            if _RUNS_THE_SUITE_RE.search(ci_actions.job_resolved_run_text(job)):
+                hits.append((wf, name, job))
+    # Non-vacuity: an empty list would make every check below pass having
+    # examined nothing, which is the failure mode this whole file is about.
     assert hits, (
-        f"no workflow under {WORKFLOWS.relative_to(REPO)} runs `pytest ... tests/`. "
+        f"no job under {WORKFLOWS.relative_to(REPO)} runs `pytest ... tests/`. "
         "Either the suite stopped running in CI, or the invocation was reworded past "
         "this detector -- update _RUNS_THE_SUITE_RE rather than leaving the checks "
         "below to pass over an empty set."
@@ -93,21 +126,58 @@ def workflows_running_the_pytest_suite():
     return hits
 
 
-def test_every_pytest_workflow_installs_torch_and_kornia():
-    """Per-file, not a union. See this module's docstring for the measured break."""
+def workflows_running_the_pytest_suite():
+    """The FILES containing such a job, de-duplicated and order-preserving."""
+    out = []
+    for wf, _name, _job in jobs_running_the_pytest_suite():
+        if wf not in out:
+            out.append(wf)
+    return out
+
+
+def test_every_pytest_job_installs_torch_and_kornia():
+    """PER JOB, resolved through the composite actions the job calls.
+
+    Per-file was the previous fix and it is no longer enough: after the Phase-2
+    move the install is a `requirements:` input at the call site, so the thing
+    that ties torch to the job that needs it IS the job's own `with:` block. A
+    sibling job passing it does not help this one.
+    """
     missing = []
-    for wf in workflows_running_the_pytest_suite():
-        text = wf.read_text()
-        rel = wf.relative_to(REPO)
-        if not _TORCH_INSTALL_RE.search(text):
-            missing.append(f"{rel}: no `pip install -r requirements/torch-cpu.txt`")
-        if not _KORNIA_INSTALL_RE.search(text):
-            missing.append(f"{rel}: no `pip install -r requirements/kornia.txt`")
+    for wf, name, job in jobs_running_the_pytest_suite():
+        installed = ci_actions.requirement_files_installed(job)
+        where = f"{wf.relative_to(REPO)}: job `{name}`"
+        for req in ("requirements/torch-cpu.txt", "requirements/kornia.txt"):
+            if req not in installed:
+                missing.append(f"{where} does not install {req} (installs {installed})")
+        if "requirements/torch-cpu.txt" in installed and "requirements/kornia.txt" in installed:
+            if installed.index("requirements/torch-cpu.txt") > installed.index(
+                "requirements/kornia.txt"
+            ):
+                missing.append(
+                    f"{where} installs kornia BEFORE torch. kornia drags the ~2.5 GB "
+                    "CUDA wheel from PyPI if torch is not already satisfied, so the "
+                    "order is load-bearing, not stylistic."
+                )
     assert not missing, (
-        "workflow(s) run the pytest suite without installing the DISK front-end "
+        "job(s) run the pytest suite without installing the DISK front-end "
         "stack, so tests/test_coarse_frontend.py's DISK cases importorskip away "
         "there and prove nothing:\n" + "\n".join(missing)
     )
+
+
+def test_the_install_detector_still_matches_a_literal_pip_install():
+    """Non-vacuity for the two module-level regexes, which no longer fire on any
+    workflow now that the installs are a `with: requirements:` input.
+
+    They are kept because a job may go back to writing `pip install -r ...`
+    inline at any time, and `ci_actions.requirement_files_installed` reads that
+    form too. A regex that matches nothing anywhere is indistinguishable from a
+    regex that is broken, so it is exercised here against the literal form.
+    """
+    sample = "pip install -r requirements/torch-cpu.txt\npip install -r requirements/kornia.txt"
+    assert _TORCH_INSTALL_RE.search(sample)
+    assert _KORNIA_INSTALL_RE.search(sample)
 
 
 def test_every_pytest_workflow_installs_the_cpu_torch_wheel():
@@ -156,20 +226,24 @@ def test_every_pytest_workflow_proves_the_disk_case_is_not_skipped():
     tests/test_coarse_frontend.py, and fail on any skip it reports.
     """
     missing = []
-    for wf in workflows_running_the_pytest_suite():
-        text = wf.read_text()
-        rel = wf.relative_to(REPO)
+    for wf, name, job in jobs_running_the_pytest_suite():
+        # Resolved through the job's composite actions: the proof steps live in
+        # the workflow today, but reading only `wf.read_text()` is what made this
+        # file's install checks go blind when the installs moved, and there is no
+        # reason to leave the same trap set for the next move.
+        text = ci_actions.job_resolved_run_text(job)
+        where = f"{wf.relative_to(REPO)}: job `{name}`"
         if not _IMPORT_PROOF_RE.search(text):
             missing.append(
-                f"{rel}: no `python -c \"import torch, kornia\"` step -- an install "
+                f"{where}: no `python -c \"import torch, kornia\"` step -- an install "
                 "line does not prove the wheel imports on this runner"
             )
         if not _NO_SKIP_PROOF_RE.search(text):
             missing.append(
-                f"{rel}: no step that runs tests/test_coarse_frontend.py and fails "
+                f"{where}: no step that runs tests/test_coarse_frontend.py and fails "
                 "on a reported skip -- so nothing here asserts the DISK case ran"
             )
     assert not missing, (
-        "workflow(s) run the pytest suite without proving the DISK front-end case "
+        "job(s) run the pytest suite without proving the DISK front-end case "
         "actually executes:\n" + "\n".join(missing)
     )
