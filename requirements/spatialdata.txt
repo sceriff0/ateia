@@ -11,21 +11,21 @@
 # zarr==2.18.3 for tifffile's aszarr region reads, which spatialdata>=0.8.0 cannot use.
 # tests/test_ci_stack_pinned.py lists this image as the standing exception.
 spatialdata>=0.8.0
-zarr>=3.0.0            # required by spatialdata >= 0.8.0 (NOT the 2.18 the tiled image pins)
-ome-zarr>=0.16.0
-anndata>=0.11.0
+zarr>=3.3.0            # required by spatialdata >= 0.8.0 (NOT the 2.18 the tiled image pins)
+ome-zarr>=0.18.0
+anndata>=0.13.3.post0
 
 # Shapes are GeoParquet-backed GeoDataFrames; GEOS comes from libgeos-c1v5 in the image.
-geopandas>=1.0.0
-shapely>=2.0.0
-pyarrow>=15.0.0        # GeoParquet writer for shapes/, and Parquet for any points/
+geopandas>=1.1.4
+shapely>=2.1.2
+pyarrow>=25.0.1        # GeoParquet writer for shapes/, and Parquet for any points/
 
 # Lazy, chunked reads of the merged pyramid — peak memory is one chunk, not one slide.
-dask[array]>=2024.8.0
-tifffile>=2024.7.2
-imagecodecs>=2024.6.1  # zstd/LZW codecs used by MERGE_AND_PYRAMID's OME-TIFF
+dask[array]>=2026.8.0
+tifffile>=2026.8.23
+imagecodecs>=2026.8.16  # zstd/LZW codecs used by MERGE_AND_PYRAMID's OME-TIFF
 
 # cKDTree for the QC-residual -> cell_mask spatial join.
-scipy>=1.13.0
-pandas>=2.0.0
-numpy>=1.26,<3
+scipy>=1.18.1
+pandas>=3.0.5
+numpy>=2.5.2,<3

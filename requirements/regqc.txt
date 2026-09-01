@@ -13,23 +13,23 @@
 # something under 1.13. Naming scipy in the last pip step means the number the guard reads and
 # the number pip installs are the same line. BaSiCPy is gone (below), so the harmonised value
 # holds and `-c constraints.txt` above enforces it at BUILD time as well.
-scipy==1.15.3
+scipy==1.18.1
 
 # dask arrives transitively (nd2 -> resource-backed-dask-array -> dask) and was the one
 # constrained package this file did not name. Named now so it is checked statically by
 # test_shared_packages_match_the_harmonised_version, not only by the constraints file.
-dask==2026.7.1
+dask==2026.8.0
 
-h5py==3.11.0
-nd2==0.10.1
-nd2reader==3.3.0
-opencv-python==4.10.0.82
-pandas==2.3.3
-tifffile==2025.5.10
-imagecodecs==2025.3.30
-zarr==2.18.3
-numcodecs==0.13.1
-matplotlib==3.9.2
+h5py==3.16.0
+nd2==0.11.3
+nd2reader==3.3.1
+opencv-python==5.0.0.93
+pandas==3.0.5
+tifffile==2026.8.23
+imagecodecs==2026.8.16
+zarr==3.3.0
+numcodecs==0.16.5
+matplotlib==3.11.1
 
 # REMOVED 2026-09-01, and both removals are why this image builds again.
 #
@@ -41,7 +41,7 @@ matplotlib==3.9.2
 #     module. nextflow.config records the in-process path as prior behaviour. The pip dependency
 #     was a leftover of that removal, and it was the whole cause of the failure: BaSiCPy declares
 #     scipy<1.13 in 1.2.0 and still in its current 2.0.0, so against the harmonised
-#     scipy==1.15.3 pip reported ResolutionImpossible and the image would not build at all.
+#     scipy==1.18.1 pip reported ResolutionImpossible and the image would not build at all.
 #
 #   dipy==1.9.0 -- nothing under bin/, lib/, modules/, conf/, workflows/ or subworkflows/
 #     references it: no import, no mention. It arrived beside the cudipy install that was itself

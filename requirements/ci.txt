@@ -7,7 +7,7 @@
 # image takes its version FROM that image's own file, never from a second copy written
 # here. The `-r` lines below are how, and the two exceptions are named and explained.
 #
-# THE ONLY VERSION STRING BELOW IS `anndata<0.12`, and its reason is spelled out where it
+# THE ONLY VERSION STRING BELOW IS `anndata<0.14`, and its reason is spelled out where it
 # sits. Everything else is either constrained by constraints.txt or comes from a production
 # image's own file.
 #
@@ -71,4 +71,4 @@ opencv-python-headless
 # below 0.12, the last line that works against the constrained zarr 2.18.3. The right fix
 # is a separate job running those two test files inside bolt3x/mirage-spatialdata; until
 # then this line is the honest record of the gap.
-anndata<0.12
+anndata<0.14
