@@ -137,16 +137,18 @@ a historical record of what was run, not an instruction.
 #### This hazard is PRESENT TODAY — it does not wait for the bump
 
 `tests/run_validation_tests.sh` was **not** a "day of the bump" problem, and
-describing it as one was wrong. `.github/workflows/ci.yml`'s `nextflow-stub`
-job runs a matrix of `['25.04.0', 'latest-everything']`, and (as noted in
-section 2) `latest-everything` **already tracks whatever Nextflow is current**
-— which is Nextflow 26 today, on every push and every PR. That job runs
-`bash tests/run_validation_tests.sh` at `ci.yml:303`, and it is in the
-`all-tests` blocking gate. `.github/workflows/release.yml`'s gate used to pin
-`version: 'latest-everything'` outright, so the job blocking a version tag was
-26-only and never exercised the `>=25.04.0` minimum `manifest.nextflowVersion`
-promises; since 2026-08-31 its `test-nextflow` job carries the same
-`['25.04.0', 'latest-everything']` matrix as ci.yml.
+describing it as one was wrong. The `nextflow-stub` job runs a matrix of
+`['25.04.0', 'latest-everything']`, and (as noted in section 2)
+`latest-everything` **already tracks whatever Nextflow is current** — which is
+Nextflow 26 today, on every push and every PR. That job runs
+`bash tests/run_validation_tests.sh`, and it is inside the blocking gate.
+`.github/workflows/release.yml`'s gate used to pin `version:
+'latest-everything'` outright, so the job blocking a version tag was 26-only and
+never exercised the `>=25.04.0` minimum `manifest.nextflowVersion` promises; it
+gained the same matrix on 2026-08-31, and since 2026-09-01 there is only one
+copy of the job to matrix — `nextflow-stub` lives in
+`.github/workflows/_test-suite.yml`, the reusable workflow `ci.yml` and
+`release.yml` both call.
 
 In other words: raising `manifest.nextflowVersion` changes what the pipeline
 *claims* to support. It does not change which engine CI executes. The boolean

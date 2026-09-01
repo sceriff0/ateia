@@ -23,6 +23,10 @@ _DEFAULT_DIRS = ("modules", "subworkflows", "workflows")
 _PROCESS_RE = re.compile(r"^\s*process\s+([A-Z][A-Z0-9_]*)\s*\{", re.M)
 _WITHNAME_RE = re.compile(r"withName:\s*'([^']+)'\s*\{")
 _PARAM_RE = re.compile(r"\bparams\.([A-Za-z_]\w*)")
+_WORKFLOW_RE = re.compile(r"^\s*workflow\s+([A-Z][A-Z0-9_]*)\s*\{", re.M)
+# `include { NAME as ALIAS }` -- the alias is the name the pipeline (and
+# `withName:`) actually sees at the call site.
+_ALIAS_RE = re.compile(r"\b([A-Z][A-Z0-9_]*)\s+as\s+([A-Z][A-Z0-9_]*)")
 
 
 @dataclass(frozen=True)
@@ -150,6 +154,45 @@ def with_name_blocks(root: Path = REPO_ROOT) -> List[WithNameBlock]:
                 start_line=raw.count("\n", 0, m.start()) + 1,
             )
         )
+    return out
+
+
+@lru_cache(maxsize=None)
+def workflows(root: Path = REPO_ROOT) -> Dict[str, Path]:
+    """Every named `workflow NAME {` under `workflows/` and `subworkflows/`.
+
+    A subworkflow is a first-class pipeline name -- SEG_QC, VALIS_ADAPTER,
+    REGISTER_PATIENT -- and is indistinguishable from a process to anything
+    reading prose or a diagram. A guard that resolves UPPER_SNAKE_CASE names
+    against `processes()` alone therefore reports every subworkflow as
+    nonexistent. Matched on the comment/string-stripped view, so a subworkflow
+    named only in a comment does not count as declared.
+
+    The anonymous entry `workflow {` in `main.nf` has no name and is not here.
+    """
+    out: Dict[str, Path] = {}
+    for f in nf_files(("workflows", "subworkflows"), root):
+        for m in _WORKFLOW_RE.finditer(strip_comments_and_strings(f.read_text())):
+            out[m.group(1)] = f
+    return out
+
+
+@lru_cache(maxsize=None)
+def include_aliases(root: Path = REPO_ROOT) -> Dict[str, str]:
+    """`alias -> original` for every `include { X as Y }` in the pipeline.
+
+    An aliased include creates a name that exists nowhere as a `process` or
+    `workflow` declaration -- SEG_QC_SEGMENT is `SEGMENT` imported under
+    another name -- yet it is the name that appears in the trace, in
+    `withName:` selectors and in every diagram. Resolving names without it
+    reports a real, running task as nonexistent.
+    """
+    out: Dict[str, str] = {}
+    for f in nf_files(("modules", "workflows", "subworkflows"), root) + [root / "main.nf"]:
+        clean = strip_comments_and_strings(f.read_text())
+        for m in re.finditer(r"include\s*\{([^}]*)\}", clean):
+            for a in _ALIAS_RE.finditer(m.group(1)):
+                out[a.group(2)] = a.group(1)
     return out
 
 

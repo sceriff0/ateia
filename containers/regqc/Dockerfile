@@ -43,19 +43,29 @@ RUN mkdir -p $CONDA_DIR && \
 RUN conda install -y -c bioconda bftools && conda clean -afy
 
 # ---- Python dependencies ----
+# The build context is the REPOSITORY ROOT (containers.yml passes `context: .`).
+# regqc.txt opens with `-c constraints.txt`, which pip resolves next to it, so both files
+# land in the same directory; the inline pins below pass the same constraints file on the
+# command line. A pin that drifts from requirements/constraints.txt fails the BUILD.
+COPY requirements/constraints.txt requirements/regqc.txt /tmp/requirements/
+
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Core scientific + GPU packages
-RUN pip install --no-cache-dir \
+# Core scientific + GPU packages.
+#
+# scipy is deliberately NOT here. It is pinned in requirements/regqc.txt, which is the LAST pip
+# step below -- because a pin in THIS layer is only as good as what the later steps do to it, and
+# for the life of this image a later step silently downgraded it (BaSiCPy, now removed, capped
+# scipy<1.13). scikit-image pulls scipy anyway and `-c` holds it at the harmonised version.
+RUN pip install --no-cache-dir -c /tmp/requirements/constraints.txt \
     numpy==1.26.4 \
     pandas==2.3.3 \
     scikit-image==0.25.2 \
-    scipy==1.15.3 \
     gputools \
     edt
 
 # TensorFlow GPU + Stardist ecosystem
-RUN pip install --no-cache-dir \
+RUN pip install --no-cache-dir -c /tmp/requirements/constraints.txt \
     tensorflow==2.17.1 \
     stardist==0.9.1 \
     csbdeep==0.8.2
@@ -65,9 +75,19 @@ RUN pip install --no-cache-dir \
 # longer exists (git clone exits 128, "could not resolve to a Repository"), so this image could
 # not be built AT ALL -- and nothing in bin/, lib/ or modules/ imports cudipy or dipy. It was
 # installed --no-deps, used by nothing, and its absence had gone unnoticed because
-# build-images.yml only runs on a push to main touching containers/**.
+# build-images.yml only ran on a push to main touching containers/**. That hole is the
+# reason .github/workflows/containers.yml now builds this image nightly as well.
 
-# Copy requirements if needed (optional)
-COPY requirements.txt /app/requirements.txt
-RUN pip install -r /app/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements/regqc.txt
 
+
+# Fail the BUILD rather than a cluster run. containers/<dir>/smoke.sh imports exactly
+# the third-party modules this image's bin/ scripts import at run time, so a stack that
+# resolved in pip and then explodes on first import stops here. The SAME script is run
+# again by .github/workflows/containers.yml against the built image, so there is one
+# definition exercised in two places rather than two copies that drift.
+#
+# LAST, and after every pip install, on purpose: a COPY invalidates the layer cache for
+# everything below it, so putting this at the end costs no rebuilds.
+COPY containers/regqc/smoke.sh /usr/local/bin/mirage-smoke.sh
+RUN bash /usr/local/bin/mirage-smoke.sh

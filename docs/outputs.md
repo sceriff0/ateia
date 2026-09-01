@@ -42,7 +42,7 @@ checkpoint — see [Checkpoints](#checkpoints).
 |---|---|---|
 | `patient_id` | string | Grouping key. All rows sharing it are registered into one coordinate space and produce one output tree. |
 | `path_to_file` | path | The image. Any Bio-Formats-readable format (ND2, CZI, LIF, NDPI, TIFF, HDF5, OME-TIFF). |
-| `is_reference` | `true` / `false` | Exactly **one** `true` per patient — the registration reference and the slide that gets segmented. With `allow_auto_reference = true`, a patient with no `true` promotes its first image instead of failing. |
+| `is_reference` | `true` / `false` | Exactly **one** `true` per patient — the registration reference and the slide that gets segmented. A patient with no `true` is a **hard error at launch**, at every entry point. There is no auto-promotion: which slide the others are warped onto is not a choice the pipeline makes on your behalf. |
 | `channels` | `\|`-separated | Marker names in channel order, e.g. `DAPI\|PanCK\|CD45`. **Declared metadata, never parsed from the filename.** The count must match the image's channel count. |
 
 !!! warning "The nuclear channel is resolved by name, not position"

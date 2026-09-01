@@ -1,0 +1,26 @@
+# The container build context is the REPOSITORY ROOT (.github/workflows/containers.yml
+# passes `context: .`), because every Dockerfile under containers/ COPYs its pins from
+# requirements/ — the same files the workflows install. A per-directory context cannot
+# reach outside itself, so the context had to widen; this file keeps what is actually
+# uploaded to the builder small.
+#
+# EXCLUSIONS ONLY, no `*` + re-include pair. The inverted form is one typo away from
+# excluding a file some Dockerfile COPYs, and the whole tree is ~10 MB, so there is nothing
+# to win by being clever. Add a directory here when it grows, not pre-emptively.
+.git
+.github
+.nextflow
+.nf-test
+docs
+site
+# 4.5 MB of the ~8.5 MB tracked tree, COPY'd by no Dockerfile (all 10 COPY/ADD lines across
+# the 11 Dockerfiles name requirements/ only).
+assets
+research
+work
+results
+benchmarks
+tests/testdata
+**/__pycache__
+**/*.pyc
+**/.DS_Store

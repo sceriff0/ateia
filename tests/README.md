@@ -65,6 +65,16 @@ def test_compute_cell_intensities_simple():
 pytest -v tests/
 ```
 
+**The floor (`MIRAGE_STRICT_SKIPS`)**: 39 modules here `pytest.importorskip` at
+module scope, so a degraded environment deselects most of the suite and still
+exits 0. Set `MIRAGE_STRICT_SKIPS=1` and `tests/conftest.py` fails the session
+on any skip not listed in `tests/expected_skips.txt`, and on a collected count
+below `tests/collected_floor.txt`. Both files are ratchets that only go up;
+both are read, not restated, so moving one is a one-line diff. CI sets the
+variable on its blocking full-suite step. It is off by default so a partial
+local environment is not blocked — but run with it before pushing, because
+that is the environment the gate uses. Measured `1151 passed / 10 skipped`.
+
 ### 2. Nextflow Process Tests (nf-test)
 
 **Purpose**: Test individual Nextflow processes with realistic inputs
@@ -327,9 +337,14 @@ Location: `.github/workflows/ci.yml`
    - Runs nf-test suite
    - Uploads test artifacts
 
-3. **lint**
-   - Runs nf-core lint
-   - Checks code style
+3. **ruff** (inside `_test-suite.yml`, blocking)
+   - Runs `ruff check .`
+   - Runs `actionlint` over `.github/workflows/**` and `.github/actions/**`
+
+There is no `nf-core lint` job. It ran `|| true` and could never fail, and it was
+deleted on 2026-09-01 once the measurement showed that no released nf-core/tools
+version -- 2.14.1 through 4.1.0 -- can lint this repository at all. `.nf-core.yml`'s
+header records the failure, version by version.
 
 ### Triggers
 

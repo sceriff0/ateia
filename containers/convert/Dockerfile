@@ -61,6 +61,14 @@ RUN pip3 install --no-cache-dir --upgrade pip
 #     unsatisfiable there. numpy 2 is safe in THIS image specifically: it carries no TensorFlow or
 #     StarDist, which are the only reason the harmonised numpy is held at the last 1.x.
 # Verified by resolving the exact set with pip 26 on Python 3.10 before committing.
+#
+# THIS IMAGE TAKES NO requirements/constraints.txt, and that is deliberate -- it is the
+# second documented exception alongside containers/spatialdata. Both divergences above are
+# already recorded in tests/test_container_harmonisation.py's PINNED_EXCEPTIONS, each with
+# the upstream constraint that forces it, and tests/test_ci_stack_pinned.py derives its
+# exception list from that table rather than from a hand-written name list. Passing
+# `-c /tmp/requirements/constraints.txt` here would not "let the constraint win" -- pip
+# would report ResolutionImpossible on numpy and tifffile and the image would not build.
 RUN pip3 install --no-cache-dir \
         tifffile==2024.12.12 \
         imagecodecs==2025.3.30 \
@@ -77,3 +85,14 @@ RUN pip3 install --no-cache-dir \
         dask[array]==2026.7.1
 
 
+
+# Fail the BUILD rather than a cluster run. containers/<dir>/smoke.sh imports exactly
+# the third-party modules this image's bin/ scripts import at run time, so a stack that
+# resolved in pip and then explodes on first import stops here. The SAME script is run
+# again by .github/workflows/containers.yml against the built image, so there is one
+# definition exercised in two places rather than two copies that drift.
+#
+# LAST, and after every pip install, on purpose: a COPY invalidates the layer cache for
+# everything below it, so putting this at the end costs no rebuilds.
+COPY containers/convert/smoke.sh /usr/local/bin/mirage-smoke.sh
+RUN bash /usr/local/bin/mirage-smoke.sh

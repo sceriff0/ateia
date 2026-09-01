@@ -15,7 +15,7 @@
 # until now lived in a second, optional image (containers/stare-ml, `-profile stare_ml`).
 # That split is gone: ONE image that always works beats TWO where the second is never
 # published. The second image was built by a plain push to main but NEVER pushed
-# (.github/workflows/build-images.yml pushes only on release:published /
+# (.github/workflows/containers.yml pushes only on release:published /
 # workflow_dispatch), so `-profile stare_ml` failed on image pull for anyone who had not
 # manually dispatched the build — the exact trap `:tiled` itself shipped into once
 # already. Folding torch+kornia in here costs every user ~1 GB of pull; it buys every user
@@ -45,13 +45,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN pip install --no-cache-dir --upgrade pip
 
-COPY requirements.txt /tmp/requirements.txt
+# The build context is the REPOSITORY ROOT (containers.yml passes `context: .`), so the
+# pin files come from requirements/ -- the same files .github/workflows/*.yml install. There
+# is no second copy of any version string to keep in step.
+COPY requirements/constraints.txt requirements/tiled.txt requirements/torch-cpu.txt requirements/kornia.txt /tmp/requirements/
 # torch BEFORE kornia, and from the CPU index: kornia pulls torch from PyPI (the CUDA
 # wheel, ~2.5 GB) if torch is not already satisfied. The order is load-bearing, and it is
-# why these two pins live HERE and not in requirements.txt -- see that file's comment.
-RUN pip install --no-cache-dir -r /tmp/requirements.txt \
-    && pip install --no-cache-dir torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir kornia==0.7.3
+# why those two are separate files and separate invocations -- see requirements/torch-cpu.txt.
+# tiled.txt opens with `-c constraints.txt`, which pip resolves next to it.
+RUN pip install --no-cache-dir -r /tmp/requirements/tiled.txt \
+    && pip install --no-cache-dir -r /tmp/requirements/torch-cpu.txt \
+    && pip install --no-cache-dir -r /tmp/requirements/kornia.txt
 
 # BAKE THE PRETRAINED WEIGHTS. kornia fetches these at FIRST USE into
 # $TORCH_HOME/hub/checkpoints -- from raw.githubusercontent.com (DISK) and
@@ -73,10 +77,12 @@ RUN python -c 'from kornia.feature import DISK, LightGlue; DISK.from_pretrained(
     && chmod -R a+rX /opt/torch \
     && HOME=/nonexistent python -c 'from kornia.feature import DISK, LightGlue; DISK.from_pretrained("depth"); LightGlue("disk"); print("baked weights load with no HOME")'
 
-RUN python -c "import numpy, scipy, skimage, tifffile, zarr, torch, kornia; \
-assert not torch.cuda.is_available(), 'CUDA wheel installed -- expected the CPU wheel'; \
-print('tiled image OK:', numpy.__version__, scipy.__version__, skimage.__version__, tifffile.__version__, zarr.__version__, torch.__version__, kornia.__version__)" \
-    && ps -e -o pid= -o ppid= > /dev/null && echo "procps OK: nextflow task-metrics wrapper can run"
+# The final verification. IT MOVED, VERBATIM, into containers/tiled/smoke.sh (CI
+# redesign Phase 6, 2026-09-01) -- including the CPU-wheel assertion above -- so the
+# same definition runs here at build time AND from .github/workflows/containers.yml
+# with `docker run` against the built image.
+COPY containers/tiled/smoke.sh /usr/local/bin/mirage-smoke.sh
+RUN bash /usr/local/bin/mirage-smoke.sh
 
 # Carried over from the folded-in stare-ml image, which set it: TILED_COARSE used to run
 # there under -profile stare_ml and now runs here, so keeping it preserves that path's

@@ -1,8 +1,24 @@
 # Mirage Container Images
 
-This directory vendors the Docker build contexts for every image the Mirage
-pipeline runs. Each subdirectory is a self-contained build context
-(`containers/<name>/Dockerfile` plus any `requirements.txt` / helper files).
+This directory vendors the Dockerfiles for every image the Mirage pipeline runs.
+
+**The build context is the REPOSITORY ROOT, not `containers/<name>/`.**
+`.github/workflows/containers.yml` passes `context: .` with
+`file: containers/<name>/Dockerfile`, because every image takes its Python pins from
+[`requirements/`](../requirements) — `constraints.txt` is the one version authority shared
+by all eleven images AND by the CI workflows, and a per-directory context cannot reach
+outside itself. A local build must therefore be run from the repository root:
+
+```sh
+docker build -f containers/segeval/Dockerfile -t bolt3x/mirage-segeval:1.0.0 .
+```
+
+Two images take no constraints file and say so in their own header:
+`containers/spatialdata` (the python:3.12 / `zarr>=3` island) and `containers/convert`
+(bioio caps `tifffile` and forces `numpy` 2.x). Both divergences are recorded in
+`tests/test_container_harmonisation.py`'s `PINNED_EXCEPTIONS`, and
+`tests/test_ci_stack_pinned.py` derives its exception list from that table rather than
+from a hand-written name list.
 
 Images are built and published to **Docker Hub**, one public repository per image,
 tagged with the pipeline version:
@@ -15,7 +31,7 @@ The build-context directory, the Docker Hub repository and the `container` direc
 `modules/local/*.nf` all use the same component name, so there is nothing to translate
 between them. `tests/test_container_image_naming.py` asserts that.
 
-Publishing is automated by [`.github/workflows/build-images.yml`](../.github/workflows/build-images.yml)
+Publishing is automated by [`.github/workflows/containers.yml`](../.github/workflows/containers.yml)
 and the release flow in [`.github/workflows/release.yml`](../.github/workflows/release.yml).
 CI authenticates with the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` repository
 secrets. Docker Hub images are **public**, so no pull credentials are needed on
@@ -33,7 +49,7 @@ not publish.
 To rebuild ONE image without republishing the other ten:
 
 ```sh
-gh workflow run build-images.yml --ref <branch> -f version=<tag> -f only=segeval
+gh workflow run containers.yml --ref <branch> -f version=<tag> -f only=segeval
 ```
 
 > `<tag>` is a content-descriptive tag (e.g. `preprocess`,
@@ -45,7 +61,7 @@ gh workflow run build-images.yml --ref <branch> -f version=<tag> -f only=segeval
 >
 > This replaces an earlier layout that used a single repository with one *content-descriptive*
 > tag per image (`:preprocess`, `:convert_bioformats_2`, …). That put component names and real
-> versions (`v2.3`, `v2.4`) in the same namespace, and — because `build-images.yml` resolved a
+> versions (`v2.3`, `v2.4`) in the same namespace, and — because the build workflow resolved a
 > `version` input it then never applied to the tag — every publish overwrote one mutable name,
 > leaving no earlier image to roll back to.
 >
@@ -89,7 +105,7 @@ directly. We do **not** vendor or republish it: its from-source libvips build is
 heavy (and the original vendored Dockerfile failed to build in CI — `meson` was
 missing). The upstream image is `linux/amd64` and already battle-tested, so there
 is little value in re-hosting it. It is therefore excluded from
-`build-images.yml`. If you ever want a self-hosted copy, add a `containers/valis/`
+`containers.yml`. If you ever want a self-hosted copy, add a `containers/valis/`
 Dockerfile that installs `meson`/`ninja` before the libvips build and re-add
 `valis` to the build matrix.
 

@@ -417,7 +417,8 @@ ARGPARSE_DEFAULT_ALLOWLIST = {
 # segment_to_geojson.py's --tolerance, not a coincidence (segment_to_geojson.py:74-76
 # passes its own --tolerance value straight into mask_to_feature_collection()'s
 # simplify_tolerance), and the cited "+0.5 corner-of-pixel offset" justification
-# (bin/mask_to_geojson.py:36-40) is about contour OFFSET, an unrelated concern, not
+# (bin/mask_to_geojson.py:36-43, whose rule is owned by bin/utils/pixel_convention.py)
+# is about contour OFFSET, an unrelated concern, not
 # simplification tolerance -- it does not support keeping a divergent default. Per this
 # file's own policy ("a divergence that is simply a bug gets fixed, not allowlisted"),
 # bin/mask_to_geojson.py's --tolerance default was changed 0.5 -> 1.0 to match its

@@ -4,15 +4,7 @@
     "outdir": "/path/to/results",
     "start": "postprocessing",
 
-    "_comment_seg": "=== Segmentation ===",
-    "seg_gpu": true,
-    "seg_pmin": 1.0,
-    "seg_pmax": 99.8,
-    "seg_n_tiles_y": 16,
-    "seg_n_tiles_x": 16,
-    "seg_expand_distance": 10,
-    "segmentation_model_dir": null,
-    "segmentation_model": "stardist_full_e200_lr00001_aug1_seed10_es50p0.001_rlr0.5p50",
+    "_comment_seg": "=== Segmentation === NOT SET ON PURPOSE. `start: postprocessing` begins AFTER the segmentation step (ParamUtils.STEP_ORDER is preprocessing -> registration -> segmentation -> postprocessing), so masks are read from the segmented checkpoint and no seg_* parameter is consulted. This preset used to carry the full segmentation block including a StarDist model name with no seg_method, which read as a configuration choice and was inert.",
 
     "_comment_output": "=== Image Output / Pyramid ===",
     "tilex": 512,

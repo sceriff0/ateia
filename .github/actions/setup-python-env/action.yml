@@ -1,0 +1,129 @@
+# =============================================================================
+# Set up Python and install requirements/ files (composite action)
+# =============================================================================
+# `actions/setup-python` (12 inline instances across ci.yml and release.yml) plus
+# the `pip install -r requirements/<file>` step that always followed it.
+#
+# `requirements` IS AN ORDERED LIST, one file per line, and each line becomes its
+# OWN `pip install` invocation. That is not cosmetic. The python-tests stack
+# installs three files and the order and the separation are both load-bearing:
+#
+#   * requirements/torch-cpu.txt carries `--index-url .../whl/cpu`, which applies
+#     to the WHOLE resolve if the file is pulled in by `-r` from another
+#     requirements file — so it must be its own invocation, not a line inside
+#     requirements/ci.txt.
+#   * kornia drags the ~2.5 GB CUDA wheel from PyPI if torch is not already
+#     satisfied, so torch goes first.
+#
+# This matches containers/tiled/Dockerfile exactly, which is the point: the pins
+# exist once, in requirements/, and CI and the image read the same files.
+#
+# NO VERSION STRING MAY APPEAR IN THIS FILE. tests/test_ci_stack_pinned.py scans
+# `.github/actions/**` alongside `.github/workflows/**` for exactly that, and
+# tests/test_disk_test_actually_runs.py resolves a workflow through the
+# `requirements:` input below to prove the DISK front-end stack really is
+# installed wherever the pytest suite runs. Both go through tests/ci_actions.py.
+#
+# `cache-dependency-path: 'requirements/**'` is NOT optional. `cache: 'pip'`
+# defaults its key to the hash of `**/requirements.txt`, and the only files
+# matching that glob are the root shim and docs/requirements.txt — neither of
+# which changes when a pin does. The key would go stale exactly when it must
+# rotate: the run after a bump would restore a cache built for the OLD wheels
+# (~190 MB of torch among them).
+#
+# THE THREE CACHING RULES that govern every cache in this repository are written
+# out in `.github/actions/setup-nextflow/action.yml`. This pip cache satisfies
+# rule 1 -- `requirements/**` is a manifest tree, not a source tree, so the key
+# rotates when and only when a pin changes.
+#
+# IT DOES NOT SATISFY RULE 2, AND THAT IS A KNOWN, DEFERRED COST. actions/setup-python
+# builds its own key as
+# `setup-python-<os>-<arch>-python-<version>-pip-<hash of cache-dependency-path>`;
+# there is no per-job component and the action exposes no suffix input. So every
+# job on one interpreter version shares ONE pip entry, and the smallest of them
+# (`ruff`, which installs requirements/lint.txt alone) can be the first writer
+# and fix a near-empty entry for the lifetime of the key -- after which
+# `python-tests` re-downloads ~190 MB of torch on every run until a pin changes.
+# The redesign's own remedy for this is `astral-sh/setup-uv`'s `cache-suffix`,
+# i.e. switching installers, which is a larger change with its own failure modes
+# (torch's `--index-url`, uv's resolver differing from pip's) and buys speed, not
+# correctness. It is deliberately NOT done here. This is a cold-download cost
+# only: a partial pip cache is still a valid pip cache.
+# =============================================================================
+name: 'Set up Python environment'
+description: 'Install Python with a pip cache, then install the given requirements/ files in order.'
+
+inputs:
+  python-version:
+    description: 'Python version to install.'
+    required: false
+    default: '3.10'
+  requirements:
+    description: >-
+      requirements/ files to install, ONE PER LINE, in order. Each line becomes
+      its own `-r` install, run separately from the others. Never name a package
+      version here — every version string lives in requirements/.
+    #
+    # REQUIRED, WITH NO DEFAULT, ON PURPOSE. A default would let a call site
+    # install requirements/ci.txt without naming it, and then no guard walking
+    # from a JOB could attribute that file to that job — the property would
+    # become unguardable by construction. The failure this protects against was
+    # measured: a per-job presence check was replaced by a whole-workflow one,
+    # and a sibling job's install line satisfied the check on behalf of the job
+    # that actually needed it, so the blocking gate could have run with no cv2
+    # (29 tests module-scope importorskip away in silence) and no PyYAML (which
+    # silently deletes both of tests/test_ci_job_hygiene.py's own guards).
+    #
+    # So: every caller names its requirements files LITERALLY, in its own `with:`
+    # block. The one exception is .github/actions/generate-testdata, which names
+    # requirements/testdata.txt literally in ITS action file — a resolver that
+    # recurses one hop through a `uses:` of a local action still attributes it
+    # to the calling job.
+    required: true
+  upgrade-pip:
+    description: >-
+      Upgrade pip, setuptools and wheel before anything else. Only the full CI
+      stack needs it; a single-tool install (ruff, nf-core) does not.
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python ${{ inputs.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: 'pip'
+        cache-dependency-path: 'requirements/**'
+
+    - name: Install Python requirements
+      # The list arrives through the environment rather than being interpolated
+      # into the script body: a `${{ }}` expansion inside `run:` is a shell
+      # injection surface, and actionlint flags the pattern.
+      shell: bash
+      env:
+        REQUIREMENTS: ${{ inputs.requirements }}
+        UPGRADE_PIP: ${{ inputs.upgrade-pip }}
+      run: |
+        set -euo pipefail
+        if [ "$UPGRADE_PIP" = "true" ]; then
+          python -m pip install --upgrade pip setuptools wheel
+        fi
+        installed=0
+        while IFS= read -r req; do
+          [ -n "$req" ] || continue
+          echo "::group::pip install -r $req"
+          pip install -r "$req"
+          echo "::endgroup::"
+          installed=$((installed + 1))
+        done <<< "$REQUIREMENTS"
+        # An empty `requirements:` input would leave the job running against
+        # whatever the runner image happens to ship — the silent-degradation
+        # failure mode this repo has already shipped once (release.yml ran for
+        # months missing three packages; 30 of the 43 tests that stopped passing
+        # were silent skips). Fail here instead.
+        if [ "$installed" -eq 0 ]; then
+          echo "::error::setup-python-env was given no requirements file to install."
+          exit 1
+        fi

@@ -24,7 +24,9 @@ returns detections in a different order — which produces plausible-looking wro
 biology rather than an error. The centroid fallback is safe because FlowPath
 exports ``centroid_x``/``centroid_y`` in micrometres, taken from the
 ``Centroid X µm`` measurement MIRAGE itself wrote, so the mapping back to pixels
-is exact: ``x_px = x_um / pixel_size - 0.5``.
+is exact: ``x_px = x_um / pixel_size``. Both sides of that comparison are
+corner-of-pixel and converted by the same rule
+(``bin/utils/pixel_convention.py``), so nothing is left to correct here.
 
 Positivity
 ----------
@@ -139,16 +141,26 @@ def join_by_centroid(
 ) -> Tuple[np.ndarray, Dict]:
     """Mutual-nearest centroid join, used when FlowPath exported no ``label``.
 
-    FlowPath centroids are micrometres; MIRAGE wrote them as
-    ``(x_px + 0.5) * pixel_size``, so the inverse is exact. Matching is **mutual**
-    nearest-neighbour: a FlowPath cell and a table cell must each be the other's
-    closest, which prevents one dense cluster from absorbing several rows.
+    Both sides are corner-of-pixel, so the inverse is a plain division and is
+    exact. FlowPath's micrometre centroids come from the ``Centroid X µm``
+    measurement ``export_geojson`` wrote, which converts; ``centroids_px`` is
+    the store's ``obsm['spatial']``, which ``build_table`` converts by the same
+    rule (``bin/utils/pixel_convention.py``).
+
+    Do NOT reintroduce a half-pixel correction here. One used to live in this
+    function, correct only while ``obsm['spatial']`` was still raw
+    centre-of-pixel regionprops output; once the store was normalised to corner
+    it became a constant 0.707 px bias on every cell -- 7% of the default
+    ``--centroid-join-max-px`` budget spent on nothing, narrowing the margin
+    between a true match and its neighbour.
+
+    Matching is **mutual** nearest-neighbour: a FlowPath cell and a table cell
+    must each be the other's closest, which prevents one dense cluster from
+    absorbing several rows.
     """
     from scipy.spatial import cKDTree
 
-    flow_px = (
-        flow[["centroid_x", "centroid_y"]].to_numpy(dtype=float) / pixel_size - 0.5
-    )
+    flow_px = flow[["centroid_x", "centroid_y"]].to_numpy(dtype=float) / pixel_size
 
     tree_flow = cKDTree(flow_px)
     tree_cell = cKDTree(centroids_px)

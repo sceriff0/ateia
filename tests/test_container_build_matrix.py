@@ -19,7 +19,7 @@ from tests.nfmodel import processes, strip_comments
 REPO_ROOT = Path(__file__).resolve().parents[1]
 IMAGES_JSON = REPO_ROOT / "containers" / "images.json"
 CONTAINERS = REPO_ROOT / "containers"
-WORKFLOW = REPO_ROOT / ".github" / "workflows" / "build-images.yml"
+WORKFLOW = REPO_ROOT / ".github" / "workflows" / "containers.yml"
 LIB_DIR = REPO_ROOT / "lib"
 
 # VALIS is deliberately not built here: the pipeline pulls the maintained upstream
@@ -68,13 +68,13 @@ def test_workflow_reads_the_json_rather_than_repeating_it():
     """The matrix must come from images.json. A hand-written `include:` list back
     in the workflow is the drift this file exists to prevent."""
     wf = WORKFLOW.read_text()
-    assert "fromJson(needs.setup.outputs.matrix)" in wf, (
-        "build-images.yml no longer builds its matrix from containers/images.json")
+    assert "fromJson(needs.resolve.outputs.matrix)" in wf, (
+        "containers.yml no longer builds its matrix from containers/images.json")
     assert "containers/images.json" in wf, (
-        "build-images.yml does not read containers/images.json")
+        "containers.yml does not read containers/images.json")
     # No inline per-image list left behind.
     assert not re.search(r"^\s*- \{ dir: \w+", wf, re.M), (
-        "build-images.yml still carries an inline image list; images.json is the "
+        "containers.yml still carries an inline image list; images.json is the "
         "single source and a second copy will drift")
 
 

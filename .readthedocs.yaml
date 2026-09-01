@@ -6,9 +6,16 @@ build:
     python: "3.11"
   jobs:
     # The git-revision-date plugin needs full history; Read the Docs clones
-    # shallow by default, so unshallow before the build (no-op if already full).
+    # shallow by default, so unshallow before the build.
+    #
+    # NOT `git fetch --unshallow || true`. `--unshallow` on an already-complete
+    # clone exits 1 with "fatal: --unshallow on a complete repository does not make
+    # sense", which is the ONLY reason that `|| true` was there -- but it also
+    # swallowed a network failure, and a docs build with no history renders every
+    # page's "last updated" date wrong rather than failing. Asking git whether the
+    # clone is shallow says the same thing and hides nothing.
     post_checkout:
-      - git fetch --unshallow || true
+      - if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then git fetch --unshallow; fi
 
 mkdocs:
   configuration: mkdocs.yml

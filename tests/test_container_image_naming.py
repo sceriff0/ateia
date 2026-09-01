@@ -10,7 +10,7 @@ a thing that actually went wrong:
     (``preprocess``, ``tiled``) next to genuine versions (``v2.3``, ``v2.4``) next to a decade of
     dead images (``pixie``, ``fastmorph``, ``stardist_gpu``). Nothing in that list can be ordered
     or compared, because Docker Hub treats one repository as one artifact lineage.
-  * There were no immutable artifacts. ``build-images.yml`` asked the operator for a version on
+  * There were no immutable artifacts. The build workflow asked the operator for a version on
     every ``workflow_dispatch``, resolved it into ``setup.outputs.version`` -- and then never put
     it in the tag, publishing to the same mutable name regardless. There was no image to roll
     back TO. ``test_the_build_workflow_applies_the_version_to_the_tag`` is the guard for that
@@ -110,7 +110,7 @@ def test_no_source_references_the_legacy_single_repository():
     offenders = []
     containers_files = sorted(p for p in (REPO / "containers").rglob("*") if p.is_file())
     for path in _searched_files() + containers_files + [
-        REPO / "CLAUDE.md", REPO / ".github/workflows/build-images.yml"
+        REPO / "CLAUDE.md", REPO / ".github/workflows/containers.yml"
     ]:
         if not path.is_file():
             continue
@@ -162,7 +162,7 @@ def test_the_build_workflow_covers_every_build_context_exactly_once():
     """The matrix must cover every build context on disk, exactly once.
 
     THE MATRIX MOVED. This test used to parse an inline `{ dir: convert }` list out of
-    build-images.yml. That list is gone: `containers/images.json` is now the single source
+    the build workflow. That list is gone: `containers/images.json` is now the single source
     the workflow's matrix and its `only` filter both read, and
     tests/test_container_build_matrix.py FAILS if an inline copy reappears in the workflow
     -- because a second copy drifts, and a context missing from one of them is never built
@@ -177,9 +177,9 @@ def test_the_build_workflow_covers_every_build_context_exactly_once():
         f"build matrix {sorted(set(listed))} does not match the build contexts on disk "
         f"{_container_dirs()}. An unlisted context is never built or published."
     )
-    workflow = (REPO / ".github/workflows/build-images.yml").read_text()
-    assert "fromJson(needs.setup.outputs.matrix)" in workflow, (
-        "build-images.yml must take its matrix from the setup job's images.json-derived "
+    workflow = (REPO / ".github/workflows/containers.yml").read_text()
+    assert "fromJson(needs.resolve.outputs.matrix)" in workflow, (
+        "containers.yml must take its matrix from the resolve job's images.json-derived "
         "output; an inline list is a second copy that drifts"
     )
 
@@ -190,9 +190,9 @@ def test_the_build_workflow_applies_the_version_to_the_tag():
     Without this, every publish overwrites one mutable name and there is no prior image to roll
     back to -- while the workflow's UI still asks for a version, implying otherwise.
     """
-    text = (REPO / ".github/workflows/build-images.yml").read_text()
+    text = (REPO / ".github/workflows/containers.yml").read_text()
     tags_line = re.search(r"^\s*tags:\s*(.+)$", text, re.M)
-    assert tags_line, "build-images.yml has no tags: line"
+    assert tags_line, "containers.yml has no tags: line"
     assert "version" in tags_line.group(1), (
         f"the published tag {tags_line.group(1).strip()!r} does not include the resolved "
         f"version, so every push overwrites the same mutable tag and nothing is rollback-able."
@@ -215,9 +215,9 @@ def test_the_build_workflow_strips_a_leading_v_from_the_version():
     process pulls mirage-<component>:1.0.0, so a release would build ten images that nothing
     can pull and fail only once a run reaches the first process.
     """
-    text = (REPO / ".github/workflows/build-images.yml").read_text()
+    text = (REPO / ".github/workflows/containers.yml").read_text()
     assert "${VERSION#v}" in text, (
-        "build-images.yml does not strip a leading 'v' from the resolved version, so a GitHub "
+        "containers.yml does not strip a leading 'v' from the resolved version, so a GitHub "
         "release tagged v1.0.0 publishes images the pipeline cannot pull."
     )
 
@@ -234,11 +234,11 @@ def test_the_build_workflow_preflights_the_registry_credentials():
     push-to-main build-only event, so the credentials were never reached. A green Build Images
     run therefore said nothing about whether publishing worked.
     """
-    text = (REPO / ".github/workflows/build-images.yml").read_text()
+    text = (REPO / ".github/workflows/containers.yml").read_text()
     assert "DOCKERHUB_USERNAME" in text and "DOCKERHUB_TOKEN" in text
     preflight = re.search(r"name: Preflight.*?(?=\n      - name:|\n  [a-z])", text, re.S)
     assert preflight, (
-        "build-images.yml has no preflight step, so a publish with missing secrets fans out "
+        "containers.yml has no preflight step, so a publish with missing secrets fans out "
         "into one opaque failure per image instead of failing once with a readable reason."
     )
     body = preflight.group(0)

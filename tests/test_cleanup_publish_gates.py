@@ -207,6 +207,35 @@ def test_no_gate_is_written_as_a_closure():
     <step>` and every add_cycle chain -- while all the static guards above, and
     a normal `-profile test` run, passed. It is the form the plan specified,
     which is why it is worth a test rather than a comment.
+
+    **How to reproduce those two numbers, and why a naive attempt does not.**
+    Re-measured 2026-09-01, same engine (NXF_VER=26.04.6), same stub, same one
+    patient. `git archive`-ing the tree at 4a6134e reproduces 30 / 62 exactly.
+    At HEAD the same two runs give **29 / 64**, and every file of that drift is
+    accounted for: `+P001_registrar.pickle` (6823d4b) and
+    `+qc/preflight_scale_report.json` (9d786bd) at both levels, and at `final`
+    the four `csv/*.csv` checkpoint manifests were replaced by the single
+    `csv/README.txt` once no manifest was written at a cleaning level
+    (30 + 2 - 4 + 1 = 29; 62 + 2 = 64). The numbers above are a dated record of
+    one commit, not a live assertion -- nothing here asserts a file count.
+
+    The trap, measured the same day and the reason a re-measurement looks like
+    a regression: **the level has to arrive on the command line or in a
+    -params-file. A profile pin does not reach these gates.**
+
+        -profile test                          (conf/test.config pins 'none') ->  32
+        -profile test --cleanup_level none                                    ->  64
+        -profile test -params-file {cleanup_level: none}                      ->  64
+        -profile test --cleanup_level final                                   ->  29
+
+    All four ran the same 35 tasks with the same effective `cleanup_level`.
+    `enabled:` is a plain boolean, so it is evaluated EAGERLY when
+    `conf/modules.config` is parsed -- and `nextflow.config` includes that file
+    (line 532) BEFORE it declares `profiles {}` (line 581), so a profile's
+    `params.cleanup_level` is not yet set and every gate freezes against the
+    shipped `'final'`. That is the price of the plain-boolean form the test
+    below enforces, and it is not a reason to go back: the closure form gates
+    nothing at all, at any level, by any route.
     """
     offenders = [
         f"conf/modules.config: `enabled: {{{v.strip()}}}` is a closure and will "

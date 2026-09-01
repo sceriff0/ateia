@@ -17,12 +17,14 @@ from ._model import (
     REPO_ROOT,
     Process,
     WithNameBlock,
+    include_aliases,
     nf_files,
     nf_test_files,
     param_refs,
     processes,
     script_bodies,
     with_name_blocks,
+    workflows,
 )
 
 __all__ = [
@@ -30,6 +32,7 @@ __all__ = [
     "Process",
     "WithNameBlock",
     "block_extent",
+    "include_aliases",
     "nf_files",
     "nf_test_files",
     "param_refs",
@@ -39,4 +42,5 @@ __all__ = [
     "strip_comments",
     "strip_comments_and_strings",
     "with_name_blocks",
+    "workflows",
 ]

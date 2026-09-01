@@ -4,6 +4,13 @@ Covers the pure-logic layer: measurement-key parsing, QC sanitizing, and the
 spatial join of registration residuals onto segmentation labels. The full
 SpatialData round-trip needs `spatialdata`/`geopandas`, which live only in the
 export container, so it is exercised by the nf-test suite rather than here.
+
+One exception, at the bottom of this file: the pixel-convention invariant runs
+`build_shapes` and `build_table` for real against stubbed element MODELS
+(`ShapesModel`/`TableModel` are pass-through wrappers around a GeoDataFrame and
+an AnnData). Faking the models rather than the geometry is what makes it a real
+test -- it is the coordinates those two functions compute, not the container's
+serialization, that the invariant is about.
 """
 
 from __future__ import annotations
@@ -376,3 +383,215 @@ def test_join_reg_residuals_skips_header_only_csv(tmp_path):
         [str(p)], np.array([[0.0, 0.0]]), np.array([1]), 15.0
     )
     assert out.empty and stats["slides"] == {}
+
+
+# ── pixel convention: the point and the polygon must agree ─────────────────────
+# The .zarr carries each cell twice: as a Shapes polygon (from build_shapes,
+# reading EXTRACT_CELL_PROPERTIES' contours.json) and as a row of
+# ``obsm["spatial"]`` (from build_table, reading the quantification CSV's x/y).
+# Those two sources are written in DIFFERENT pixel conventions -- contours.json
+# is corner-of-pixel, the CSV's x/y are raw regionprops centroids and therefore
+# centre-of-pixel -- so one of them has to be converted before it is stored, or
+# every cell's point sits half a pixel up-and-left of its own polygon.
+# bin/utils/pixel_convention.py owns the rule.
+#
+# What is asserted below is the INVARIANT -- a cell's point falls inside that
+# same cell's polygon -- not the offset or its direction. That holds under
+# either convention as long as both elements use the same one, so this test
+# survives a later decision to flip which way the .zarr is normalised.
+#
+# geopandas / shapely / spatialdata live only in the export container, so the
+# element MODELS are faked here (they are pass-through wrappers). The two
+# functions under test are the real ones, and so is the contour producer.
+
+_ecp_spec = importlib.util.spec_from_file_location(
+    "extract_cell_properties", BIN / "extract_cell_properties.py"
+)
+ecp = importlib.util.module_from_spec(_ecp_spec)
+_ecp_spec.loader.exec_module(ecp)
+
+
+class _FakePolygon:
+    """As much shapely as ``build_shapes`` uses: construction from a ring."""
+
+    def __init__(self, ring):
+        self.ring = [(float(x), float(y)) for x, y in ring]
+
+
+class _FakeGeoDataFrame:
+    """As much geopandas as ``build_shapes`` uses: a geometry column + index."""
+
+    def __init__(self, data, index=None):
+        self.geometry = list(data["geometry"])
+        self.index = list(index)
+
+
+@pytest.fixture
+def fake_geo_stack(monkeypatch):
+    """Stub geopandas/shapely/spatialdata so the real builders can run here."""
+    import types
+
+    gpd = types.ModuleType("geopandas")
+    gpd.GeoDataFrame = _FakeGeoDataFrame
+
+    geometry = types.ModuleType("shapely.geometry")
+    geometry.Polygon = _FakePolygon
+    shapely = types.ModuleType("shapely")
+    shapely.geometry = geometry
+
+    class _TableModel:
+        @staticmethod
+        def parse(adata, **_kwargs):
+            return adata
+
+    models = types.ModuleType("spatialdata.models")
+    models.TableModel = _TableModel
+    spatialdata = types.ModuleType("spatialdata")
+    spatialdata.models = models
+
+    for name, module in (
+        ("geopandas", gpd),
+        ("shapely", shapely),
+        ("shapely.geometry", geometry),
+        ("spatialdata", spatialdata),
+        ("spatialdata.models", models),
+    ):
+        monkeypatch.setitem(sys.modules, name, module)
+
+
+# Cells drawn as ASCII, one per 14x14 tile. The first two are thin
+# ANTI-diagonals: the centre->corner translation is (+0.5, +0.5), which is
+# perpendicular to their long axis, so half a pixel is the entire margin and
+# their centroid lands outside their own polygon the moment the two conventions
+# disagree. The rest are ordinary blobs, for which the invariant must hold too.
+_CELL_PATTERNS = (
+    (
+        ".##",
+        "##.",
+        "#..",
+    ),
+    (
+        "..##",
+        ".##.",
+        "##..",
+    ),
+    (
+        ".###.",
+        "#####",
+        "#####",
+        "#####",
+        ".###.",
+    ),
+    (
+        "###",
+        "###",
+        "###",
+    ),
+    (
+        ".##.",
+        "####",
+        "####",
+        ".##.",
+    ),
+)
+
+
+def _mask_from_patterns(patterns, tile=14):
+    """One labelled cell per tile, so no two cells touch."""
+    mask = np.zeros((tile * len(patterns), tile), dtype=np.int32)
+    for i, pattern in enumerate(patterns):
+        for r, row in enumerate(pattern):
+            for c, char in enumerate(row):
+                if char == "#":
+                    mask[i * tile + 4 + r, 4 + c] = i + 1
+    return mask
+
+
+def _point_in_ring(point, ring):
+    """Ray-casting point-in-polygon (shapely is not importable here)."""
+    x, y = point
+    inside = False
+    for (x1, y1), (x2, y2) in zip(ring, ring[1:]):
+        if (y1 > y) != (y2 > y):
+            crossing = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+            if x < crossing:
+                inside = not inside
+    return inside
+
+
+def _build_zarr_elements(tmp_path):
+    """Run the real contour producer, then the real shapes/table builders."""
+    mask = _mask_from_patterns(_CELL_PATTERNS)
+    props, filtered, _ = ecp.extract_morphology(mask)
+    contours = ecp.extract_contours(filtered, props, 1.0, 2)
+
+    contours_json = tmp_path / "contours.json"
+    contours_json.write_text(json.dumps(contours))
+
+    df = props.reset_index()[
+        ["label", "y", "x", "area", "eccentricity", "perimeter", "solidity"]
+    ].copy()
+    # One marker column: build_table refuses a CSV with no intensities at all.
+    df["CD3: Cell: Mean"] = np.arange(len(df), dtype=float)
+    quant_csv = tmp_path / "quant.csv"
+    df.to_csv(quant_csv, index=False)
+
+    labels = df["label"].to_numpy(dtype=np.int64)
+    gdf = esd.build_shapes(str(contours_json), labels, "cells")
+    adata = esd.build_table(
+        str(quant_csv),
+        "P001",
+        None,
+        {},
+        {"qc_json": "{}", "versions": ""},
+        {},
+    )
+    return contours, gdf, adata
+
+
+def test_table_points_fall_inside_their_own_shape_polygons(tmp_path, fake_geo_stack):
+    """Every ``obsm["spatial"]`` row lies inside that cell's Shapes polygon."""
+    _contours, gdf, adata = _build_zarr_elements(tmp_path)
+
+    rings = {int(lab): poly.ring for lab, poly in zip(gdf.index, gdf.geometry)}
+    points = adata.obsm["spatial"]
+    labels = adata.obs[esd.INSTANCE_KEY].to_numpy()
+
+    # Not vacuous: every cell drawn above must have survived contour
+    # simplification and be present in BOTH elements, or this asserts nothing.
+    assert len(rings) == len(_CELL_PATTERNS), (
+        f"only {len(rings)} of {len(_CELL_PATTERNS)} cells produced a polygon -- "
+        "the invariant below would be checked on a subset chosen by accident"
+    )
+    assert set(labels) == set(rings)
+    assert points.shape == (len(_CELL_PATTERNS), 2)
+
+    outside = [
+        int(lab)
+        for lab, point in zip(labels, points)
+        if not _point_in_ring(tuple(point), rings[int(lab)])
+    ]
+    assert not outside, (
+        f"cells {outside} have a spatial point outside their own polygon. The "
+        "Shapes element and obsm['spatial'] are in different pixel conventions "
+        "-- see bin/utils/pixel_convention.py."
+    )
+
+
+def test_shapes_keep_the_contour_ring_verbatim(tmp_path, fake_geo_stack):
+    """The polygons are contours.json unmodified; the TABLE is what converts.
+
+    This pins the DIRECTION chosen in bin/utils/pixel_convention.py. The same
+    corner-of-pixel rings are shipped to QuPath as ``cells.geojson``, a contract
+    with the sibling ``qupath-extension-flowpath`` repo, so making the two
+    elements agree by shifting the geometry would fix the .zarr by breaking the
+    GeoJSON. Any offset introduced in ``build_shapes`` fails here.
+    """
+    contours, gdf, _adata = _build_zarr_elements(tmp_path)
+
+    assert len(gdf.geometry) == len(_CELL_PATTERNS)
+    for lab, poly in zip(gdf.index, gdf.geometry):
+        expected = [(float(x), float(y)) for x, y in contours[str(int(lab))]]
+        assert poly.ring == expected, (
+            f"cell {lab}: build_shapes altered the contour ring it was given"
+        )

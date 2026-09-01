@@ -47,6 +47,7 @@ from measurements import (  # noqa: E402
     STATISTICS,
     identify_marker_columns,
 )
+from pixel_convention import centre_to_corner  # noqa: E402
 from pixel_size import resolve_pixel_size  # noqa: E402
 
 logger = get_logger(__name__)
@@ -378,7 +379,16 @@ def build_table(
         # Pixels, not micrometres: SpatialData's convention is intrinsic pixel
         # coordinates plus a transformation carrying the scale. Storing µm here
         # would double-apply pixel_size on any cross-modality alignment.
-        adata.obsm["spatial"] = df[["x", "y"]].to_numpy(dtype=np.float64)
+        #
+        # Corner-of-pixel, because build_shapes' polygons already are. The
+        # quantification CSV carries raw regionprops centroids, which are
+        # centre-of-pixel; contours.json was converted by
+        # extract_cell_properties. Storing the centroids unconverted put every
+        # cell's point half a pixel up-and-left of its own polygon -- see
+        # bin/utils/pixel_convention.py for the rule and who else applies it.
+        adata.obsm["spatial"] = centre_to_corner(
+            df[["x", "y"]].to_numpy(dtype=np.float64)
+        )
 
     # Per-slide z-scores, matching what EXPORT_GEOJSON writes for QuPath display.
     with np.errstate(invalid="ignore", divide="ignore"):
