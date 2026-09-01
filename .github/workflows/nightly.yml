@@ -1,0 +1,199 @@
+# =============================================================================
+# Nightly (advisory suites)
+# =============================================================================
+# THIS WORKFLOW EXISTS SO THAT A RED `ci.yml` MEANS SOMETHING.
+#
+# `nf-test-real` and `nf-test-integration` used to live in ci.yml. Both were
+# advisory in the only way this repository permits -- absent from the `all-tests`
+# gate's `needs:` list, never `continue-on-error` -- and that was correct as far
+# as the GATE went. It was not enough for the RUN. A GitHub Actions run's
+# conclusion is the worst conclusion of any job in it, gate membership included
+# or not, so on every push to main or dev the blocking gate passed, `nf-test
+# (real)` failed, and the run reported `failure`: a red X on the commit, a red
+# badge, a red PR checks list. Verified on 84cc53f. That trains people to ignore
+# red, which is the failure mode the whole CI redesign is against.
+#
+# Moving the two jobs into their own workflow fixes it at the level it is broken:
+# ci.yml is now green exactly when its gate is green, and the advisory suites
+# keep their own honest history to trend. Nothing here is `continue-on-error` and
+# nothing here is `|| true` -- a nightly job that fails FAILS, visibly, in this
+# workflow's own status. That is the point of giving it a status of its own.
+#
+# -----------------------------------------------------------------------------
+# THIS MOVE IS A DEFERRAL, NOT A FIX. READ THIS BEFORE ASSUMING IT WAS GREEN.
+# -----------------------------------------------------------------------------
+# `nf-test (real)` was RED at the moment it was moved here. It has been red for a
+# while and it is still red. The failures, pulled from the run on main@84cc53f
+# (2026-09-01) rather than inferred:
+#
+#   1. `tests/testdata/P001_nuclei_mask.tif` is EMPTY on the runner, so
+#      `MIRAGE:READ_SEGMENTED_CHECKPOINT:EXTRACT_NUCLEI_PROPERTIES (P001)` aborts
+#      with `tifffile.TiffFileError: not a TIFF file b''`.
+#   2. Downstream of (1), the exported GeoJSON carries 0 features against 20 rows
+#      in the quantification CSV.
+#   3. Separately from (1) and (2): the preprocessed and registered `.ome.tif`
+#      outputs never appear at all.
+#
+# A fourth, older cause is recorded in the job's own comment below (StarDist's
+# 2D_versatile_fluo finds no nuclei in smooth synthetic blobs). Do not assume the
+# list above replaces it; assume both until someone re-measures.
+#
+# A job moved to a nightly workflow with no note reads as "this always passed
+# somewhere else", which is false here. When these are fixed, the job goes back
+# into ci.yml's `all-tests` gate and this section gets deleted with it.
+#
+# -----------------------------------------------------------------------------
+# GATING, AND WHAT WAS PRESERVED
+# -----------------------------------------------------------------------------
+# `nf-test-integration` did NOT run on every push in ci.yml either: it carried
+# `if: github.event_name == 'workflow_dispatch'`, i.e. it ran only when a human
+# fired the workflow by hand. That is preserved EXACTLY -- the same `if:` is on
+# the job below, so the nightly schedule runs `nf-test-real` only and the
+# integration suite is still a deliberate, manual act. Moving it here without
+# that condition would have quietly promoted a manually-triggered 2-hour suite
+# into something that runs unattended every night.
+#
+# `nf-test-real` ran on `push` to main AND dev in ci.yml. Here it runs on the
+# schedule and on a manual dispatch, which is the trade this move makes: the
+# signal is one run per day instead of one per push, and in exchange a push's
+# status tells the truth about the gate.
+#
+# BE PRECISE ABOUT WHAT dev LOSES. `schedule:` fires on the DEFAULT BRANCH ONLY --
+# GitHub runs the workflow file as it exists on `main`, against `main`. So dev's
+# real-suite coverage drops from "every push" to ZERO, and the only way to run the
+# real suite against dev is a manual `workflow_dispatch` with the branch selected.
+# That is a real reduction and it is being made deliberately: the suite is red
+# today (see above), so what dev is losing is a signal nobody could read anyway,
+# and restoring per-push coverage on a branch is the wrong shape for a suite that
+# takes two hours. If dev needs it back once the suite is green, the fix is a
+# `push:` trigger here with `branches: [dev]` -- a decision to take then, on a
+# green suite, not now.
+#
+# 05:17 UTC is deliberately not on the hour: GitHub's scheduler queues heavily at
+# :00 and can delay or drop a run entirely under load.
+# =============================================================================
+name: Nightly
+
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+# Least-privilege default token: read-only, as in ci.yml.
+permissions:
+  contents: read
+
+# Never cancel a nightly in flight: a half-run advisory suite reports a failure
+# that is indistinguishable from a real one, which is the exact confusion this
+# workflow exists to remove.
+concurrency:
+  group: nightly-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NFTEST_VERSION: '0.9.0'
+  # Same mechanism as ci.yml and release.yml: one cacheable plugins directory
+  # instead of ~/.nextflow/plugins, which is also the air-gapped NXF_PLUGINS_DIR
+  # path docs/usage.md documents.
+  NXF_PLUGINS_DIR: ${{ github.workspace }}/.nextflow-plugins
+
+jobs:
+  # ============================================================================
+  # nf-test real suite
+  # ============================================================================
+  nf-test-real:
+    name: nf-test (real)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    # ADVISORY BY LOCATION, and by nothing else. There is no `continue-on-error`
+    # here and there must never be one: it makes `needs.<job>.result` report
+    # `success` for a job that failed, which is strictly worse than `|| true`
+    # (at least `|| true` is local and visible on one line). This job is advisory
+    # because it is in a workflow no merge is gated on -- and it still reports its
+    # true colour, which is the whole trade.
+    #
+    # The older recorded cause, kept because it is a different one from the three
+    # in the header: registration, segmentation model-loading and most
+    # test-staging bugs are fixed (the suite went 26 -> ~20 failing); what remains
+    # of THAT round is the synthetic-data segmentation wall -- StarDist's built-in
+    # 2D_versatile_fluo detects 0 nuclei in the smooth synthetic test blobs even at
+    # a low prob_thresh, so cell/quant/geojson assertions cannot pass on this
+    # fixture data. The fix is to bundle a tiny real nuclei crop, or to weaken
+    # those assertions to "runs without error".
+    #
+    # Put this job back in ci.yml's `all-tests` gate once it is green. That is the
+    # end state; this workflow is where it waits, not where it belongs.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Nextflow and nf-test
+        # The action pins Nextflow to the supported release by default: nf-test
+        # 0.9.0's generated test wrappers do not compile under edge Nextflow's
+        # strict parser.
+        uses: ./.github/actions/setup-nf-test
+        with:
+          nf-test-version: ${{ env.NFTEST_VERSION }}
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate test data
+        uses: ./.github/actions/generate-testdata
+
+      - name: Run nf-test real suite
+        run: |
+          nf-test test --profile test,docker --tag real --verbose
+
+      - name: Upload nf-test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nf-test-real-results
+          path: |
+            .nf-test/
+            tests/output/
+
+  # ============================================================================
+  # nf-test integration suite (manual trigger only -- NOT on the schedule)
+  # ============================================================================
+  nf-test-integration:
+    name: nf-test (integration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    # PRESERVED VERBATIM from ci.yml. This job has never run on a schedule or on
+    # a push; it ran only when someone dispatched the workflow by hand, and it
+    # still does. Deleting this line would turn a deliberate 2-hour manual suite
+    # into an unattended nightly one, which is a change nobody asked for and
+    # which the move itself makes very easy to do by accident.
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Nextflow and nf-test
+        # The action pins Nextflow to the supported release by default: nf-test
+        # 0.9.0's generated test wrappers do not compile under edge Nextflow's
+        # strict parser.
+        uses: ./.github/actions/setup-nf-test
+        with:
+          nf-test-version: ${{ env.NFTEST_VERSION }}
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate test data
+        uses: ./.github/actions/generate-testdata
+
+      - name: Run nf-test integration suite
+        run: |
+          nf-test test --profile test,docker --tag integration --verbose
+
+      - name: Upload nf-test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nf-test-integration-results
+          path: |
+            .nf-test/
+            tests/output/

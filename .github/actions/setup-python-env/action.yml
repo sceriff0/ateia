@@ -30,6 +30,25 @@
 # which changes when a pin does. The key would go stale exactly when it must
 # rotate: the run after a bump would restore a cache built for the OLD wheels
 # (~190 MB of torch among them).
+#
+# THE THREE CACHING RULES that govern every cache in this repository are written
+# out in `.github/actions/setup-nextflow/action.yml`. This pip cache satisfies
+# rule 1 -- `requirements/**` is a manifest tree, not a source tree, so the key
+# rotates when and only when a pin changes.
+#
+# IT DOES NOT SATISFY RULE 2, AND THAT IS A KNOWN, DEFERRED COST. actions/setup-python
+# builds its own key as
+# `setup-python-<os>-<arch>-python-<version>-pip-<hash of cache-dependency-path>`;
+# there is no per-job component and the action exposes no suffix input. So every
+# job on one interpreter version shares ONE pip entry, and the smallest of them
+# (`ruff`, which installs requirements/lint.txt alone) can be the first writer
+# and fix a near-empty entry for the lifetime of the key -- after which
+# `python-tests` re-downloads ~190 MB of torch on every run until a pin changes.
+# The redesign's own remedy for this is `astral-sh/setup-uv`'s `cache-suffix`,
+# i.e. switching installers, which is a larger change with its own failure modes
+# (torch's `--index-url`, uv's resolver differing from pip's) and buys speed, not
+# correctness. It is deliberately NOT done here. This is a cold-download cost
+# only: a partial pip cache is still a valid pip cache.
 # =============================================================================
 name: 'Set up Python environment'
 description: 'Install Python with a pip cache, then install the given requirements/ files in order.'

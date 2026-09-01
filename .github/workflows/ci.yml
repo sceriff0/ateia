@@ -1,3 +1,23 @@
+# =============================================================================
+# CI (the blocking gate)
+# =============================================================================
+# EVERY JOB IN THIS FILE IS IN THE `all-tests` GATE, except `lint`, which runs
+# `nf-core lint ... || true` and says so. That is a deliberate property as of
+# 2026-09-01 (CI redesign, Phase 4): a run's conclusion is the WORST conclusion
+# of any job in it, gate membership or not, so a non-required job that fails
+# still paints the commit, the badge and the PR checks list red. This workflow
+# used to carry two such jobs -- `nf-test-real` and `nf-test-integration` -- and
+# on every push to main or dev it reported `failure` while the gate itself was
+# green. Training people to ignore red is the failure mode the redesign exists to
+# remove, so both moved to `.github/workflows/nightly.yml`, which carries the
+# record of WHY the real suite is red rather than letting the next person
+# re-derive it.
+#
+# So: a green run of this workflow now means a green gate. Keep it that way --
+# an advisory job belongs in nightly.yml, not here with a missing `needs:` entry,
+# and never behind `continue-on-error`. tests/test_release_workflow_graph.py
+# asserts both halves.
+# =============================================================================
 name: CI
 
 on:
@@ -275,102 +295,6 @@ jobs:
             tests/output/
 
   # ============================================================================
-  # nf-test real suite (runs on push to main/dev only)
-  # ============================================================================
-  nf-test-real:
-    name: nf-test (real)
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
-    # ADVISORY, and advisory by ONE mechanism only: this job is absent from the
-    # `all-tests` gate's `needs:` list. Registration, segmentation model-loading,
-    # and most test-staging bugs are fixed (suite went 26 -> ~20 failing); the
-    # remaining failures are the synthetic-data segmentation wall: StarDist's
-    # built-in 2D_versatile_fluo detects 0 nuclei in the smooth synthetic test
-    # blobs even at a low prob_thresh, so cell/quant/geojson assertions can't
-    # pass on this fixture data. Tracked for a follow-up (bundle a tiny real
-    # nuclei crop, or switch those assertions to "runs without error"). Add this
-    # job to `all-tests`'s `needs:` once green.
-    #
-    # `continue-on-error: true` used to sit here as a SECOND advisory mechanism,
-    # and it was the dishonest one: it made 129 real cases show a green tick
-    # whatever they did, so the run summary said nothing about whether the suite
-    # got better or worse. Without it the job reports its true colour and stays
-    # non-blocking, because nothing needs it. Nothing stopped it coming back until
-    # tests/test_release_workflow_graph.py grew a scan for it across every workflow.
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Nextflow and nf-test
-        # The action pins Nextflow to the supported release by default: nf-test
-        # 0.9.0's generated test wrappers do not compile under edge Nextflow's
-        # strict parser.
-        uses: ./.github/actions/setup-nf-test
-        with:
-          nf-test-version: ${{ env.NFTEST_VERSION }}
-
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
-
-      - name: Generate test data
-        uses: ./.github/actions/generate-testdata
-
-      - name: Run nf-test real suite
-        run: |
-          nf-test test --profile test,docker --tag real --verbose
-
-      - name: Upload nf-test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nf-test-real-results
-          path: |
-            .nf-test/
-            tests/output/
-
-  # ============================================================================
-  # nf-test integration suite (manual trigger only)
-  # ============================================================================
-  nf-test-integration:
-    name: nf-test (integration)
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    if: github.event_name == 'workflow_dispatch'
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Nextflow and nf-test
-        # The action pins Nextflow to the supported release by default: nf-test
-        # 0.9.0's generated test wrappers do not compile under edge Nextflow's
-        # strict parser.
-        uses: ./.github/actions/setup-nf-test
-        with:
-          nf-test-version: ${{ env.NFTEST_VERSION }}
-
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v3
-
-      - name: Generate test data
-        uses: ./.github/actions/generate-testdata
-
-      - name: Run nf-test integration suite
-        run: |
-          nf-test test --profile test,docker --tag integration --verbose
-
-      - name: Upload nf-test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nf-test-integration-results
-          path: |
-            .nf-test/
-            tests/output/
-
-  # ============================================================================
   # Security tests (blocking)
   # ============================================================================
   # tests/modules/segment_deepcell_token.nf.test is deliberately NOT tagged
@@ -527,6 +451,12 @@ jobs:
     # always exits 0 (`|| true`, kept advisory on purpose — see the lint job
     # above), so including it here would be a fake gate that can never fail.
     # `ruff` is the real, blocking Python lint gate.
+    #
+    # It is now the ONLY job in this file outside the list. The two that used to
+    # keep it company, `nf-test-real` and `nf-test-integration`, live in
+    # nightly.yml since 2026-09-01 -- see this file's header for why a
+    # non-required job in a required workflow is not actually advisory. When the
+    # real suite goes green it comes back HERE, into this `needs:` list.
     needs: [python-tests, nextflow-stub, nf-test-stub, security-tests, ruff]
     runs-on: ubuntu-latest
     timeout-minutes: 5

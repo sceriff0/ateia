@@ -433,12 +433,14 @@ def test_flat_tree_scanners_are_really_flat():
 # A THIRD kind, and like FLAT_TREE_SCANNERS it is not debt and will never be
 # discharged.
 #
-# A guard over `.github/workflows/*.yml` parses YAML, not Nextflow. It is
-# discovered by the heuristic above only because a CI step's COMMAND STRING
-# mentions a `.nf` path -- `nextflow run tests/lib_probe.nf -lib lib`,
-# `tests/modules/segment_deepcell_token.nf.test` -- which is the needle the guard
-# looks FOR inside a workflow, never a file it opens. There is nothing in the
-# model for it to call: the model parses Nextflow sources, and this reads none.
+# A guard over this repository's CI YAML -- `.github/workflows/*.yml` and, since
+# the composite actions landed, `.github/actions/*/action.yml` -- parses YAML, not
+# Nextflow. It is discovered by the heuristic above only because a CI step's
+# COMMAND STRING or a cache key mentions a `.nf` path -- `nextflow run
+# tests/lib_probe.nf -lib lib`, `tests/modules/segment_deepcell_token.nf.test`,
+# `hashFiles('**/*.nf')` -- which is the needle the guard looks FOR inside the
+# YAML, never a file it opens. There is nothing in the model for it to call: the
+# model parses Nextflow sources, and this reads none.
 #
 # The mechanically-checked property that separates "names a .nf path in a string"
 # from "reads Nextflow source" is whether the file ever CONSTRUCTS a path to one.
@@ -446,12 +448,17 @@ def test_flat_tree_scanners_are_really_flat():
 # guard does not, and the check below fails the moment one appears -- at which
 # point the file is a real reader and belongs in the model.
 _WORKFLOW_YAML_REASON = (
-    "parses .github/workflows/*.yml as YAML; its `.nf` mentions are CI command "
-    "needles, never source it opens"
+    "parses this repo's CI YAML (.github/workflows/*.yml and "
+    ".github/actions/*/action.yml); its `.nf` mentions are needles it looks for "
+    "inside that YAML, never source it opens"
 )
 
 WORKFLOW_YAML_GUARDS = {
     "tests/test_release_workflow_graph.py": _WORKFLOW_YAML_REASON,
+    # Added 2026-09-01 with the CI redesign's Phase 3. It trips the heuristic on
+    # `hashFiles('**/*.nf')` -- the cache key it exists to FORBID, quoted in its
+    # docstring and in its failure message.
+    "tests/test_ci_cache_keys.py": _WORKFLOW_YAML_REASON,
 }
 
 # A path CONSTRUCTED to a Nextflow/Groovy source file -- `ROOT / "modules/local/x.nf"`,

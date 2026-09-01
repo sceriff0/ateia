@@ -34,8 +34,10 @@
 #   * nf-core structural lint is absent, exactly as it is absent from ci.yml's
 #     `all-tests`: it runs `|| true` and can never fail.
 #   * The nf-test REAL and INTEGRATION suites are absent, also as in
-#     `all-tests`. `nf-test-real` is advisory in ci.yml (see the comment on that
-#     job); gating a version tag on an advisory suite would block every release.
+#     `all-tests`. Since 2026-09-01 they do not live in ci.yml at all -- they are
+#     `.github/workflows/nightly.yml`, whose header records why the real suite is
+#     currently red. Gating a version tag on an advisory suite would block every
+#     release.
 # Everything else ci.yml blocks on, this gate blocks on.
 #
 # Two entry points:

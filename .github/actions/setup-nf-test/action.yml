@@ -37,18 +37,17 @@ runs:
       with:
         nextflow-version: ${{ inputs.nextflow-version }}
 
-    - name: Cache nf-test
-      # KEYED ON THE NF-TEST VERSION, which is the whole point of it living here
-      # rather than riding along in setup-nextflow's key: that key knows the
-      # Nextflow version and the pipeline sources and nothing about nf-test, so a
-      # version bump would restore a directory the previous version populated.
-      uses: actions/cache@v4
-      with:
-        path: ~/.nf-test
-        key: ${{ runner.os }}-nf-test-${{ inputs.nf-test-version }}
-        restore-keys: |
-          ${{ runner.os }}-nf-test-
-
+    # `~/.nf-test` IS NOT CACHED HERE, and must not be added back. Phase 2 moved
+    # it out of setup-nextflow's key (which knows the Nextflow version and nothing
+    # about nf-test) into a version-aware key here; Phase 3 then read the pinned
+    # action's own source and found the move unnecessary AND still unsafe:
+    # `nf-core/setup-nf-test@v1` already restores and saves `~/.nf-test/nf-test`
+    # and `~/.nf-test/nf-test.jar` under its own key, so a cache here is a second
+    # entry for the same bytes -- and on a version bump the `restore-keys:` prefix
+    # this step carried would hand the new run the OLD binary, their restore would
+    # miss, and their install path's `fs.move(...)` (no `overwrite: true`) fails
+    # with "dest already exists". Every nf-test job in the repo goes red.
+    # tests/test_ci_cache_keys.py fails on both halves of that shape.
     - name: Install nf-test
       uses: nf-core/setup-nf-test@v1
       with:
