@@ -59,20 +59,12 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
     #     there is no distributed counterpart to benchmark. See docs/superpowers/specs/
     #     2026-07-24-benchmark-paper-data-design.md.
 
-    # 3. REGISTRATION PARAMETER GRID (VALIS) — the VALIS registration knobs (memory_mode, reg_micro_reg)
-    #    crossed at the baseline cell, VALIS path only. reg_micro_reg is the micro-registration DEPTH
-    #    (0/1/2), replacing the old boolean skip_micro_registration (removed on main). Labelled
-    #    registration_param_grid.
-    rpg = sweep.get("registration_param_grid")
-    if rpg:
-        mms = rpg.get("memory_mode", [baseline.get("memory_mode", "medium")])
-        mms = list(mms) if isinstance(mms, (list, tuple)) else [mms]
-        rmrs = rpg.get("reg_micro_reg", [baseline.get("reg_micro_reg", 0)])
-        rmrs = list(rmrs) if isinstance(rmrs, (list, tuple)) else [rmrs]
-        for mm in mms:
-            for rmr in rmrs:
-                configs.append((dict(baseline, memory_mode=mm, reg_micro_reg=rmr),
-                                "registration_param_grid"))
+    # 3. registration_param_grid IS GONE, folded into registration_method_grid's `valis:` entry.
+    #    It crossed memory_mode x reg_micro_reg only, at the baseline reg_max_image_dim, while that
+    #    third VALIS knob sat in flat `axes:` and varied at only one (memory_mode, micro) point.
+    #    The result was VALIS measured on 11 of its 27 cells against STARE's full 27 -- see the
+    #    SYMMETRY RULE block in sweep.yaml. Both methods now go through the one generic per-method
+    #    loop below, which is what makes equal dimensionality checkable rather than a convention.
 
     # 3c. SEGMENTATION GRID — each method benchmarked with ITS OWN parameters. sweep.yaml maps a
     #     seg_method to a dict of {param: [values]}; this pins seg_method and crosses that method's

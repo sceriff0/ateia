@@ -75,7 +75,9 @@ baseline:
                                       # values from this tier's row in bin/utils/valis_config.py.
   reg_valis_max_processed_dim: null   # VALIS detection/matching size (px). null = from memory_mode (high -> 2048).
                                       # Declared so every run RECORDS what it used; only settable under
-                                      # memory_mode=custom, which registration_param_grid pins where it varies it.
+                                      # memory_mode=custom. NOT crossed anywhere: registration_method_grid.valis
+                                      # varies memory_mode itself, and pinning custom to reach this knob would
+                                      # collapse that axis. Recorded, deliberately unswept.
   reg_valis_max_non_rigid_dim: null   # VALIS non-rigid registration size (px). null = from memory_mode
                                       # (high -> 4096). Same custom-only rule as above.
   reg_micro_reg: 1                    # pipeline default: micro-registration DEPTH (0=none | 1=micro-rigid |
@@ -85,7 +87,8 @@ baseline:
                                       # accurate than the shipped config. The baseline must BE the shipped
                                       # config, so this tracks nextflow.config and nothing else.
                                       # Replaces the old boolean skip_micro_registration (removed on main);
-                                      # crossed with memory_mode by registration_param_grid.
+                                      # crossed with memory_mode AND reg_max_image_dim by
+                                      # registration_method_grid.valis (full 3x3x3).
   reg_tiled_mode: high                # STARE cost/accuracy tier (high|medium|low|custom), pipeline default.
                                       # This is now the SHIPPED default for the tier-owned knobs below —
                                       # they are null in nextflow.config and take their values from this
@@ -215,11 +218,6 @@ axes:
   # --- registration resource elasticity ---
   reg_jvm_heap_gb:            [16, 32, 64]        # does more BioFormats JVM heap speed up REGISTER, or
                                                   # just reserve idle RAM? (classic path; RAM response curve)
-  reg_max_image_dim:          [2000, 4000, 8000]  # VALIS max processing dimension (px). Ungated and live
-                                                  # at the VALIS baseline. Doubling it roughly quadruples
-                                                  # the pixels VALIS solves on, so this is simultaneously
-                                                  # the dominant VALIS runtime axis AND an accuracy axis
-                                                  # (reg_qc=2 scores it) — read the two together.
   # --- preprocessing ---
   skip_preprocessing:         [false, true]       # true skips BaSiC entirely (conversion still runs):
                                                   # prices the WHOLE PREPROCESS stage in one axis, the
@@ -269,20 +267,16 @@ axes:
   seg_qc_match_radius_factor: [1.0, 1.5, 2.0]     # match radius x median nuclear radius. Brackets the
                                                   # default in both directions, as the STARE/VALIS
                                                   # resolution axes do.
-  # NOTE — the VALIS registration knobs (memory_mode, reg_micro_reg) are NOT OFAT axes: they are
-  # crossed at the baseline cell by registration_param_grid below.
-  # NOTE — registration_method is NOT an OFAT axis: it is a method grid (registration_method_grid), each
-  # method run with its OWN live knobs (a tiled-only knob off the VALIS baseline would be a no-op).
+  # NOTE — NO registration knob is an OFAT axis, for EITHER method. registration_method_grid below
+  # crosses each method's own three knobs in full. reg_max_image_dim used to be a flat axis here and
+  # was moved into that grid: as an OFAT axis it varied only at the baseline (memory_mode=high,
+  # reg_micro_reg=1), which measured VALIS's dominant accuracy knob at ONE point of the other two
+  # while STARE's counterpart was measured at all nine. See the grid's header.
+  # NOTE — registration_method is NOT an OFAT axis either: it is the key of that grid, each method run
+  # with its OWN live knobs (a tiled-only knob off the VALIS baseline would be a no-op).
   # NOTE — seg_method and its per-method params (seg_n_tiles_*, seg_cellsam_*, seg_instantseg_*) are NOT
   # OFAT axes: segmentation_grid below runs each method with its OWN live params (an OFAT run of a
   # backend-specific param off the instantseg baseline would be a no-op).
-
-# REGISTRATION PARAMETER GRID (VALIS) — memory_mode x reg_micro_reg crossed at the baseline cell, VALIS
-# path only. Characterises the effect of the VALIS registration knobs on cost + accuracy. reg_micro_reg is
-# the micro-registration DEPTH (0/1/2), replacing the old boolean skip_micro_registration (removed on main).
-registration_param_grid:
-  memory_mode:    [low, medium, high]
-  reg_micro_reg:  [0, 1, 2]              # 0=none | 1=micro-rigid only | 2=+micro non-rigid
 
 # SEGMENTATION GRID — each method benchmarked with ITS OWN parameters (pinned seg_method + that method's
 # live knobs crossed). All THREE shipped backends are covered: stardist crosses its tile grid, instantseg
@@ -301,12 +295,38 @@ segmentation_grid:
     seg_cellsam_block_size:     [512, 1024, 2048]  # native tiling block (px); stay in CellSAM's [256,2048]
     seg_cellsam_bbox_threshold: [0.3, 0.4, 0.5]    # precision/recall knob — cell count vs false positives
 
-# REGISTRATION METHOD GRID — the head-to-head method comparison. Each registration_method is benchmarked
-# with ITS OWN live knobs, exactly like segmentation_grid does per seg backend. The baseline run above is
-# the VALIS anchor (registration_method=valis at defaults); this grid adds the STARE / tiled method and
-# sweeps its accuracy knobs. An OFAT run of a tiled-only knob off the VALIS baseline would be a no-op, so
-# per-method grids (not flat OFAT axes) are the correct structure. Like all real registration axes this
-# needs a --paired matrix (a moving panel to register).
+# REGISTRATION METHOD GRID — the head-to-head method comparison. ONE grid, BOTH methods, each
+# benchmarked with ITS OWN live knobs and at THE SAME DIMENSIONALITY. Exactly like segmentation_grid
+# does per seg backend. An OFAT run of a method-specific knob off the other method's baseline would be
+# a no-op, so per-method grids (not flat OFAT axes) are the correct structure. Like all real
+# registration axes this needs a --paired matrix (a moving panel to register).
+#
+# ============================ THE SYMMETRY RULE ============================
+# EACH METHOD'S ENTRY MUST CROSS THE SAME NUMBER OF KNOBS AT THE SAME NUMBER OF LEVELS.
+# Not a style preference — it is what makes the head-to-head readable at all.
+#
+# This grid used to hold `tiled` alone, with VALIS's knobs split across two other structures:
+# registration_param_grid crossed memory_mode x reg_micro_reg (9 cells at ONE resolution) and
+# reg_max_image_dim sat in flat `axes:` (3 values at ONE memory_mode/micro_reg). Both backends have
+# three knobs at three levels — 27 possible cells each — but the measured coverage was:
+#
+#     STARE  27/27   full cube; up to 3 knobs off-default simultaneously (8 such cells)
+#     VALIS  11/27   a 3x3 plane at reg_max_image_dim=4000, plus a 1-D spur through (high, 1);
+#                    NEVER more than 2 knobs off-default at once; all 16 missing cells vary
+#                    reg_max_image_dim, which was measured at exactly ONE (memory_mode, micro) point
+#
+# That confounds "which method wins" with "which method got more cells", and the direction flips with
+# the estimator: a BEST-CELL comparison flatters STARE (a min over 27 noisy draws beats a min over 11,
+# and VALIS's optimum may sit in an unmeasured cell — memory_mode low/high are DIFFERENT MATCHERS, so
+# a matcher x resolution interaction is plausible and was unobservable), while a MEAN-OVER-CELLS
+# comparison flatters VALIS (9 of its 11 cells sat at its default resolution; 8 of STARE's 27 have all
+# three knobs off-default and drag its mean down). Neither estimator was safe.
+#
+# test_project_sweep_backends_are_crossed_at_equal_dimensionality enforces the rule directly. The older
+# test_project_stare_resolution_axis_mirrors_the_valis_one checked that each method's resolution axis
+# was SWEPT and BRACKETED its default — true of both, and it passed throughout. It compares MARGINALS;
+# this asymmetry lived in the JOINT coverage, one level up from what that guard can see.
+# ===========================================================================
 #
 # reg_tiled_tile is THE fairness / granularity knob: it sets both the tile core size AND the mesh grid
 # resolution (nextflow.config), so a finer grid gives STARE more local (piecewise) deformation freedom.
@@ -323,6 +343,28 @@ segmentation_grid:
 # Held at pipeline defaults: reg_tiled_halo / reg_tiled_upsample (secondary accuracy) and
 # reg_tiled_out_tile (write-side I/O) — add them here if a curve for them is ever needed.
 registration_method_grid:
+  # VALIS — the shipped default backend. Three knobs, three levels, FULL CROSS = 27 cells.
+  #
+  # None of these are tier-owned, so no `custom` pin is needed (unlike the tiled entry below):
+  # memory_mode IS the tier here, and reg_max_image_dim is ungated and live at every tier.
+  # reg_valis_max_processed_dim / reg_valis_max_non_rigid_dim ARE tier-owned and are deliberately
+  # NOT crossed here — varying them would require memory_mode=custom, which would collapse the
+  # memory_mode axis this grid exists to measure.
+  valis:
+    # low = BRISK/RANSAC, high = SuperPoint/SuperGlue — DIFFERENT FEATURE MATCHERS, not one matcher
+    # at two resolutions. medium interpolates cost between them. This is why the interaction with
+    # reg_max_image_dim below is plausible rather than pedantic.
+    memory_mode:       [low, medium, high]
+    # micro-registration DEPTH: 0=none | 1=micro-rigid only | 2=+micro non-rigid. A depth, not a
+    # flag, which is why it is 3 levels and not 2.
+    reg_micro_reg:     [0, 1, 2]
+    # VALIS's counterpart to STARE's reg_tiled_coarse_max_dim: the resolution the transform is
+    # solved at, and the dominant runtime-and-accuracy axis of the method. Brackets its shipped
+    # default (4000) in both directions. Doubling it roughly quadruples the pixels VALIS solves on,
+    # so it is simultaneously the dominant runtime axis AND an accuracy axis (reg_qc=2 scores it) —
+    # read the two together.
+    reg_max_image_dim: [2000, 4000, 8000]
+
   tiled:
     # reg_tiled_tile and reg_tiled_coarse_max_dim are TIER-OWNED: ParamUtils.validateRegPresets
     # rejects a per-knob override under any tier other than 'custom', so this grid must pin it or
