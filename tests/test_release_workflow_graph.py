@@ -932,3 +932,155 @@ def test_the_integration_suite_is_still_manual_only():
         "It has always been manual-only. If that is meant to change, change it "
         "deliberately and update this guard in the same commit."
     )
+
+
+# ---------------------------------------------------------------------------
+# Invariant 7: the MEMBERSHIP of each gate is a written-down fact.
+# ---------------------------------------------------------------------------
+# Added 2026-09-01, fix round 1 of Phase 4, from a reviewer's break.
+#
+# The reviewer moved the `nf-test-stub` job wholesale out of ci.yml into
+# nightly.yml and dropped it from `all-tests`' `needs:`. **116 CI guards passed,
+# 0 failed.** Phase 4 had just made that move idiomatic -- "advisory suites live
+# in nightly.yml" reads as an invitation -- so the hole and the well-lit path to
+# it arrived together.
+#
+# Two separate reasons nothing caught it, and closing either alone is not enough:
+#
+#   * `test_every_job_is_connected_to_its_workflows_gate` cannot see a job once it
+#     is no longer in a workflow that HAS a gate. Its scope is gated workflows;
+#     the job left that scope.
+#   * `test_the_release_gate_runs_every_check_ci_blocks_on[nf-test stub suite]`
+#     kept passing its ci.yml non-vacuity check, because `security-tests`'
+#     collection assertion contains the substring `nf-test test --tag stub` too.
+#     A COMMAND needle cannot distinguish "the suite runs" from "some other job
+#     mentions the suite".
+#
+# So the missing assertion is about MEMBERSHIP, not about commands: which job ids
+# the gate depends on, stated once, here.
+
+# Each gated workflow's aggregator `needs:` set, written down. Keyed by file
+# because gate membership IS a per-file fact -- but every gated workflow must
+# appear (asserted below), so a new one cannot arrive undeclared.
+GATE_MEMBERSHIP = {
+    "ci.yml": {
+        "python-tests",
+        "nextflow-stub",
+        "nf-test-stub",
+        "security-tests",
+        "ruff",
+    },
+    # release.yml's gate is ci.yml's written twice; the parity between them is
+    # what test_the_release_gate_runs_every_check_ci_blocks_on asserts by command.
+    "release.yml": {
+        "test-python",
+        "test-nextflow",
+        "test-nf-test",
+        "test-security",
+        "test-ruff",
+    },
+}
+
+
+def test_each_gate_needs_exactly_the_jobs_written_down_here():
+    """Dropping a job from a gate's `needs:` must be a diff someone reads.
+
+    A blocking check can be removed from CI in one line -- delete it from
+    `needs:` -- and every other guard in this repository keeps passing, because
+    they all reason about what the workflows CONTAIN rather than about what the
+    gate REQUIRES. Reproduced by a reviewer, who removed `nf-test-stub` and got
+    116 green CI guards.
+
+    Every gated workflow must appear in GATE_MEMBERSHIP, so a third gate cannot
+    be added without a line here.
+    """
+    gated = {}
+    for path in workflow_files():
+        aggregators = sorted(result_aggregator_jobs(path))
+        if aggregators:
+            gated[path.name] = (path, aggregators)
+
+    assert set(gated) == set(GATE_MEMBERSHIP), (
+        f"the set of workflows carrying a gate aggregator is {sorted(gated)}, but "
+        f"GATE_MEMBERSHIP declares {sorted(GATE_MEMBERSHIP)}. A gate this file does "
+        "not know about is a gate nothing checks the membership of."
+    )
+
+    problems = []
+    for name, (path, aggregators) in gated.items():
+        assert len(aggregators) == 1, (
+            f"{name} has {aggregators}; this check assumes one aggregator per "
+            "workflow and must be taught the second one deliberately."
+        )
+        jobs = jobs_of(path)
+        actual = set(needs_of(jobs[aggregators[0]]))
+        expected = GATE_MEMBERSHIP[name]
+        if actual != expected:
+            problems.append(
+                f"{name}: `{aggregators[0]}` needs {sorted(actual)}, expected "
+                f"{sorted(expected)} (missing {sorted(expected - actual)}, "
+                f"unexpected {sorted(actual - expected)})"
+            )
+        for job_id in expected:
+            if job_id not in jobs:
+                problems.append(f"{name}: GATE_MEMBERSHIP names `{job_id}`, which does not exist")
+    assert not problems, (
+        "gate membership changed:\n  " + "\n  ".join(problems) + "\n\n"
+        "If a check really should stop blocking, say so HERE in the same commit. "
+        "Removing it from `needs:` alone leaves every other guard green."
+    )
+
+
+def test_every_nf_test_suite_is_either_blocking_or_declared_advisory():
+    """`GATE_MEMBERSHIP` and `ADVISORY_SUITES` are COMPLEMENTS over the nf-test
+    suites. A suite in neither is a new fact someone has to write down.
+
+    This is the general form of the reviewer's break. A job that runs
+    `nf-test test` is either:
+
+      * wired into its own workflow's gate -- it blocks something; or
+      * running one of the commands declared in ADVISORY_SUITES -- it is
+        deliberately non-blocking, and nightly.yml is where it lives.
+
+    A job in neither has stopped blocking without anyone declaring it advisory,
+    which is precisely what "move it to nightly.yml" does by accident. Discovery
+    is by the `nf-test test` invocation, so it holds for a suite this file has
+    never heard of.
+    """
+    advisory_needles = tuple(ADVISORY_SUITES.values())
+    checked = 0
+    offenders = []
+    for path in workflow_files():
+        aggregators = sorted(result_aggregator_jobs(path))
+        jobs = jobs_of(path)
+        gate_needs = set()
+        for agg in aggregators:
+            gate_needs |= set(needs_of(jobs[agg]))
+        for job_id, job in jobs.items():
+            if not isinstance(job, dict):
+                continue
+            text = run_text(job)
+            if "nf-test test" not in text:
+                continue
+            checked += 1
+            if job_id in gate_needs:
+                continue
+            if any(needle in text for needle in advisory_needles):
+                continue
+            offenders.append(
+                f"{path.name}::{job_id} runs `nf-test test` but is in neither "
+                f"{path.name}'s gate `needs:` nor ADVISORY_SUITES"
+            )
+    assert checked >= 4, (
+        f"only {checked} job(s) run `nf-test test` across the workflows; ci.yml, "
+        "release.yml and nightly.yml between them run considerably more, so this "
+        "scan did not read what it thinks it read."
+    )
+    assert not offenders, (
+        "nf-test suite(s) neither block nor are declared advisory:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nA suite that has quietly stopped blocking is the failure mode Phase 4 "
+        "made easy: moving a job to nightly.yml looks like tidying. Put it back in "
+        "the gate's `needs:` (and in GATE_MEMBERSHIP), or declare it in "
+        "ADVISORY_SUITES with the reason it is allowed to be red."
+    )

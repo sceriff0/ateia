@@ -53,10 +53,21 @@
 # that condition would have quietly promoted a manually-triggered 2-hour suite
 # into something that runs unattended every night.
 #
-# `nf-test-real` ran on `push` to main/dev in ci.yml. Here it runs on the
+# `nf-test-real` ran on `push` to main AND dev in ci.yml. Here it runs on the
 # schedule and on a manual dispatch, which is the trade this move makes: the
-# signal is one run per day on main instead of one per push, and in exchange a
-# push's status tells the truth about the gate.
+# signal is one run per day instead of one per push, and in exchange a push's
+# status tells the truth about the gate.
+#
+# BE PRECISE ABOUT WHAT dev LOSES. `schedule:` fires on the DEFAULT BRANCH ONLY --
+# GitHub runs the workflow file as it exists on `main`, against `main`. So dev's
+# real-suite coverage drops from "every push" to ZERO, and the only way to run the
+# real suite against dev is a manual `workflow_dispatch` with the branch selected.
+# That is a real reduction and it is being made deliberately: the suite is red
+# today (see above), so what dev is losing is a signal nobody could read anyway,
+# and restoring per-push coverage on a branch is the wrong shape for a suite that
+# takes two hours. If dev needs it back once the suite is green, the fix is a
+# `push:` trigger here with `branches: [dev]` -- a decision to take then, on a
+# green suite, not now.
 #
 # 05:17 UTC is deliberately not on the hour: GitHub's scheduler queues heavily at
 # :00 and can delay or drop a run entirely under load.

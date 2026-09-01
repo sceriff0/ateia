@@ -70,18 +70,34 @@ ci_actions = importlib.import_module("ci_actions")
 # The two tables. Both CLOSED: anything absent from them fails.
 # ---------------------------------------------------------------------------
 
-# A path may be cached only where something in the SAME file installs it. The
-# value is a substring that must appear in that file -- the step that puts the
-# bytes there. `~/.nf-test` had no such owner in setup-nextflow and that is
-# exactly defect 2 above.
+# Every cached path declares TWO things, and both are checked:
+#
+#   installer        -- a substring that must appear in the SAME file. A path may
+#                       be cached only where something puts the bytes there.
+#                       `~/.nf-test` had no such owner in setup-nextflow, which is
+#                       defect 2 above.
+#   key_must_contain -- a substring that must appear in that cache step's `key:`.
+#                       This is the OTHER half of rule 2, and it is the half a
+#                       reviewer broke straight through on 2026-09-01: deleting
+#                       `${{ inputs.nextflow-version }}` from the distribution key
+#                       left `${{ runner.os }}-${{ runner.arch }}-nextflow` and all
+#                       five cases here passed. The `25.04.0` and
+#                       `latest-everything` legs would then share ONE immutable
+#                       entry, and whichever saved first would fix its framework
+#                       directory on the other for the life of the key. A key must
+#                       name what determines the bytes it covers.
 CACHED_PATH_OWNERS = {
     "~/.nextflow": (
         "nf-core/setup-nextflow",
-        "the Nextflow launcher + framework jars, written by the install step",
+        "inputs.nextflow-version",
+        "the Nextflow launcher + framework jars, written by the install step; the "
+        "VERSION is the whole of what determines them, so the key must name it",
     ),
     "${{ github.workspace }}/.nextflow-plugins": (
         "nextflow plugin install",
-        "NXF_PLUGINS_DIR, filled by the plugin provisioning step",
+        "hashFiles('nextflow.config')",
+        "NXF_PLUGINS_DIR, filled by the plugin provisioning step; nextflow.config "
+        "declares the pin, so its hash is what determines the contents",
     ),
 }
 
@@ -260,7 +276,7 @@ def test_every_cached_path_has_a_declared_installer_in_the_same_file():
                     f"{where}: caches {cached!r}, which is not in CACHED_PATH_OWNERS"
                 )
                 continue
-            owner, reason = CACHED_PATH_OWNERS[cached]
+            owner, _key_component, reason = CACHED_PATH_OWNERS[cached]
             if owner not in text:
                 offenders.append(
                     f"{where}: caches {cached!r} but {owner!r} ({reason}) does not "
@@ -337,3 +353,92 @@ def test_restore_keys_exist_exactly_where_the_key_can_miss():
                 "names, or a superseded one"
             )
     assert not offenders, "\n".join(offenders)
+
+
+def test_every_cached_path_is_keyed_on_what_determines_its_contents():
+    """The other half of rule 2, and the half that was missing.
+
+    A cache entry is immutable, so a key that does not name everything the cached
+    bytes depend on quietly merges two different things into one entry and hands
+    the loser whatever the winner saved. `test_no_two_cache_steps_share_a_key`
+    only catches two SEPARATE steps colliding; this catches ONE step whose key has
+    lost a component and now collides with itself across matrix legs.
+
+    Measured, not hypothetical: on 2026-09-01 a reviewer deleted
+    `${{ inputs.nextflow-version }}` from the distribution key and every case in
+    this file still passed, while `25.04.0` and `latest-everything` would have
+    shared one entry.
+    """
+    offenders = []
+    checked = 0
+    for _path, where, step in cache_steps():
+        with_block = step.get("with") or {}
+        key = str(with_block.get("key", ""))
+        for cached in _lines(with_block.get("path")):
+            if cached not in CACHED_PATH_OWNERS:
+                continue  # test_every_cached_path_has_a_declared_installer... owns this
+            _owner, component, reason = CACHED_PATH_OWNERS[cached]
+            checked += 1
+            if component not in key:
+                offenders.append(
+                    f"{where}: caches {cached!r} under key {key!r}, which does not "
+                    f"contain {component!r} -- {reason}"
+                )
+    assert checked >= 2, (
+        f"only {checked} cached path(s) had a declared key component; the scan is "
+        "not reading them"
+    )
+    assert not offenders, (
+        "cache key(s) do not name what determines the bytes they cover:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nA cache entry is IMMUTABLE. A key missing a component merges two "
+        "different caches into one entry and the first writer wins -- silently, "
+        "and forever, because both steps report a hit afterwards."
+    )
+
+
+def test_every_workflow_that_installs_nextflow_pins_nxf_plugins_dir():
+    """`NXF_PLUGINS_DIR` is load-bearing for the DISTRIBUTION cache, not just a
+    speed knob, and nothing asserted it.
+
+    With the distribution key reduced to os/arch/version (Phase 3), `~/.nextflow`
+    is claimed to be a pure function of the Nextflow version. That is only true
+    while the plugins live somewhere else. A workflow that forgot the `env:` would
+    let nf-schema land in `~/.nextflow/plugins`, and the plugin set would be
+    frozen into a version-only entry that never rotates when `nextflow.config`
+    changes the pin -- the exact staleness the separate plugins cache exists to
+    avoid, reintroduced through the back door and invisible.
+
+    Scope is every JOB that reaches `.github/actions/setup-nextflow`, resolved
+    through `tests/ci_actions.py`, so a job that picks it up via `setup-nf-test`
+    counts too. `env:` may be declared at workflow or job level; both work.
+    """
+    var = "NXF_PLUGINS_DIR"
+    offenders = []
+    checked = 0
+    for path in ci_actions.workflow_files():
+        data = yaml.safe_load(path.read_text()) or {}
+        workflow_env = data.get("env") or {}
+        for job_id, job in (data.get("jobs") or {}).items():
+            if not isinstance(job, dict):
+                continue
+            actions = {p.parent.name for p in ci_actions.job_local_actions(job)}
+            if "setup-nextflow" not in actions:
+                continue
+            checked += 1
+            job_env = job.get("env") or {}
+            if var not in workflow_env and var not in job_env:
+                offenders.append(
+                    f"{path.relative_to(ROOT).as_posix()}::{job_id} installs Nextflow "
+                    f"but neither it nor its workflow sets {var}"
+                )
+    assert checked >= 3, (
+        f"only {checked} job(s) were found to install Nextflow. ci.yml, release.yml "
+        "and nightly.yml all do, several times over; a number this small means the "
+        "resolver stopped reaching .github/actions/setup-nextflow."
+    )
+    assert not offenders, (
+        f"{var} must be set wherever Nextflow is installed -- without it the plugins "
+        "land inside ~/.nextflow and get frozen into a cache key that only names the "
+        "Nextflow version:\n  " + "\n  ".join(offenders)
+    )

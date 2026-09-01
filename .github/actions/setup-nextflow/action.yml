@@ -47,7 +47,19 @@
 # function of this repository's `.nf` sources, so the hash only guaranteed a miss
 # (rule 1). With the hash gone the key is fully determined by the version string:
 # it hits, or the version was bumped and a fresh download is exactly what is
-# wanted. There is nothing left for a restore-key prefix to fall back TO, and a
+# wanted.
+#
+# ONE EXCEPTION, and it is the `latest-everything` leg. That string does not
+# change when the version behind it does, so under rule 2 the entry is written
+# once and then never refreshed: edge Nextflow restores a stale framework
+# directory and downloads the current one beside it, every run. That leg is
+# effectively uncached in steady state. It is left that way on purpose -- the
+# obvious fix, a date component in the key, writes a fresh never-reused entry
+# every day, which is defect 1 again with a different glob. Correctness is
+# unaffected: a cached framework directory is additive, and Nextflow uses the
+# version it was asked for.
+#
+# There is nothing left for a restore-key prefix to fall back TO, and a
 # prefix fallback would only restore the very entry the key already names.
 # `runner.arch` is in the key because the distribution is per-architecture and a
 # future arm64 runner must not restore an amd64 entry under rule 2.
