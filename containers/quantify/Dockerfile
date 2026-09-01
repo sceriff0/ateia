@@ -1,6 +1,6 @@
 
 # Option 1: NVIDIA CUDA base (most reliable)
-FROM nvidia/cuda:12.2.2-devel-ubuntu22.04
+FROM nvidia/cuda:13.3.1-devel-ubuntu22.04
 
 # Install Python and essential tools
 RUN apt-get update && apt-get install -y \

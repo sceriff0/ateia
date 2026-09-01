@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:26.04
 
 LABEL maintainer="mirage team"
 LABEL description="Docker image for mirage image conversion and illumination-correction tiling"

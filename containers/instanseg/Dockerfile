@@ -1,5 +1,5 @@
 # torch 2.6.0 carries the CVE-2025-32434 fix; cuda11.8 is unchanged.
-FROM pytorch/pytorch:2.6.0-cuda11.8-cudnn9-runtime
+FROM pytorch/pytorch:2.7.1-cuda11.8-cudnn9-runtime
 
 LABEL maintainer="MIRAGE Pipeline"
 LABEL description="InstanSeg segmentation container (PyTorch 2.5.1 + CUDA 12.4)"

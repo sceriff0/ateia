@@ -26,7 +26,7 @@
 # TILED_COARSE, and the CPU path must stay correct since the default deployment exercises
 # nothing else. `torch.cuda.is_available()` must report False out of this image; True means
 # the wrong (CUDA) wheel got installed, and the final verification RUN below asserts it.
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 # scikit-image / scipy import cleanly on slim with no extra *Python-facing* system libs, but
 # `procps` is not optional: Nextflow's task-metrics wrapper hard-exits BEFORE the script block

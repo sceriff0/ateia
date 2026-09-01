@@ -12,7 +12,7 @@
 # No python-bioformats / javabridge / scyjava — both Glencoe tools are
 # shaded JVM zips; install is `unzip` + symlink, no native compilation.
 
-FROM eclipse-temurin:21-jre-jammy
+FROM eclipse-temurin:25-jre-jammy
 
 LABEL maintainer="mirage WSI pipeline"
 LABEL description="Bioformats CONVERT_IMAGE: bioformats2raw + raw2ometiff + tifffile reorder"

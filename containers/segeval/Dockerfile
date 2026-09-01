@@ -13,7 +13,7 @@
 #
 # OPT-IN in the pipeline (skip_seg_quality_eval defaults to true), so this image is
 # only pulled by a run that asked for it.
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 LABEL description="Mirage SEG_QUALITY_EVAL: vendored CellSegmentationEvaluator (2D) metrics"
 
