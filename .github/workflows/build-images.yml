@@ -61,6 +61,10 @@ on:
     branches: [main]
     paths:
       - 'containers/**'
+      # The images' pins live here now, so a pin change must still trigger the
+      # build-only validation. Without this line a constraints.txt bump would reach
+      # Docker Hub having never been built.
+      - 'requirements/**'
       - '.github/workflows/build-images.yml'
 
   # Reusable entry point so release.yml can invoke this workflow.
@@ -261,7 +265,12 @@ jobs:
       - name: Build and push mirage-${{ matrix.dir }}
         uses: docker/build-push-action@v6
         with:
-          context: containers/${{ matrix.dir }}
+          # REPOSITORY ROOT, not containers/<dir>. Every Dockerfile now COPYs its pins
+          # from requirements/ -- the same files .github/workflows/*.yml install -- so the
+          # version strings exist once instead of twice. A per-directory context cannot
+          # reach outside itself, so the context had to widen for the pins to be shared.
+          # .dockerignore keeps what is actually sent small.
+          context: .
           file: containers/${{ matrix.dir }}/Dockerfile
           # Pin to linux/amd64 — the pipeline runs on amd64 HPC nodes.
           platforms: linux/amd64

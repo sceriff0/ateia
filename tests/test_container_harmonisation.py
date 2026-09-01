@@ -36,6 +36,8 @@ from packaging.requirements import InvalidRequirement, Requirement
 
 REPO = Path(__file__).resolve().parent.parent
 CONTAINERS = REPO / "containers"
+REQUIREMENTS = REPO / "requirements"
+CONSTRAINTS = REQUIREMENTS / "constraints.txt"
 
 # Since the one-repo-per-image rename, the component name in the image reference IS the
 # build-context directory name, so no translation table is needed. The previous table mapped
@@ -46,26 +48,51 @@ CONTAINERS = REPO / "containers"
 # requires zarr>=3, which cannot be installed on the python:3.10 bases the others use.
 PY312_ISLAND = "spatialdata"
 
-# Packages installed by more than one image must agree on a version. Ceilings are the newest
-# release that still supports Python 3.10, except numpy, which is held at the last 1.x because
-# the segmentation image's TensorFlow 2.15 base requires numpy<2.
-HARMONISED = {
-    "numpy": "1.26.4",
-    "tifffile": "2025.5.10",
-    "imagecodecs": "2025.3.30",
-    "zarr": "2.18.3",
-    "numcodecs": "0.13.1",
-    "pandas": "2.3.3",
-    "scikit-image": "0.25.2",
-    "scipy": "1.15.3",
-    # Added after the final review found csbdeep and dask installed UNPINNED by the fix wave,
-    # directly under a comment reading "Install Python packages with exact versions". They were
-    # invisible to test_no_shared_package_is_installed_unpinned purely because that test only
-    # checks packages listed here -- an unpinned package the table does not know about cannot be
-    # flagged. Listing them is what makes the guard able to see them at all.
-    "csbdeep": "0.8.2",
-    "dask": "2026.7.1",
-}
+# Packages installed by more than one image must agree on a version.
+#
+# THIS TABLE IS NOT WRITTEN HERE ANY MORE. It is READ from requirements/constraints.txt --
+# the very file the Dockerfiles COPY and pass to pip with `-c`, and the one CI's requirements
+# files constrain against. It used to be a hand-maintained dict beside a hand-maintained copy
+# of the same numbers in the workflow YAML, with a 42 KB guard test proving the two copies
+# equal. Reading the file deletes the second copy instead of checking it: an image can no
+# longer disagree with "the harmonised set" while the harmonised set agrees with nothing that
+# actually gets installed.
+#
+# Ceilings are the newest release that still supports Python 3.10, except numpy, which is held
+# at the last 1.x because the segmentation image's TensorFlow 2.15 base requires numpy<2. The
+# rationale for each pin, and for the four packages deliberately NOT constrained, lives in
+# requirements/constraints.txt itself.
+
+
+def _read_constraints(path=CONSTRAINTS):
+    """{name: version} from a pip constraints file. Exact pins only, which is all it may hold.
+
+    A constraints file may legally carry inexact specifiers; this one may not, and saying so
+    HERE is what keeps `>=`-style drift out of the harmonised set. Comment-only lines and the
+    documented "not constrained here" block are skipped by the `#` strip, so the block that
+    records matplotlib/scikit-learn/opencv/torch's authorities cannot accidentally become a
+    pin.
+    """
+    out = {}
+    for raw in path.read_text().splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line or line.startswith("-"):
+            continue
+        parsed = _parse_req(line)
+        assert parsed, f"{path.name}: cannot parse requirement {line!r}"
+        name, specs = parsed
+        assert len(specs) == 1 and specs[0][0] == "==", (
+            f"{path.name} pins {name!r} as {line!r}. Every line in the constraints file must "
+            f"be an exact `name==version`: it is the single version authority for every "
+            f"container image and every CI job, and an inexact one authorises drift."
+        )
+        out[name] = specs[0][1]
+    assert out, (
+        f"{path} parsed to an EMPTY table. Every harmonised check below would then pass "
+        f"having compared nothing -- the vacuous-guard failure this repo keeps hitting."
+    )
+    return out
+
 
 # Documented per-image exceptions to HARMONISED. Each names the UPSTREAM CONSTRAINT that forces
 # it, because an exception without one is just a silent escape hatch from the harmonised set.
@@ -134,6 +161,13 @@ def _is_exact(specs):
     return len(specs) == 1 and specs[0][0] == "=="
 
 
+
+# Module-level, so an unreadable or empty constraints file fails at COLLECTION rather than
+# leaving each parametrised check to pass over an empty table. Defined after _parse_req
+# because it uses it.
+HARMONISED = _read_constraints()
+
+
 def _dockerfile(name):
     return (CONTAINERS / name / "Dockerfile").read_text()
 
@@ -199,13 +233,32 @@ def _requirements_tokens(path):
     return tokens
 
 
+def _requirements_files_installed(text):
+    """Every `requirements/<name>.txt` a Dockerfile actually `pip install -r`s.
+
+    The files moved out of ``containers/<c>/requirements.txt`` into ``requirements/<c>.txt``
+    so a single ``constraints.txt`` could be shared with CI. This resolves them by the
+    BASENAME the Dockerfile installs rather than by the container's own name, because
+    containers/tiled installs three (tiled.txt, torch-cpu.txt, kornia.txt) -- and reading only
+    ``tiled.txt`` would have hidden torch and kornia from every check below, which is exactly
+    the "counted set is smaller than the installed set" defect this module's parser docstring
+    describes.
+    """
+    joined = re.sub(r"\\\s*\n", " ", text)
+    found = []
+    for m in re.finditer(r"(?:-r|--requirement)[=\s]+(\S+)", joined):
+        path = REQUIREMENTS / Path(m.group(1)).name
+        if path.is_file():
+            found.append(path)
+    return found
+
+
 def _installed(container):
     """package -> specifier string including its operator, or None if installed bare."""
     text = _dockerfile(container)
-    req = CONTAINERS / container / "requirements.txt"
     tokens = _dockerfile_pip_tokens(text)
     # Only count a requirements file the Dockerfile actually installs.
-    if req.is_file() and re.search(r"pip3?\s+install[^\n]*-r ", text):
+    for req in _requirements_files_installed(text):
         tokens += _requirements_tokens(req)
     found = {}
     for tok in tokens:
@@ -222,17 +275,17 @@ def _installed(container):
 
 @pytest.mark.parametrize("container", _container_dirs())
 def test_every_requirements_file_is_actually_installed(container):
-    """A requirements.txt nothing installs is a decoy that reads like a pin."""
-    req = CONTAINERS / container / "requirements.txt"
+    """A requirements file nothing installs is a decoy that reads like a pin."""
+    req = REQUIREMENTS / f"{container}.txt"
     if not req.is_file():
-        pytest.skip(f"{container} has no requirements.txt")
+        pytest.skip(f"{container} has no requirements/{container}.txt")
     text = _dockerfile(container)
-    assert re.search(r"COPY[^\n]*requirements", text), (
-        f"containers/{container}/requirements.txt is never COPYd into the image, so every "
+    assert re.search(rf"COPY[^\n]*requirements/{container}\.txt", text), (
+        f"requirements/{container}.txt is never COPYd into containers/{container}, so every "
         f"version it lists is inert. Either install it or delete it."
     )
-    assert re.search(r"pip3?\s+install[^\n]*-r ", text), (
-        f"containers/{container}/requirements.txt is COPYd but never pip-installed."
+    assert req in _requirements_files_installed(text), (
+        f"requirements/{container}.txt is COPYd but never pip-installed."
     )
 
 
@@ -273,8 +326,7 @@ def test_shared_packages_match_the_harmonised_version(container):
 def test_no_forbidden_package_reappears(container):
     """Frameworks removed for having zero importers must not drift back in."""
     text = _dockerfile(container)
-    req = CONTAINERS / container / "requirements.txt"
-    if req.is_file():
+    for req in _requirements_files_installed(text):
         text += "\n" + req.read_text()
     # Strip `#` comments first. This scan is a regex over raw text, so without this a comment
     # EXPLAINING why a package was removed -- quoting the import line it used to have -- reads as

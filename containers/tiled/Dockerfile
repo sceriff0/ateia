@@ -45,13 +45,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN pip install --no-cache-dir --upgrade pip
 
-COPY requirements.txt /tmp/requirements.txt
+# The build context is the REPOSITORY ROOT (build-images.yml passes `context: .`), so the
+# pin files come from requirements/ -- the same files .github/workflows/*.yml install. There
+# is no second copy of any version string to keep in step.
+COPY requirements/constraints.txt requirements/tiled.txt requirements/torch-cpu.txt requirements/kornia.txt /tmp/requirements/
 # torch BEFORE kornia, and from the CPU index: kornia pulls torch from PyPI (the CUDA
 # wheel, ~2.5 GB) if torch is not already satisfied. The order is load-bearing, and it is
-# why these two pins live HERE and not in requirements.txt -- see that file's comment.
-RUN pip install --no-cache-dir -r /tmp/requirements.txt \
-    && pip install --no-cache-dir torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir kornia==0.7.3
+# why those two are separate files and separate invocations -- see requirements/torch-cpu.txt.
+# tiled.txt opens with `-c constraints.txt`, which pip resolves next to it.
+RUN pip install --no-cache-dir -r /tmp/requirements/tiled.txt \
+    && pip install --no-cache-dir -r /tmp/requirements/torch-cpu.txt \
+    && pip install --no-cache-dir -r /tmp/requirements/kornia.txt
 
 # BAKE THE PRETRAINED WEIGHTS. kornia fetches these at FIRST USE into
 # $TORCH_HOME/hub/checkpoints -- from raw.githubusercontent.com (DISK) and

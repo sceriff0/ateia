@@ -1,8 +1,24 @@
 # Mirage Container Images
 
-This directory vendors the Docker build contexts for every image the Mirage
-pipeline runs. Each subdirectory is a self-contained build context
-(`containers/<name>/Dockerfile` plus any `requirements.txt` / helper files).
+This directory vendors the Dockerfiles for every image the Mirage pipeline runs.
+
+**The build context is the REPOSITORY ROOT, not `containers/<name>/`.**
+`.github/workflows/build-images.yml` passes `context: .` with
+`file: containers/<name>/Dockerfile`, because every image takes its Python pins from
+[`requirements/`](../requirements) — `constraints.txt` is the one version authority shared
+by all eleven images AND by the CI workflows, and a per-directory context cannot reach
+outside itself. A local build must therefore be run from the repository root:
+
+```sh
+docker build -f containers/segeval/Dockerfile -t bolt3x/mirage-segeval:1.0.0 .
+```
+
+Two images take no constraints file and say so in their own header:
+`containers/spatialdata` (the python:3.12 / `zarr>=3` island) and `containers/convert`
+(bioio caps `tifffile` and forces `numpy` 2.x). Both divergences are recorded in
+`tests/test_container_harmonisation.py`'s `PINNED_EXCEPTIONS`, and
+`tests/test_ci_stack_pinned.py` derives its exception list from that table rather than
+from a hand-written name list.
 
 Images are built and published to **Docker Hub**, one public repository per image,
 tagged with the pipeline version:

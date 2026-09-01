@@ -33,9 +33,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         procps \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /tmp/requirements.txt
+# The build context is the REPOSITORY ROOT (build-images.yml passes `context: .`).
+# segeval.txt opens with `-c constraints.txt`, which pip resolves next to it, so both files
+# must land in the same directory.
+COPY requirements/constraints.txt requirements/segeval.txt /tmp/requirements/
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r /tmp/requirements.txt
+    && pip install --no-cache-dir -r /tmp/requirements/segeval.txt
 
 # Fail the BUILD rather than a cluster run. This stack is exactly the kind that
 # resolves in pip and then explodes on first import: scikit-image 0.25 against numpy 1.26

@@ -1,0 +1,17 @@
+# torch, CPU wheel. THE single copy of this pin — read by containers/tiled/Dockerfile and
+# by every CI job that runs the Python suite.
+#
+# Install this file as its OWN `pip install -r` invocation, BEFORE requirements/kornia.txt.
+# Two reasons, both load-bearing:
+#   * `--index-url` below applies to the ENTIRE pip resolve, not just to the lines in this
+#     file, so this file must never be `-r`-included from another requirements file.
+#   * kornia pulls torch from PyPI (the ~2.5 GB CUDA wheel) if torch is not ALREADY
+#     satisfied, so the order matters.
+#
+# CPU-only deliberately: the cluster never guarantees a GPU-visible node for TILED_COARSE,
+# and containers/tiled/Dockerfile asserts `torch.cuda.is_available()` is False at build
+# time. tests/test_disk_test_actually_runs.py asserts every workflow that runs the pytest
+# suite installs this file, so tests/test_coarse_frontend.py's DISK cases cannot
+# importorskip away in the blocking gate.
+--index-url https://download.pytorch.org/whl/cpu
+torch==2.3.1

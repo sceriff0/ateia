@@ -1,0 +1,74 @@
+# The environment CI's Python unit-test suite runs in. Installed by
+# `pip install -r requirements/ci.txt` in every workflow job that runs `pytest tests/`.
+#
+# BE HONEST ABOUT WHAT THIS IS. The suite spans four production images' dependency sets,
+# so this environment matches NO single shipped image — it is their union. What this file
+# guarantees is narrower and checkable: every package that CI shares with a production
+# image takes its version FROM that image's own file, never from a second copy written
+# here. The `-r` lines below are how, and the two exceptions are named and explained.
+#
+# THE ONLY VERSION STRING BELOW IS `anndata<0.12`, and its reason is spelled out where it
+# sits. Everything else is either constrained by constraints.txt or comes from a production
+# image's own file.
+#
+# NOTE ON torch/kornia: they are NOT included here. `requirements/torch-cpu.txt` carries an
+# `--index-url`, which applies to the whole pip resolve if it is pulled in by `-r`. They
+# are installed as two separate `pip install -r` steps after this one, in that order,
+# exactly as containers/tiled/Dockerfile does it.
+-c constraints.txt
+
+# containers/segeval — the CSE evaluation image. Supplies numpy, scipy, pandas,
+# scikit-image, scikit-learn, tifffile, xmltodict and matplotlib at the versions that image
+# ships. scikit-learn and matplotlib in particular are load-bearing for QualityScore and
+# have no other home; taking them from this file rather than restating them is the reason
+# CI cannot drift from the image any more.
+-r segeval.txt
+
+# containers/tiled — the STARE tiled-registration image. Supplies zarr, numcodecs and
+# imagecodecs on top of the imaging stack above (same harmonised pins, so no conflict).
+# zarr/numcodecs must move together: a newer numcodecs drops blosc.cbuffer_sizes that zarr
+# 2.18 imports, and tests/test_tiled_stitch_streaming.py then fails at COLLECTION.
+# imagecodecs supplies the zstd/LZW codecs tifffile writes through — its absence is not an
+# ImportError, it surfaces only on a WRITE.
+-r tiled.txt
+
+# ---- CI-only tooling -------------------------------------------------------------------
+pytest
+pytest-cov
+
+# pyyaml is named EXPLICITLY. It used to be declared only in the root requirements.txt,
+# which CI installed with `|| true`, and tests/test_ci_job_hygiene.py importorskips it at
+# MODULE scope — so a swallowed failure silently deleted both of that file's guards. It
+# survived only transitively, as a dependency of dask.
+pyyaml
+
+# ---- Runtime packages the suite needs that no `-r` above supplies ----------------------
+
+# dask[array] powers bin/convert_image.py's lazy read (BioImage.dask_data), driven for real
+# by tests/test_convert_lazy_read.py and tests/test_convert_streaming_write.py, which import
+# it unconditionally. UNPINNED HERE ON PURPOSE: constraints.txt owns the version
+# (dask==2026.7.1, what containers/convert, containers/stardist and containers/cellsam run).
+dask[array]
+
+# opencv, as the HEADLESS build — the runners have no display libs. bin/utils/qc.py imports
+# cv2 at module scope, and tests/test_merge_pyramid_streaming.py and
+# tests/test_registration_qc_lazy_read.py both importorskip("cv2") at MODULE scope, so its
+# absence silently deselects 29 tests.
+#
+# UNPINNED HERE. requirements/constraints.txt now carries BOTH opencv distribution names
+# at the same release — `opencv-python` (what containers/regqc and containers/merge
+# install) and `opencv-python-headless` (what CI installs) — so this line names no version
+# and the two cannot drift apart. tests/test_ci_stack_pinned.py's EQUIVALENT_DISTRIBUTIONS
+# asserts they stay equal. Also worth knowing: opencv-python-headless>=5 requires numpy>=2
+# and would collide with the constrained numpy==1.26.4.
+opencv-python-headless
+
+# anndata powers tests/test_join_flowpath.py. THIS IS THE ONE GENUINE DIVERGENCE between CI
+# and every shipped image, and it cannot be closed by a constraints file. anndata's only
+# production home is containers/spatialdata — python:3.12 with zarr>=3.0.0 — and zarr 3
+# removes the store API tifffile's aszarr relies on ("Unsupported type for store_like:
+# 'ZarrTiffStore'"), which breaks the tiled streaming/fanout tests. So CI pins anndata
+# below 0.12, the last line that works against the constrained zarr 2.18.3. The right fix
+# is a separate job running those two test files inside bolt3x/mirage-spatialdata; until
+# then this line is the honest record of the gap.
+anndata<0.12

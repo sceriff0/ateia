@@ -178,125 +178,58 @@ jobs:
       # NOTE: no `docker/setup-buildx-action` here on purpose. Every step in this
       # job is container-free. Guarded by
       # tests/test_ci_job_hygiene.py::test_buildx_job_must_actually_use_buildx.
-      # `cache: 'pip'` keys on the hash of **/requirements.txt -- which includes
-      # containers/tiled/requirements.txt, the file that DOCUMENTS the torch/kornia split
-      # (they are installed by an inline `pip install` below, not from any requirements
-      # file, because torch needs a CPU --index-url and kornia must follow it). So the
-      # ~190 MB torch wheel is cached, but the key rotates only when some requirements.txt
-      # changes -- NOT when the inline pins below change. If you bump torch or kornia here,
-      # touch containers/tiled/requirements.txt's comment in the same commit or the first
-      # run after the bump restores a cache built for the old wheel.
+
+      # `cache-dependency-path` is NOT optional now that the pins live in requirements/.
+      # `cache: 'pip'` defaults its key to the hash of `**/requirements.txt`, and after the
+      # move the only files matching that glob are the root shim and docs/requirements.txt
+      # -- neither of which changes when a pin does. The cache key would have gone stale
+      # exactly when it must rotate: the run after a bump would restore a cache built for
+      # the OLD wheels (~190 MB of torch among them). Keying on requirements/** rotates it
+      # on any pin change, including torch's and kornia's, which the old `**/requirements.txt`
+      # key never did.
       - name: Install Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
           cache: 'pip'
+          cache-dependency-path: 'requirements/**'
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          # This list is IDENTICAL to ci.yml's python-tests job, line for line.
-          # There is deliberately NO `pip install -r requirements.txt` on either
-          # side: that file is an unpinned developer-convenience superset
-          # (stardist, csbdeep, basicpy, aicsimageio, dask[distributed] and a
-          # `git+https://.../deepcell-types@master` clone). ci.yml ran it with
-          # `|| true`, in the BLOCKING gate, so total failure was swallowed --
-          # and it does fail: deepcell-types declares `requires-python >=3.11`,
-          # so on the 3.10 leg pip resolves nothing at all and installs NOTHING,
-          # while on 3.11 it would resolve numpy 2.x before the pinned line
-          # downgrades it. Nothing in the suite needs those packages: every
-          # MODULE-SCOPE `pytest.importorskip` in tests/ targets anndata, cv2,
-          # kornia, numpy, pandas, scipy, skimage, tifffile, torch, yaml or
-          # zarr, all of which the pinned lines below install. The one test that
-          # touches stardist/csbdeep does so through a per-test `skipif` whose
-          # own docstring calls it "deliberately additive", with a structural
-          # counterpart that always runs.
+          # EVERY version string lives in requirements/, never here. That is not a style
+          # preference: the same pins used to be written twice -- once in this YAML and
+          # once in the production image -- and a 42 KB guard test existed only to prove
+          # the two copies were equal. requirements/ci.txt `-r`-includes
+          # requirements/segeval.txt and requirements/tiled.txt, the very files
+          # containers/segeval and containers/tiled build from, so there is one copy and
+          # nothing left to prove equal. Read requirements/ci.txt: it documents what this
+          # environment is, and the one place (anndata) where it honestly cannot match a
+          # shipped image.
           #
-          # pyyaml is listed EXPLICITLY here for that reason: it used to be
-          # declared only in requirements.txt, and tests/test_ci_job_hygiene.py
-          # `importorskip`s it at module scope, so a failed `-r` install
-          # silently deleted two guards. It survived only transitively, via
-          # dask's own dependency on it.
+          # There is deliberately NO `pip install -r requirements.txt` (the ROOT file).
+          # It is an unpinned developer-convenience superset carrying a
+          # `git+https://github.com/vanvalenlab/deepcell-types@master` clone that does not
+          # install on Python 3.10 at all, and it was once installed in this BLOCKING gate
+          # with `|| true`, so total failure was swallowed. The root file is now a shim
+          # that points at requirements/ci.txt and says so.
           #
-          # scikit-learn is PINNED for the reason ci.yml gives at its own pin:
-          # bin/utils/cse/functions.py:650 builds its PCA model by assigning
-          # fitted attributes by hand, so it is valid only against the sklearn
-          # internals it was written for. Unpinned, pip resolved 1.7.2 on a 3.10
-          # leg and 1.9.0 on a 3.11 leg and 1.9.0 made QualityScore come out
-          # `nan`. Tracks containers/segeval/requirements.txt.
-          pip install pytest pytest-cov pandas scikit-learn==1.5.2 xmltodict pyyaml
-          # The imaging stack is pinned to containers/tiled/requirements.txt — the
-          # production image that actually runs the tiled path — and installed in one
-          # command, exactly as ci.yml's python-tests job does. This gate claims to run
-          # the same checks CI runs; installing an UNPINNED tifffile/numpy/
-          # scikit-image here (as it used to) meant it resolved a different stack than
-          # both CI and the container, which is the class of bug that produced a blank
-          # thumbnail (intensity p1/p50/p99.9 = 0.0/0.0/0.0) and `RuntimeError: ORB
-          # found no features.` on unrelated tiled tests.
-          # tests/test_ci_stack_pinned.py globs EVERY workflow under .github/workflows/
-          # and guards this pin; it used to look only at ci.yml, which is how this line
-          # stayed unpinned.
-          #
-          # imagecodecs supplies the zstd/LZW codecs tifffile calls through, and belongs on
-          # THIS line rather than one of its own so the resolver never gets a window in
-          # which it can move the stack. Its absence is not an ImportError at import time --
-          # it surfaces only when something WRITES with a codec, as `ModuleNotFoundError: No
-          # module named 'compression'` raised from inside tifffile. This line used to stop
-          # at numcodecs while ci.yml's counterpart -- identical apart from this one token
-          # -- carried imagecodecs, and tests/test_ci_stack_pinned.py's presence check was
-          # a UNION across workflows, so ci.yml satisfied it on this file's behalf, in a
-          # gate ci.yml does not run. Measured cost of the omission in this
-          # gate: 13 failed / 1072 passed against ci.yml's 1115 passed. Authority:
-          # containers/tiled/requirements.txt.
-          pip install numpy==1.26.4 scipy==1.15.3 scikit-image==0.25.2 tifffile==2025.5.10 zarr==2.18.3 numcodecs==0.13.1 imagecodecs==2025.3.30
+          # tests/test_ci_stack_pinned.py asserts that no workflow names a package version
+          # anywhere -- a closed rule with no package list to keep up to date.
+          pip install -r requirements/ci.txt
           # torch + kornia power STARE's DISK+LightGlue COARSE front-end
           # (bin/utils/coarse_align.py). Without them tests/test_coarse_frontend.py's DISK
-          # case importorskips and proves nothing -- which is how an unimplemented
-          # front-end shipped once already. tests/test_disk_test_actually_runs.py asserts
-          # these two lines exist.
+          # cases importorskip and prove nothing -- which is how an unimplemented front-end
+          # shipped once already. tests/test_disk_test_actually_runs.py asserts these two
+          # lines exist in every workflow that runs the suite.
           #
-          # CPU wheel and torch-before-kornia, matching containers/tiled/Dockerfile: kornia
-          # pulls the ~2.5 GB CUDA wheel from PyPI if torch is not already satisfied.
-          pip install torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
-          pip install kornia==0.7.3
-          # matplotlib is a hard dependency of the CSE evaluation path, not a plotting
-          # nicety: the vendored CSE source runs `import matplotlib.pyplot` at the top of
-          # functions.py's foreground_separation(), which single_method_eval.py calls on
-          # the main path. Without it bin/seg_quality_eval.py exits 1 and
-          # tests/test_seg_quality_eval_cli.py fails -- which is exactly what this gate did
-          # while ci.yml, which installs it, stayed green.
-          #
-          # Pinned to segeval's version, NOT to containers/tiled's -- the tiled image
-          # neither pins nor imports matplotlib. containers/segeval/requirements.txt is the
-          # authority and explains it at length; tests/test_ci_stack_pinned.py encodes the
-          # split.
-          pip install matplotlib==3.8.4
-          # dask[array] powers bin/convert_image.py's lazy read: BioImage.dask_data is a
-          # dask array, and tests/test_convert_lazy_read.py +
-          # tests/test_convert_streaming_write.py import dask.array UNCONDITIONALLY, so
-          # this gate needs it too. Same pin as ci.yml and as containers/stardist,
-          # containers/cellsam and containers/convert: 2026.7.1. (This job is
-          # single-version Python 3.10 -- see python-version above -- so no matrix
-          # consideration applies here.)
-          pip install 'dask[array]==2026.7.1'
-          # bin/utils/qc.py imports cv2 at module scope, and this runner has no display
-          # libs, so -headless, not opencv-python (containers/regqc/requirements.txt's
-          # runtime pin). Pinned to the same 4.10.0.82 release that container installs, and
-          # to a build compatible with numpy==1.26.4 above -- opencv-python-headless>=5
-          # requires numpy>=2 and would break the pin the imaging-stack line exists to
-          # protect.
-          #
-          # Its absence here was SILENT, not loud: tests/test_merge_pyramid_streaming.py
-          # and tests/test_registration_qc_lazy_read.py call pytest.importorskip("cv2") at
-          # MODULE scope, so 24 + 5 tests were deselected from this gate without a single
-          # failure to show for it. That is why cv2's distribution is now in
-          # tests/test_ci_stack_pinned.py's IMPORTORSKIP_GUARDED set.
-          pip install opencv-python-headless==4.10.0.82
-          # anndata powers tests/test_join_flowpath.py. Capped below 0.12: anndata >= 0.12
-          # requires zarr >= 3, which breaks tifffile's aszarr store used by the tiled
-          # tests. 0.11.x works with zarr 2 and is all these tests need — they only build
-          # in-memory AnnData. A failed install now fails this release gate, same as ci.yml.
-          pip install 'anndata<0.12'
+          # TWO SEPARATE INVOCATIONS, in this order, matching containers/tiled/Dockerfile
+          # exactly. requirements/torch-cpu.txt carries `--index-url .../whl/cpu`, which
+          # applies to the WHOLE resolve if the file is pulled in by `-r` from another
+          # requirements file -- so it must stay its own step. And kornia drags the ~2.5 GB
+          # CUDA wheel from PyPI if torch is not already satisfied, so torch goes first.
+          pip install -r requirements/torch-cpu.txt
+          pip install -r requirements/kornia.txt
 
       - name: Generate test data
         run: |
@@ -397,13 +330,14 @@ jobs:
         with:
           python-version: '3.10'
           cache: 'pip'
+          cache-dependency-path: 'requirements/**'
 
       - name: Generate test data
         run: |
-          # Pinned to containers/tiled/requirements.txt (the production tiled-path
-          # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
-          # `pip install` of a guarded imaging package, in every job, to match.
-          pip install numpy==1.26.4 tifffile==2025.5.10
+          # numpy and tifffile at the harmonised versions, taken from
+          # requirements/constraints.txt -- the same file every container image reads. No
+          # version is named here; there is nothing to keep in step by hand.
+          pip install -r requirements/testdata.txt
           python tests/testdata/generate_complete_testdata.py
 
       - name: Check all profiles parse without the gitignored site config
@@ -528,13 +462,14 @@ jobs:
         with:
           python-version: '3.10'
           cache: 'pip'
+          cache-dependency-path: 'requirements/**'
 
       - name: Generate test data
         run: |
-          # Pinned to containers/tiled/requirements.txt (the production tiled-path
-          # image) — guarded by tests/test_ci_stack_pinned.py, which requires every
-          # `pip install` of a guarded imaging package, in every job, to match.
-          pip install numpy==1.26.4 tifffile==2025.5.10
+          # numpy and tifffile at the harmonised versions, taken from
+          # requirements/constraints.txt -- the same file every container image reads. No
+          # version is named here; there is nothing to keep in step by hand.
+          pip install -r requirements/testdata.txt
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
@@ -602,11 +537,14 @@ jobs:
         with:
           python-version: '3.10'
           cache: 'pip'
+          cache-dependency-path: 'requirements/**'
 
       - name: Generate test data
         run: |
-          # Same pin as every other job — guarded by tests/test_ci_stack_pinned.py.
-          pip install numpy==1.26.4 tifffile==2025.5.10
+          # numpy and tifffile at the harmonised versions, taken from
+          # requirements/constraints.txt -- the same file every container image reads. No
+          # version is named here; there is nothing to keep in step by hand.
+          pip install -r requirements/testdata.txt
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
@@ -660,12 +598,13 @@ jobs:
         with:
           python-version: '3.10'
           cache: 'pip'
+          cache-dependency-path: 'requirements/**'
 
       - name: Install ruff
         # Pinned to the version used locally (see ruff.toml) so CI and local
         # `ruff check .` agree exactly.
         run: |
-          pip install ruff==0.16.0
+          pip install -r requirements/lint.txt
 
       - name: Run ruff check
         run: |

@@ -5,6 +5,13 @@ FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
 
 RUN apt-get update && apt-get install -y git
 
+# The build context is the REPOSITORY ROOT (build-images.yml passes `context: .`), so the
+# harmonised pins come from requirements/constraints.txt -- the SAME file the workflows and
+# the other images read. The inline pins below must AGREE with it: a constraint does not
+# override a divergent direct requirement, it conflicts with it and fails the build, which
+# is exactly the behaviour wanted.
+COPY requirements/constraints.txt /tmp/requirements/constraints.txt
+
 RUN python -m pip install --upgrade pip
 
 # dask and scikit-image are named explicitly even though cellSAM's own dependency chain
@@ -12,7 +19,7 @@ RUN python -m pip install --upgrade pip
 # (`import dask.array as da`, `from skimage import segmentation`), and an install nothing
 # in this Dockerfile names is invisible to
 # tests/test_container_harmonisation.py's "installs what it imports" guard.
-RUN pip install \
+RUN pip install -c /tmp/requirements/constraints.txt \
     numpy==1.26.4 \
     pandas==2.3.3 \
     tifffile==2025.5.10 \
@@ -21,7 +28,7 @@ RUN pip install \
     dask==2026.7.1 \
     scikit-image==0.25.2
 
-RUN python -m pip install "imagecodecs==2025.3.30"
+RUN python -m pip install -c /tmp/requirements/constraints.txt "imagecodecs==2025.3.30"
 
 # Pinned: an unpinned git install makes every rebuild a different image.
-RUN pip install git+https://github.com/vanvalenlab/cellSAM.git@362a8e521bcd7313d5cb280bcd4cfc12977c1e9f
+RUN pip install -c /tmp/requirements/constraints.txt git+https://github.com/vanvalenlab/cellSAM.git@362a8e521bcd7313d5cb280bcd4cfc12977c1e9f
