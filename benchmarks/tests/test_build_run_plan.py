@@ -464,9 +464,20 @@ BASELINE_DEVIATIONS = {
         "*_cell_mask.tif, and 'segmentation' is an INTERMEDIATE kind "
         "(Layout.FINAL_KINDS), so at the shipped default those masks are never "
         "published and the cell-count metric silently returns no rows while every "
-        "run exits 0. registration_eval reads the registered slides for the same "
-        "reason. Benchmarking 'final' is worth doing one day, but it needs an "
-        "analysis that does not depend on the files it removes."),
+        "run exits 0. `registered/` is an INTERMEDIATE_KIND for the same reason, so "
+        "<patient>/registered/summary/*.csv -- which "
+        "benchmarks/analysis/lib/quality.py:142 globs to build the "
+        "registration-quality table -- is not published at 'final' either, and a "
+        "swept arm there would report an empty table while exiting 0, exactly like "
+        "cleanup_work. Benchmarking 'final' is worth doing one day, but it needs an "
+        "analysis that does not depend on the files it removes.\n"
+        "THIS ENTRY IS THE ONLY HOME FOR THAT REASON, and it was briefly not: the "
+        "benchmarking branch listed cleanup_level in NOT_SWEPT while the remediation "
+        "branch moved it here, and the merge of the two carried BOTH -- a param at "
+        "once pinned in the baseline and excused as never set. It is not an excuse; "
+        "it is a DEVIATION, because sweep.yaml really does set it. "
+        "test_not_swept_registry_has_no_stale_entries is what caught the duplicate, "
+        "and it does not run on dev -- this merge was the first moment it could."),
 }
 
 
@@ -590,22 +601,12 @@ NOT_SWEPT = {
     "prior_outdir": "add_cycle input; the sweep benchmarks standard mode only",
     "mode": "'standard' vs 'add_cycle' — a different PIPELINE, not a knob (see docs/add_cycle.md)",
     "config_profile_name": (
-        "nf-core boilerplate: a display string echoed into the run summary. It reaches no "
-        "process and has no cost curve."),
-    "config_profile_description": "nf-core boilerplate display string — see config_profile_name",
+        "nf-core provenance string: a display string echoed into the run header and the QC "
+        "report. Null by default and set by a site profile; it reaches no process and has "
+        "no cost curve."),
+    "config_profile_description": "nf-core provenance display string — see config_profile_name",
     "start": "step gate — every sweep run is a full pipeline; a partial run is not comparable",
     "stop": "step gate — see start",
-    "cleanup_level": (
-        "which publish kinds survive a run -- and the benchmark must PIN it, not sweep it. "
-        "The shipped default 'final' publishes only Layout.FINAL_KINDS (quantification/, "
-        "geojson/, pyramid/) plus the run-level qc/csv/size_logs; `registered/` is an "
-        "INTERMEDIATE_KIND, so <patient>/registered/summary/*.csv -- which "
-        "benchmarks/analysis/lib/quality.py:142 globs to build the registration-quality "
-        "table -- is not published at all. A swept arm at 'final' would report an empty "
-        "table while exiting 0, exactly like cleanup_work below. benchmark.config pins it "
-        "to 'none' for that reason; sweeping it would un-pin the thing the analysis depends "
-        "on. It is also not a cost knob worth an axis: publishing is a copy that happens "
-        "after each task's work is done."),
     "cleanup_work": (
         "post-run disk hygiene, and ACTIVELY HOSTILE to benchmarking. It sets Nextflow's "
         "`cleanup`, which deletes the work directory once a run succeeds -- and the work "
@@ -632,18 +633,6 @@ NOT_SWEPT = {
     "max_cpus": "resourceLimits clamp — a site ceiling; varying it benchmarks the machine",
     "max_memory": "resourceLimits clamp — see max_cpus",
     "max_time": "resourceLimits clamp — see max_cpus",
-    "concurrency": (
-        "cluster concurrency, not pipeline cost — the single coupled knob max_forks and "
-        "queue_size are now derived from (5 -> 5/20, the shipped ratio). Same category and "
-        "the same reasoning as those two below: varying it changes how fast the SWEEP "
-        "drains, never what a task costs, so it benchmarks the machine. Note it is derived "
-        "in the executor/process scopes rather than in the params block, because the params "
-        "block is evaluated BEFORE the CLI is applied and a derived default there would "
-        "silently ignore --concurrency."),
-    "config_profile_name": (
-        "nf-core provenance string, printed in the run header and the QC report. Null by "
-        "default and set by a site profile; it has no cost curve and reaches no task."),
-    "config_profile_description": "nf-core provenance string — see config_profile_name",
     "max_forks": (
         "cluster concurrency, not pipeline cost. It caps how many tasks of one process run "
         "at once, so varying it changes how fast the SWEEP drains, never what a task costs. "
@@ -660,7 +649,10 @@ NOT_SWEPT = {
         "derivatives are: it changes how fast the SWEEP drains, never what a task costs. "
         "benchmark.config keeps setting max_forks/queue_size directly on the CLI rather than "
         "going through this knob, because the clamps in conf/modules.config read max_forks "
-        "EAGERLY at parse time -- see max_forks."),
+        "EAGERLY at parse time -- see max_forks.\n"
+        "Note also WHERE the derivation lives: in the executor/process scopes, not in the "
+        "params block, because the params block is evaluated BEFORE the CLI is applied and a "
+        "derived default written there would silently ignore --concurrency."),
     "slurm_account": "scheduler identity",
     "slurm_partition": "scheduler identity",
     "slurm_qos": "scheduler identity",
@@ -833,17 +825,24 @@ def _schema_enum(name):
 
 
 def test_every_shipped_registration_method_is_actually_swept():
-    """`ashlar` is a schema-valid registration_method with three params and its
-    own adapter, and registration_method_grid contained only `tiled`.
+    """Every method in registration_method's enum is either the baseline or has a
+    grid block. Nothing is offered by the pipeline and left unmeasured.
 
-    The existing coverage guard passed anyway, because it counts a param as
-    covered when it merely appears in `baseline` -- so "declared and never
-    varied" was indistinguishable from "swept". Appearing in baseline is a
-    DEFAULT, not coverage: every run shares it, so nothing is being measured
-    against anything.
+    WRITTEN FOR `ashlar`, WHICH IS NO LONGER THE CASE IT CATCHES. When this was
+    added, ashlar was a schema-valid registration_method with three params and its
+    own adapter, and registration_method_grid contained only `tiled`; the coverage
+    guard passed anyway, because it counts a param as covered when it merely
+    appears in `baseline` -- so "declared and never varied" was indistinguishable
+    from "swept". Appearing in baseline is a DEFAULT, not coverage: every run
+    shares it, so nothing is being measured against anything.
 
-    The enum is read from the schema rather than restated, so a fourth backend
-    is covered the day it is added.
+    :fire: 6a54479 then removed the ashlar BACKEND from the pipeline for v1.0.0.
+    The enum is now ['valis', 'tiled'] and ashlar survives as an EXTERNAL arm
+    (benchmarks/ashlar/, arms.yaml) rather than a registration_method, so the
+    original offender is gone -- but the enum is READ FROM THE SCHEMA rather than
+    restated here, so this keeps working across that change and covers a third
+    backend the day one is added. That is the reason it is not deleted with the
+    case that motivated it.
     """
     import yaml
 

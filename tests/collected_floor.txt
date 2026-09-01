@@ -36,8 +36,27 @@
 # (test_the_workflows_ -> test_the_scanned_files_actually_install_something),
 # and 1 renamed per-JOB (test_every_pytest_workflow_ -> _job_installs_torch_and_kornia).
 #
+# RE-MEASURED 2026-09-01 ON `benchmarking`, after merging main (the CI redesign) and
+# remediation/phase-7-benchmarking: 1282 passed, 12 skipped, 0 failed = 1294.
+#
+# THE +2 IS ACCOUNTED FOR, NOT ACCEPTED. Both are parametrised cases keyed on
+# `.github/workflows/benchmarks.yml`, a workflow that exists on this branch and no
+# other:
+#   test_release_workflow_graph.py::test_no_gate_aggregator_treats_skipped_as_a_pass[benchmarks.yml]
+#   test_release_workflow_graph.py::test_every_gate_aggregator_reads_every_job_it_needs[benchmarks.yml]
+# Both guards discover workflows BY GLOB, so the extra file is the whole difference;
+# `benchmarks/tests/` (217 tests) is outside this scope entirely -- the measurement
+# command below names `tests/` and nothing else. Enumerated by running
+# `--collect-only | grep -i benchmark` against this tree rather than inferred.
+#
+# So on `benchmarking` the number is 1294 and on main it is 1292. That is not drift
+# between two copies of one file: `benchmarking` is dev plus benchmarks/, the merge
+# direction is one-way (see CLAUDE.md's "Branch model"), and this line is ratcheted
+# here so the floor stays TIGHT on this branch -- deleting benchmarks.yml would drop
+# the count back to 1292 and fail, which is exactly what a floor is for.
+#
 # The check is `>=`, so adding tests never fails it. But a floor that is allowed
 # to fall arbitrarily far behind stops being a floor, so conftest.py also fails
 # once the suite has grown FLOOR_DRIFT (50) tests past this number, with the
 # replacement value in the message. Re-ratcheting is then one line, here.
-1292
+1294
