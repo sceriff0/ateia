@@ -1,0 +1,337 @@
+<title>Mirage Remediation Handoff</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  --ground:#f4f6f8; --surface:#ffffff; --surface-2:#eef2f5;
+  --ink:#10151b; --body:#2b343d; --muted:#5a6672;
+  --rule:#dde3e9; --rule-strong:#c3ced8;
+  --accent:#1f5f8b; --accent-soft:#e8f0f6;
+  --done:#2f7a52; --open:#9a6a12; --stop:#a33a2e;
+  --done-bg:#e7f2ec; --open-bg:#f8f0dc; --stop-bg:#f8e8e5;
+  --shadow:0 1px 2px rgba(16,21,27,.05),0 8px 24px -16px rgba(16,21,27,.22);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0e1317; --surface:#161c22; --surface-2:#1c242b;
+    --ink:#eef3f7; --body:#c6d0d9; --muted:#8b98a4;
+    --rule:#27313a; --rule-strong:#3a4752;
+    --accent:#6fb2dd; --accent-soft:#152530;
+    --done:#7cc79c; --open:#dcb45f; --stop:#e08a7c;
+    --done-bg:#14251c; --open-bg:#282013; --stop-bg:#2a1a17;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -16px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0e1317; --surface:#161c22; --surface-2:#1c242b;
+  --ink:#eef3f7; --body:#c6d0d9; --muted:#8b98a4;
+  --rule:#27313a; --rule-strong:#3a4752;
+  --accent:#6fb2dd; --accent-soft:#152530;
+  --done:#7cc79c; --open:#dcb45f; --stop:#e08a7c;
+  --done-bg:#14251c; --open-bg:#282013; --stop-bg:#2a1a17;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -16px rgba(0,0,0,.8);
+}
+*{box-sizing:border-box}
+body{
+  background:var(--ground); color:var(--body);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  font-size:16px; line-height:1.62; margin:0;
+  padding:clamp(1.6rem,4vw,4rem) clamp(1rem,5vw,2rem) 6rem;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:60rem;margin:0 auto;display:flex;flex-direction:column;gap:3.25rem}
+.prose{max-width:41rem}
+h1,h2,h3{color:var(--ink);text-wrap:balance;margin:0;font-family:"Newsreader",Georgia,serif;font-weight:500}
+h1{font-size:clamp(2.1rem,5vw,3rem);line-height:1.1;letter-spacing:-.015em}
+h2{font-size:clamp(1.45rem,3vw,1.9rem);line-height:1.2}
+h3{font-size:1.1rem;font-family:"IBM Plex Sans",sans-serif;font-weight:600;letter-spacing:-.005em}
+p{margin:0}
+.eyebrow{
+  font-family:"IBM Plex Mono",monospace;font-size:.7rem;font-weight:500;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0;
+}
+code,.mono{font-family:"IBM Plex Mono",monospace;font-size:.86em}
+code{background:var(--surface-2);padding:.1em .36em;border-radius:3px;color:var(--ink)}
+a{color:var(--accent)}
+hr{border:0;border-top:1px solid var(--rule);margin:0}
+
+header{display:flex;flex-direction:column;gap:1rem;padding-bottom:2rem;border-bottom:2px solid var(--rule-strong)}
+.lede{font-size:1.1rem;color:var(--muted);max-width:44rem}
+
+section{display:flex;flex-direction:column;gap:1.25rem}
+.section-head{display:flex;flex-direction:column;gap:.4rem}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:6px;overflow:hidden}
+.stat{background:var(--surface);padding:1rem 1.1rem;display:flex;flex-direction:column;gap:.3rem}
+.stat dt{font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.stat dd{margin:0;font-size:1.28rem;color:var(--ink);font-variant-numeric:tabular-nums;font-weight:500}
+.stat .sub{font-size:.78rem;color:var(--muted);font-weight:400}
+
+.phase{background:var(--surface);border:1px solid var(--rule);border-radius:8px;box-shadow:var(--shadow);overflow:hidden}
+.phase-head{display:flex;gap:1rem;align-items:baseline;padding:1.15rem 1.4rem;border-bottom:1px solid var(--rule);background:var(--surface-2)}
+.phase-num{font-family:"IBM Plex Mono",monospace;font-size:1.5rem;font-weight:500;color:var(--accent);line-height:1;font-variant-numeric:tabular-nums}
+.phase-title{display:flex;flex-direction:column;gap:.15rem;flex:1}
+.phase-title strong{color:var(--ink);font-size:1.05rem;font-weight:600}
+.phase-title span{font-size:.83rem;color:var(--muted)}
+.phase-body{padding:1.25rem 1.4rem;display:flex;flex-direction:column;gap:1rem}
+.phase-body > p{max-width:44rem}
+
+.tasks{display:flex;flex-wrap:wrap;gap:.4rem}
+.task{font-family:"IBM Plex Mono",monospace;font-size:.74rem;padding:.22rem .5rem;border:1px solid var(--rule-strong);border-radius:3px;color:var(--muted);background:var(--ground)}
+
+.warn{border-left:3px solid var(--open);background:var(--open-bg);padding:.85rem 1rem;border-radius:0 4px 4px 0;display:flex;flex-direction:column;gap:.45rem}
+.warn .eyebrow{color:var(--open)}
+.danger{border-left-color:var(--stop);background:var(--stop-bg)}
+.danger .eyebrow{color:var(--stop)}
+
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+.scroll{overflow-x:auto;border:1px solid var(--rule);border-radius:6px;background:var(--surface)}
+th{text-align:left;font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:500;padding:.7rem .9rem;border-bottom:1px solid var(--rule-strong);white-space:nowrap}
+td{padding:.7rem .9rem;border-bottom:1px solid var(--rule);vertical-align:top;color:var(--body)}
+tr:last-child td{border-bottom:0}
+td.id{font-family:"IBM Plex Mono",monospace;color:var(--accent);white-space:nowrap;font-weight:500}
+
+.pill{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;padding:.16rem .45rem;border-radius:3px;white-space:nowrap;font-weight:500}
+.p-done{background:var(--done-bg);color:var(--done)}
+.p-open{background:var(--open-bg);color:var(--open)}
+.p-stop{background:var(--stop-bg);color:var(--stop)}
+
+ul{margin:0;padding-left:1.15rem;display:flex;flex-direction:column;gap:.5rem}
+li{padding-left:.2rem}
+li::marker{color:var(--rule-strong)}
+
+footer{border-top:1px solid var(--rule);padding-top:1.5rem;color:var(--muted);font-size:.85rem;display:flex;flex-direction:column;gap:.4rem}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+
+<header>
+  <p class="eyebrow">Handoff · 2026-08-25</p>
+  <h1>Mirage Remediation Handoff</h1>
+  <p class="lede">Phases 0–4 of the architecture-review remediation are complete, reviewed, and pushed. This is what remains, what was learned, and what will bite the next person.</p>
+</header>
+
+<section>
+  <div class="section-head">
+    <p class="eyebrow">Where things stand</p>
+    <h2>Current state</h2>
+  </div>
+  <dl class="stats">
+    <div class="stat"><dt>main = dev</dt><dd class="mono">bb7d711</dd><span class="sub">identical, <code>0 0</code></span></div>
+    <div class="stat"><dt>benchmarking</dt><dd class="mono">f365562</dd><span class="sub">dev + harness, <code>0 4</code></span></div>
+    <div class="stat"><dt>Python suite</dt><dd>974 <span class="sub">/ 9 skipped</span></dd><span class="sub">was 939 at baseline</span></div>
+    <div class="stat"><dt>nf-test</dt><dd>216 <span class="sub">/ 3 failed</span></dd><span class="sub">all 3 pre-existing</span></div>
+    <div class="stat"><dt>Nextflow 26</dt><dd>verified</dd><span class="sub">34 processes, 0 failed</span></div>
+    <div class="stat"><dt>Stub manifest</dt><dd>62 files</dd><span class="sub">byte-identical to baseline</span></div>
+  </dl>
+  <p class="prose">The plan lives at <code>docs/superpowers/plans/2026-08-24-architecture-review-remediation.md</code> (gitignored — copies in the main worktree and in <code>.worktrees/remediation</code>). Work branch <code class="mono">remediation/arch-review-2026-08-24</code> is pushed to origin.</p>
+</section>
+
+<section>
+  <div class="section-head">
+    <p class="eyebrow">Read this first</p>
+    <h2>Four things that will bite you</h2>
+  </div>
+
+  <div class="warn danger">
+    <p class="eyebrow">Shipped breaking change</p>
+    <p>Checkpoint CSVs now carry an <code>id</code> column (Ruling R17). An existing <code>--prior_outdir</code> for <code>add_cycle</code>, or <code>--start X</code> against a pre-change outdir, <strong>fails loudly</strong> with an actionable message instead of silently misreading. This is intended, but it is user-visible and <strong>must</strong> appear in the Phase 9 migration note alongside the darkfield and NaN-measurement changes.</p>
+  </div>
+
+  <div class="warn">
+    <p class="eyebrow">The plan is not a spec</p>
+    <p>Every task in Phases 0–4 found at least one brief premise that <code>dev</code>'s history had already overtaken — including a <code>nextflow.config</code> property that does not exist on the pinned plugin and would have aborted every launch, a query function that could never have matched anything, and two controller rulings that were simply wrong. <strong>Tell every implementer the brief may be stale, and that reporting a stale premise counts as success.</strong> That single instruction produced most of the findings below.</p>
+  </div>
+
+  <div class="warn">
+    <p class="eyebrow">Before touching config</p>
+    <p>Grep <code>tests/</code> for an existing guard on the surface you are about to change. <code>dev</code> added ~40 test files encoding rules invisible from the code they protect. Two of them constrained the <code>--concurrency</code> design after the fact (R9, R10) — one forbidding an elvis form that had been written in seven places.</p>
+  </div>
+
+  <div class="warn">
+    <p class="eyebrow">Verify the mechanism, not the outcome</p>
+    <p>Four assertions in this repo were found whose stated subject and real subject diverged, all passing. The only reliable detector is to <strong>plant the violation the guard claims to catch and watch it fail.</strong> Where a fix makes two things agree, the test must exercise <em>both</em> derivations end to end — a test that supplies either side tests the assumption, not the code.</p>
+  </div>
+</section>
+
+<section>
+  <div class="section-head">
+    <p class="eyebrow">Remaining work</p>
+    <h2>Phases 5 through 9</h2>
+  </div>
+
+  <div class="phase">
+    <div class="phase-head">
+      <span class="phase-num">5</span>
+      <span class="phase-title"><strong>Named failure policies</strong><span>3 tasks · closes 2 HIGH · strictly ordered before Phase 6</span></span>
+      <span class="pill p-open">next</span>
+    </div>
+    <div class="phase-body">
+      <p>Two <code>errorStrategy</code> closures call <code>log.warn</code>. <code>log</code> is <em>not bound</em> in <code>conf/*.config</code> — it resolves against <code>ConfigObject</code>, throws past the retry budget, and aborts the run. The <code>'ignore'</code> branch they return is unreachable: the block does the opposite of its own comment. Separately, the default-on QC selector drops an ordinary exit 1 on attempt 1, so a broken <code>warp_seg_qc.py</code> yields a green run with no <code>*_seg_qc.json</code> and a SpatialData <code>.zarr</code> missing its <code>obsm</code> blocks.</p>
+      <div class="tasks"><span class="task">5.1 reproduce the abort</span><span class="task">5.2 remove log.warn</span><span class="task">5.3 narrow the QC selector</span></div>
+      <div class="warn">
+        <p class="eyebrow">Ruling R3 — ordering</p>
+        <p>Run <strong>Task 6.4 immediately after 5.3</strong>, before the rest of Phase 6. 5.3 makes a failed QC task fatal; 6.4 fixes the silently-ignored <code>optional: true</code> that 5.3 unmasks. Any gap between them leaves the default path failing.</p>
+      </div>
+      <p>The seam is constrained: <code>conf/*.config</code> cannot see <code>lib/</code>, and NF26 forbids sharing a helper between <code>withName:</code> blocks. So the fix is <em>reduce to three named policies, inline each verbatim, and assert on the config text</em> through <code>tests/nfmodel</code>.</p>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-head">
+      <span class="phase-num">6</span>
+      <span class="phase-title"><strong>Defect sweep</strong><span>7 tasks · mutually independent · parallelisable</span></span>
+      <span class="pill p-open">queued</span>
+    </div>
+    <div class="phase-body">
+      <p>Seven unrelated defects, each with its own test surface. A reviewer could reject any one while approving its neighbours, so keep them as separate dispatches rather than batching.</p>
+      <div class="tasks"><span class="task">6.1 MERGE_AND_PYRAMID one-file group</span><span class="task">6.2 InstanSeg nuclei == cells</span><span class="task">6.3 PhysicalSizeXUnit</span><span class="task">6.4 optional: inside path()</span><span class="task">6.5 chained add_cycle</span><span class="task">6.6 SEGMENT clusterOptions</span><span class="task">6.7 DEEPCELL token test in CI</span></div>
+      <p>6.2 is the one with a silent wrong answer in production: <code>--target nuclei</code> and <code>--target cells</code> return the <em>same</em> mask, so <code>Cytoplasm = Cell − Nucleus</code> is empty for every cell and every cytoplasmic measurement is zero. Fixing it turns a silent wrong answer into a hard failure on the default path, so the <code>ext.args</code> change must land in the same commit.</p>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-head">
+      <span class="phase-num">6B</span>
+      <span class="phase-title"><strong>Final-outputs-only publishing</strong><span>5 tasks · user-requested · depends on Phase 5</span></span>
+      <span class="pill p-open">queued</span>
+    </div>
+    <div class="phase-body">
+      <p>Successful runs delete <code>work/</code>, and only <code>pyramid/</code>, <code>geojson/</code>, <code>quantification/</code>, the SpatialData <code>.zarr</code>, plus run-level <code>qc/</code>, <code>csv/</code> and <code>size_logs/</code> are published. Intermediates are <strong>never published</strong> rather than published-then-deleted — <code>publishDir</code> is <code>mode: 'copy'</code>, so delete-after-publish pays a full copy for a file nobody reads.</p>
+      <div class="tasks"><span class="task">6B.1 Layout vocabulary</span><span class="task">6B.2 gate publishDir</span><span class="task">6B.3 honest manifests</span><span class="task">6B.4 launch-time refusals</span><span class="task">6B.5 verify cleanup</span></div>
+      <div class="warn">
+        <p class="eyebrow">Why this sits after Phase 5</p>
+        <p><code>nextflow.config</code>'s own comment gives two reasons <code>cleanup_work</code> shipped <code>false</code>. One — that it destroys evidence for tasks dropped by the <code>errorStrategy 'ignore'</code> branch — is <strong>eliminated by Task 5.3</strong>. Doing 6B first would delete the evidence for silently-dropped tasks.</p>
+      </div>
+      <p><code>--cleanup_level=none</code> must survive as the level you pass when output will be re-entered: <code>add_cycle</code> reads the prior run's <code>registered/</code> and <code>segmentation/</code>. Without it, cyclic-IF becomes structurally impossible. <code>ParamUtils.validateCleanup</code> refuses the combination at launch.</p>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-head">
+      <span class="phase-num">7</span>
+      <span class="phase-title"><strong>Benchmark analysis contract</strong><span>6 tasks · <code>benchmarking</code> branch only</span></span>
+      <span class="pill p-open">queued</span>
+    </div>
+    <div class="phase-body">
+      <p>Three severe completeness gaps. <strong>Task 7.2 is the gate on Phase 8</strong> — both submit scripts still print <code>--outdir benchmarks/paper_data</code>, so the two experiments overwrite each other's tables on the cluster path. Fix it before any run.</p>
+      <div class="tasks"><span class="task">7.1 ruff over benchmarks/</span><span class="task">7.2 split the hand-offs</span><span class="task">7.3 contract.py</span><span class="task">7.4 reg_eval reaches a table</span><span class="task">7.5 sweep ashlar</span><span class="task">7.6 delete synthetic runs</span></div>
+      <p>7.3 replaces a 33-entry <code>CONFIG_COLS</code> that <em>nothing imports</em> and a 14-entry hardcoded carry in <code>quality.py</code> — two axes collapse to indistinguishable labels, including <code>reg_max_image_dim</code>, which <code>sweep.yaml</code> itself calls the dominant runtime-and-accuracy axis of VALIS. 7.4 fixes <code>reg_eval_csv</code> sitting unread in <code>make_figures.run()</code>'s signature: the benchmark's only ground-truth accuracy number reaches no table and no figure.</p>
+      <div class="warn">
+        <p class="eyebrow">Ruling R4 — added step</p>
+        <p>Task 7.5 gains a step pinning <code>cleanup_level: none</code> in <code>sweep.yaml</code>'s <code>baseline</code>. Phase 6B's default skips most publish I/O; benchmarking it would produce a cost model describing a pipeline nobody ran. Pin it in <code>baseline</code>, not as an axis, so <code>contract.axes()</code> correctly excludes it.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-head">
+      <span class="phase-num">8</span>
+      <span class="phase-title"><strong>Run the benchmark</strong><span>3 tasks · cluster time, not code</span></span>
+      <span class="pill p-open">blocked on 7.2</span>
+    </div>
+    <div class="phase-body">
+      <p>Nothing has ever been run. <code>benchmarks/paper_data/</code> does not exist; <code>analysis/figures/</code> holds only its own <code>.gitignore</code>. Take the run count from <code>generate_matrix.py --dry-run</code> after 7.5 adds the ashlar arm — roughly 135 configs × 3 repeats, plus the new arm, plus the real cohort at real-WSI cost.</p>
+      <div class="tasks"><span class="task">8.1 generate the matrix</span><span class="task">8.2 run the sweep</span><span class="task">8.3 run the arms</span></div>
+      <p>Watch two known cliffs: <code>MERGE_AND_PYRAMID</code> is an absolute node-memory cliff around 450 GB, and <code>REG_WARP_REF</code> OOMs on merged high-LZW multi-channel references. Historically ~19.6% of reserved GB·h has been lost to OOM-retry behind green builds.</p>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-head">
+      <span class="phase-num">9</span>
+      <span class="phase-title"><strong>Downstream comms &amp; repo memory</strong><span>2 tasks · do not skip</span></span>
+      <span class="pill p-open">queued</span>
+    </div>
+    <div class="phase-body">
+      <p>Three output-semantics changes are already live on <code>main</code> and undocumented:</p>
+      <ul>
+        <li><strong>Darkfield correction is gone.</strong> nf-core <code>BASICPY</code> runs at <code>get_darkfield=False</code>; the deleted in-house path used <code>True</code>. Corrected pixel values are <em>not comparable</em> across the merge.</li>
+        <li><strong>NaN measurements are omitted, not written as <code>0.0</code>.</strong> A cell with no nuclear overlap carries 7 of 9 measurement keys. FlowPath code using <code>measurements[...]</code> rather than <code>.get()</code> breaks.</li>
+        <li><strong>STARE meshes differ from main's, by design</strong> — the two gates reject control points main accepted.</li>
+      </ul>
+      <p>Add the checkpoint <code>id</code> column to that list. <code>CLAUDE.md</code> is gitignored and lives only in the local top-level checkout — fix that copy, leave it untracked.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="section-head">
+    <p class="eyebrow">Found during execution</p>
+    <h2>Queued pre-existing items</h2>
+  </div>
+  <p class="prose">None of these are in the plan. All were found while executing it, and all are small.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Item</th><th>Detail</th><th>Why it matters</th></tr></thead>
+      <tbody>
+        <tr><td class="id">nf-test split</td><td><code>tests/subworkflows/local/segmentation.nf.test</code> is the only multi-block file. nf-test 0.9.5 executes <strong>only the last block</strong> — proven with a scratch file whose first block asserted <code>1 == 2</code> and reported <code>SUCCESS, exit 0</code>.</td><td>Hides a real "no reference" failure. Split it, fix what unhides, and guard against multi-block files returning.</td></tr>
+        <tr><td class="id">seg_eval fixture</td><td><code>tests/testdata/seg_eval_P001.json</code> is referenced by two CI-collected tests but produced by nothing. Stranded by the CSE removal in <code>cea0b47</code>.</td><td>2 of the 3 current nf-test failures. Ruling R7 inverted: a fixture the generator never writes.</td></tr>
+        <tr><td class="id">generator drift</td><td><code>generate_complete_testdata.py</code> hardcodes checkpoint column lists rather than reading <code>lib/Checkpoint.groovy</code>. Correct today; nothing asserts it stays so.</td><td>Same drift class as every vacuous guard found. Fold into the fixture task.</td></tr>
+        <tr><td class="id">24 private parsers</td><td>32 test files read <code>.nf</code>/<code>.groovy</code>/<code>modules.config</code>; 8 are clean, <strong>24 carry private regex parses</strong> — including the security-relevant <code>test_no_secret_interpolation.py</code>.</td><td>Now enumerated, dated, and enforced against growth by a discovery-based meta-test. Not reduced. Largest known remaining work.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="section-head">
+    <p class="eyebrow">Decisions taken on your behalf</p>
+    <h2>Rulings</h2>
+  </div>
+  <p class="prose">Nineteen decisions made without asking, each with what it costs if wrong. R2 was later <strong>overturned by evidence</strong> — it is kept here because a reversed ruling is more instructive than a silent correction.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Decision</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td class="id">R1</td><td>Twin-rule test moved out of <code>check_param_consistency.py</code> — that filename is not pytest-collected, so the plan specified a test that could never run.</td><td><span class="pill p-done">held</span></td></tr>
+        <tr><td class="id">R2</td><td>Told <code>identityFor</code> to strip one extension "matching <code>simpleName</code>". <strong>Backwards</strong> — <code>simpleName</code> strips every extension, <code>baseName</code> strips one. The original plan text was right.</td><td><span class="pill p-stop">reversed</span></td></tr>
+        <tr><td class="id">R3</td><td>Task 6.4 runs immediately after 5.3, not later in Phase 6.</td><td><span class="pill p-open">pending</span></td></tr>
+        <tr><td class="id">R4</td><td>Task 7.5 gains a step pinning <code>cleanup_level: none</code> in <code>sweep.yaml</code>'s baseline.</td><td><span class="pill p-open">pending</span></td></tr>
+        <tr><td class="id">R5</td><td>Task 6B.4 must re-read <code>validateAddCycle</code>'s current text; the plan quotes a version 6.5 supersedes.</td><td><span class="pill p-open">pending</span></td></tr>
+        <tr><td class="id">R6</td><td>Any new param goes into <code>nextflow_schema.json</code> in the same commit — unrecognised params are now a hard launch failure.</td><td><span class="pill p-done">held</span></td></tr>
+        <tr><td class="id">R7</td><td>Fixtures go in <code>generate_complete_testdata.py</code>, never committed. <code>tests/testdata/</code> is gitignored, so a hand-written fixture is absent in CI.</td><td><span class="pill p-done">held</span></td></tr>
+        <tr><td class="id">R8</td><td>Plan and review HTML stay uncommitted — <code>docs/superpowers/</code> is gitignored by deliberate repo choice.</td><td><span class="pill p-done">held</span></td></tr>
+        <tr><td class="id">R9</td><td>Extend <code>dev</code>'s existing <code>test_concurrency_params.py</code> rather than weakening it; its <code>conf/base.config</code> negative assertion stays byte-for-byte.</td><td><span class="pill p-done">held</span></td></tr>
+        <tr><td class="id">R10</td><td>Never elvis on a numeric param — Groovy treats <code>0</code> as falsy. <code>dev</code> already forbids it, citing a live bug where <code>--reg_tiled_max_disp 0</code> became <code>256</code>.</td><td><span class="pill p-done">held</span></td></tr>
+        <tr><td class="id">R11</td><td>The baseline file's force-add into gitignored <code>.planning/</code> stands for the engagement. <strong>Pre-merge: <code>git rm --cached</code> it.</strong></td><td><span class="pill p-open">pending</span></td></tr>
+        <tr><td class="id">R12</td><td>Upheld a reviewer finding <em>against my own plan text</em>: a triple-quote meta-test that could not fail.</td><td><span class="pill p-done">held</span></td></tr>
+        <tr><td class="id">R13</td><td>Promote a second source view (comments blanked, strings preserved) into <code>nfmodel</code> before Task 1.6, not "if a third guard needs it".</td><td><span class="pill p-done">held</span></td></tr>
+        <tr><td class="id">R14</td><td>Invert the capstone meta-test to <em>discovery</em> plus a shrink-only debt allowlist, rather than repointing 24 files. New guards are covered automatically.</td><td><span class="pill p-done">held</span></td></tr>
+        <tr><td class="id">R15</td><td>Upheld against plan text again: a guard asserting substring presence rather than the null-test <em>form</em>, proven by reverting a site and watching it pass.</td><td><span class="pill p-done">held</span></td></tr>
+        <tr><td class="id">R16</td><td>Task 4.1 ships its cross-file guard as <code>xfail(strict=True)</code> rather than leaving the suite red across three tasks.</td><td><span class="pill p-done">held</span></td></tr>
+        <tr><td class="id">R17</td><td>Checkpoint schemas gain an <code>id</code> column. Identity is carried, never re-derived — a checkpoint names a <em>derived</em> artifact whose basename cannot reproduce the assigned id.</td><td><span class="pill p-done">held</span></td></tr>
+        <tr><td class="id">R18</td><td><code>images_count</code> enters Task 4.1's loop, not 4.2 — the defect is in <code>Meta.groovy</code>, and the first real caller would otherwise inherit it.</td><td><span class="pill p-done">held</span></td></tr>
+        <tr><td class="id">R19</td><td>Task 4.3's missing regression test is Important, not deferrable. A verification performed once by hand and written into a report is not a guard.</td><td><span class="pill p-done">held</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="section-head">
+    <p class="eyebrow">Honesty about coverage</p>
+    <h2>Environment limits and what is unverified</h2>
+  </div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Constraint</th><th>Consequence</th></tr></thead>
+      <tbody>
+        <tr><td><code>nf-test tests/subworkflows/local/input_check.nf.test</code> hangs</td><td>Stalled one reviewer for 10 minutes. Task 4.4's corrected cases rest on a reading-based trace plus a <code>lib_probe</code> proxy, not direct execution.</td></tr>
+        <tr><td>No Docker daemon</td><td><code>tests/main.nf.test</code>'s two keep-set tests were never re-run end to end. Confident but unverified by a green run.</td></tr>
+        <tr><td>Full <code>--tag stub</code> sweep ≈ 18 min</td><td>Run once per phase at most. Use <code>--dryRun</code> to confirm collection; it answers in seconds.</td></tr>
+        <tr><td>Real nf-test on arm64</td><td>Does not run reliably; <code>-profile test,docker</code> hangs pulling images. The containerless stub is the fast loop.</td></tr>
+        <tr><td>Stub determinism</td><td>Baseline measured <strong>62/62/62</strong>, not the review's <code>60/61/60</code>. Do not quote the historical counts as current evidence — reproduce the drop deliberately instead.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <p><strong>Ledger:</strong> <code>.superpowers/sdd/2026-08-24-architecture-review-remediation/progress.md</code> — gitignored, dies with the worktree. Everything durable from it is on this page.</p>
+  <p>Phases 0–4: 12 tasks, 8 fix rounds, every task independently reviewed. Suite 939 → 974. No production behaviour changed beyond the defects fixed and one dead param removed.</p>
+</footer>
+
+</div>

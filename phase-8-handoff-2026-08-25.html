@@ -1,0 +1,614 @@
+<title>The Unrun Benchmark</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+/* ------------------------------------------------------------------ tokens */
+/* Light is the base. Every colour is defined HERE; the two dark blocks below
+   redefine the same names and nothing else, so the un-stamped "system" state
+   resolves as a complete set. */
+:root{
+  --ground:#f4f5f7;
+  --surface:#ffffff;
+  --surface-2:#eceef2;
+  --ink:#12151a;
+  --body:#333a45;
+  --muted:#5f6a79;
+  --rule:#dde1e8;
+  --rule-strong:#c2c9d4;
+
+  --accent:#6b4fa8;          /* this chapter's colour */
+  --accent-soft:#efeaf8;
+
+  --done:#2f7a52;            /* the status vocabulary is shared with the */
+  --open:#9a6a12;            /* 2026-08-25 handoff on purpose: same series, */
+  --stop:#a33a2e;            /* same reader, same three meanings. */
+  --done-bg:#e6f1ea;
+  --open-bg:#f7efdb;
+  --stop-bg:#f8e7e4;
+
+  --shadow:0 1px 2px rgba(18,21,26,.05), 0 10px 28px -20px rgba(18,21,26,.35);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0f1216;
+    --surface:#171b21;
+    --surface-2:#1e232b;
+    --ink:#eef1f5;
+    --body:#c3cbd6;
+    --muted:#8894a3;
+    --rule:#262c35;
+    --rule-strong:#39424f;
+    --accent:#a894dc;
+    --accent-soft:#1d1a2a;
+    --done:#79c79c;
+    --open:#dcb45f;
+    --stop:#e08a7c;
+    --done-bg:#132419;
+    --open-bg:#271f12;
+    --stop-bg:#2a1917;
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 28px -20px rgba(0,0,0,.9);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0f1216;
+  --surface:#171b21;
+  --surface-2:#1e232b;
+  --ink:#eef1f5;
+  --body:#c3cbd6;
+  --muted:#8894a3;
+  --rule:#262c35;
+  --rule-strong:#39424f;
+  --accent:#a894dc;
+  --accent-soft:#1d1a2a;
+  --done:#79c79c;
+  --open:#dcb45f;
+  --stop:#e08a7c;
+  --done-bg:#132419;
+  --open-bg:#271f12;
+  --stop-bg:#2a1917;
+  --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 28px -20px rgba(0,0,0,.9);
+}
+
+/* ------------------------------------------------------------------- base */
+*{box-sizing:border-box}
+body{
+  background:var(--ground);
+  color:var(--body);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  font-size:16px;
+  line-height:1.62;
+  margin:0;
+  padding:clamp(1.5rem,4vw,3.5rem) clamp(1rem,5vw,2rem) 6rem;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:62rem;margin:0 auto;display:flex;flex-direction:column;gap:3.5rem}
+.prose{max-width:40rem}
+p{margin:0}
+a{color:var(--accent)}
+
+h1,h2,h3{
+  color:var(--ink);
+  margin:0;
+  font-family:"Source Serif 4",Georgia,serif;
+  font-weight:600;
+  text-wrap:balance;
+}
+h1{font-size:clamp(2.2rem,5.5vw,3.4rem);line-height:1.05;letter-spacing:-.02em;font-weight:400}
+h2{font-size:clamp(1.4rem,3vw,1.85rem);line-height:1.2}
+h3{font-size:1.05rem;font-family:"IBM Plex Sans",sans-serif;font-weight:600;letter-spacing:-.004em}
+
+.eyebrow{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;
+  font-size:.7rem;font-weight:500;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--muted);margin:0;
+}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.85em}
+code{background:var(--surface-2);padding:.1em .36em;border-radius:3px;color:var(--ink)}
+
+header{display:flex;flex-direction:column;gap:1.1rem;padding-bottom:2.25rem;border-bottom:2px solid var(--rule-strong)}
+.lede{font-size:1.12rem;color:var(--muted);max-width:43rem}
+
+section{display:flex;flex-direction:column;gap:1.4rem}
+.section-head{display:flex;flex-direction:column;gap:.35rem}
+
+/* ------------------------------------------------------------- counts strip */
+.counts{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(10.5rem,1fr));
+  gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:7px;overflow:hidden;
+}
+.count{background:var(--surface);padding:1rem 1.15rem;display:flex;flex-direction:column;gap:.25rem}
+.count dt{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.66rem;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--muted);
+}
+.count dd{margin:0;font-size:1.3rem;color:var(--ink);font-variant-numeric:tabular-nums;font-weight:500}
+.count .sub{font-size:.78rem;color:var(--muted);font-weight:400;line-height:1.4}
+.count .delta{color:var(--done)}
+
+/* --------------------------------------------------------------- verdict */
+.verdict{
+  background:var(--surface);border:1px solid var(--rule);border-left:4px solid var(--accent);
+  border-radius:0 7px 7px 0;padding:1.15rem 1.35rem;box-shadow:var(--shadow);
+  display:flex;flex-direction:column;gap:.5rem;
+}
+.verdict strong{color:var(--ink)}
+
+/* ---------------------------------------------------------------- tables */
+.scroll{overflow-x:auto;border:1px solid var(--rule);border-radius:7px;background:var(--surface)}
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+th{
+  text-align:left;font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.66rem;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--muted);font-weight:500;
+  padding:.75rem .9rem;border-bottom:1px solid var(--rule-strong);white-space:nowrap;
+  background:var(--surface-2);
+}
+td{padding:.75rem .9rem;border-bottom:1px solid var(--rule);vertical-align:top;color:var(--body)}
+tr:last-child td{border-bottom:0}
+td.num{font-family:"IBM Plex Mono",ui-monospace,monospace;color:var(--accent);font-weight:500;
+       font-variant-numeric:tabular-nums;white-space:nowrap}
+td.what{color:var(--ink);font-weight:500;min-width:11rem}
+
+.pill{
+  display:inline-block;font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.66rem;
+  letter-spacing:.07em;text-transform:uppercase;padding:.18rem .45rem;border-radius:3px;
+  white-space:nowrap;font-weight:500;
+}
+.p-done{background:var(--done-bg);color:var(--done)}
+.p-open{background:var(--open-bg);color:var(--open)}
+.p-stop{background:var(--stop-bg);color:var(--stop)}
+
+/* ----------------------------------------------------------------- traps */
+.traps{display:grid;grid-template-columns:repeat(auto-fit,minmax(19rem,1fr));gap:1.1rem}
+.trap{
+  background:var(--surface);border:1px solid var(--rule);border-radius:7px;
+  padding:1.15rem 1.25rem;display:flex;flex-direction:column;gap:.6rem;box-shadow:var(--shadow);
+}
+.trap h3{margin:0}
+.trap p{font-size:.92rem}
+.measure{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.76rem;line-height:1.7;
+  background:var(--surface-2);border-radius:5px;padding:.6rem .75rem;color:var(--ink);
+  overflow-x:auto;white-space:pre;
+}
+
+/* ------------------------------------------------------------------ notes */
+.note{
+  border-left:3px solid var(--open);background:var(--open-bg);
+  padding:.9rem 1.05rem;border-radius:0 5px 5px 0;display:flex;flex-direction:column;gap:.45rem;
+}
+.note.stop{border-left-color:var(--stop);background:var(--stop-bg)}
+.note .eyebrow{color:var(--open)}
+.note.stop .eyebrow{color:var(--stop)}
+.note p{font-size:.92rem}
+
+ul{margin:0;padding-left:1.15rem;display:flex;flex-direction:column;gap:.55rem}
+li{padding-left:.2rem}
+li::marker{color:var(--rule-strong)}
+
+.cmd{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.8rem;line-height:1.75;
+  background:var(--surface);border:1px solid var(--rule);border-radius:7px;
+  padding:1rem 1.15rem;overflow-x:auto;white-space:pre;color:var(--ink);
+}
+
+footer{border-top:1px solid var(--rule);padding-top:1.5rem;color:var(--muted);
+       font-size:.85rem;display:flex;flex-direction:column;gap:.45rem}
+
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">Handoff · 2026-08-25 · supersedes the Phases 5–9 handoff</p>
+    <h1>The Unrun Benchmark</h1>
+    <p class="lede">
+      Every phase of the architecture-review remediation is finished except the one that
+      cannot be finished at a keyboard. The code is done, both suites are green for the
+      first time, and nothing is pushed. What is left is 414 cluster runs and a decision
+      about who pays for them.
+    </p>
+  </header>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">Where things stand</p>
+      <h2>Two branches, both green, neither pushed</h2>
+    </div>
+
+    <dl class="counts">
+      <div class="count">
+        <dt>Python suite</dt>
+        <dd>1039 <span class="sub delta">+65</span></dd>
+        <p class="sub">9 skipped, 0 failed. Was 974.</p>
+      </div>
+      <div class="count">
+        <dt>nf-test <span class="mono">--tag stub</span></dt>
+        <dd>221 / 221</dd>
+        <p class="sub">Was 216 with 3 failing. First fully green run.</p>
+      </div>
+      <div class="count">
+        <dt>benchmarks/tests</dt>
+        <dd>237 <span class="sub delta">+40</span></dd>
+        <p class="sub">Was 197, and unlinted.</p>
+      </div>
+      <div class="count">
+        <dt>Commits</dt>
+        <dd>14 <span class="sub">+ 6</span></dd>
+        <p class="sub">Pipeline branch, then benchmarking.</p>
+      </div>
+      <div class="count">
+        <dt>Sweep size</dt>
+        <dd>138 <span class="sub">configs</span></dd>
+        <p class="sub">414 runs at repeats=3. Was 129.</p>
+      </div>
+      <div class="count">
+        <dt>Runs executed</dt>
+        <dd>0</dd>
+        <p class="sub">Unchanged. This is Phase 8.</p>
+      </div>
+    </dl>
+
+    <div class="verdict">
+      <p class="eyebrow">The branches</p>
+      <p>
+        <strong><code>remediation/arch-review-2026-08-24</code></strong> — the pipeline.
+        Started at <code>origin/dev</code>'s head and is 14 commits ahead of it, so
+        <code>dev</code> fast-forwards onto it exactly. Phases 5, 6, 6B and 9.
+      </p>
+      <p>
+        <strong><code>remediation/phase-7-benchmarking</code></strong> — the benchmark.
+        Branched from <code>origin/benchmarking</code> with the pipeline branch merged in
+        (one conflict, in <code>mkdocs.yml</code>'s nav, where both sides were wanted).
+        Phase 7.
+      </p>
+      <p>
+        Both live in the worktree <code>.worktrees/remediation</code>, one checked out at a
+        time. <code>ruff check .</code> is clean across the whole repo for the first time.
+      </p>
+    </div>
+
+    <div class="note">
+      <p class="eyebrow">Why one worktree, not two</p>
+      <p>
+        A worktree-isolated session refuses every git operation whose target is outside its
+        own worktree — <code>git -C</code> and <code>cd &amp;&amp; git</code> alike — and
+        <code>EnterWorktree</code> only accepts paths under <code>.claude/worktrees/</code>.
+        Two worktrees were created for this work and had to be removed. Switching branches
+        inside the single worktree is the available shape; plan for it rather than against it.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">What shipped</p>
+      <h2>The ledger, with the evidence</h2>
+    </div>
+    <p class="prose">
+      Numbered by phase because the phases are a real order — 6.4 had to follow 5.3, and
+      6B had to follow both. The evidence column is the point: every row was reproduced
+      before the fix and re-measured after.
+    </p>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Phase</th><th>What</th><th>Evidence</th><th>State</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">5</td>
+            <td class="what">Failure policy gets a name and a test surface</td>
+            <td>
+              Forcing <code>WARP_SEG_QC</code> to <code>exit 1</code> gave shell exit
+              <strong>0</strong>, a full-looking tree and <strong>zero</strong>
+              <code>*_seg_qc.json</code>. Now exits 1. The <code>log.warn</code> abort
+              reproduces on 25.04.7 and not on 26.04.6 — and
+              <code>manifest.nextflowVersion</code> accepts the version it aborts on.
+            </td>
+            <td><span class="pill p-done">done</span></td>
+          </tr>
+          <tr>
+            <td class="num">6</td>
+            <td class="what">Seven-defect sweep</td>
+            <td>
+              One-file group abort reproduced as
+              <code>No such file or directory: channels</code>. InstanSeg's
+              <code>--target nuclei</code> returned one mask for both outputs, zeroing every
+              cytoplasmic measurement. An <code>nm</code> OME header was a 1000× scale error
+              into ASHLAR's shift budget. The DEEPCELL token guard was collected by nothing
+              (<code>grep -c</code> → 0).
+            </td>
+            <td><span class="pill p-done">done</span></td>
+          </tr>
+          <tr>
+            <td class="num">6B</td>
+            <td class="what">Final-outputs-only publishing</td>
+            <td>
+              30 published files at <code>final</code>, 62 at <code>none</code> — and 62 is
+              the pre-change baseline, byte-for-byte. A successful run's work directory goes
+              404 files → 6; a failed one keeps 12.
+            </td>
+            <td><span class="pill p-done">done</span></td>
+          </tr>
+          <tr>
+            <td class="num">7</td>
+            <td class="what">Benchmark analysis contract</td>
+            <td>
+              Run identity 14 → 52 columns. <code>reg_eval_csv</code> now reaches a table
+              <em>and</em> a figure. Both hand-off roots split on the cluster path, which the
+              earlier Makefile-only fix never touched. 41 lint errors surfaced and fixed.
+            </td>
+            <td><span class="pill p-done">done</span></td>
+          </tr>
+          <tr>
+            <td class="num">8</td>
+            <td class="what">Run the benchmark</td>
+            <td>
+              Nothing has ever been run. Two blockers that would have stopped it are now
+              closed — see below.
+            </td>
+            <td><span class="pill p-stop">blocked on cluster time</span></td>
+          </tr>
+          <tr>
+            <td class="num">9</td>
+            <td class="what">Downstream comms &amp; repo memory</td>
+            <td>
+              <code>docs/migration-2026-08-24.md</code> carries six output-semantics changes,
+              not the three the review named. <code>CHANGELOG.md</code> leads with the same
+              list; <code>CLAUDE.md</code> updated in place and still untracked.
+            </td>
+            <td><span class="pill p-done">done</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note stop">
+      <p class="eyebrow">Two Phase 8 blockers, found while closing Phase 7</p>
+      <p>
+        <strong>The sweep could not launch on Nextflow 26 at all.</strong> Both runners
+        passed every axis as <code>--&lt;name&gt; &lt;value&gt;</code>, and NF26 delivers
+        every CLI param as a String — not just booleans. It would have failed at launch, on
+        the cluster, after the input matrix had already been generated. They build a
+        <code>-params-file</code> now.
+      </p>
+      <p>
+        <strong>The arms and the sweep still shared a hand-off root on the cluster path.</strong>
+        Commit <code>103e47c</code> separated them in the <code>Makefile</code> and reads as
+        though that closed it; it never touched either submit script. And it was
+        <em>both</em> halves — tables and figures — not just the tables the review named.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">Read this before the next phase</p>
+      <h2>Five traps, each with the measurement that caught it</h2>
+    </div>
+    <p class="prose">
+      Not a sequence — a set. Every one of these was specified by the plan or believed by the
+      code, and every one was only exposed by running the thing rather than reading it. Four
+      of the five pass every static guard in the repo.
+    </p>
+
+    <div class="traps">
+
+      <article class="trap">
+        <h3><code>enabled: { … }</code> in a publishDir is silently false</h3>
+        <p>
+          Nextflow does not resolve a closure in <code>enabled:</code> the way it does in
+          <code>path:</code> or <code>saveAs:</code> — it coerces the closure object, which
+          comes out false. The plan specified the closure form. It makes
+          <code>--cleanup_level=none</code> a no-op, which breaks every
+          <code>--start</code> and every <code>add_cycle</code> chain, while the run exits 0.
+        </p>
+        <div class="measure">enabled: { … }   →  30 files at BOTH levels
+enabled: &lt;expr&gt;   →  30 at final, 62 at none</div>
+      </article>
+
+      <article class="trap">
+        <h3><code>task.clusterOptions</code> recurses</h3>
+        <p>
+          Read from inside a <code>clusterOptions</code> closure it is self-referential. It
+          does not fall back to the profile value — it crashes. The plan specified exactly
+          that form, so shipping it would have traded a missing <code>--account</code> for a
+          dead GPU path.
+        </p>
+        <div class="measure">NXF_VER=26.04.6
+java.lang.StackOverflowError
+task failed, run aborted</div>
+      </article>
+
+      <article class="trap">
+        <h3><code>cleanup_work=true</code> breaks nf-test wholesale</h3>
+        <p>
+          Nextflow empties the work directory at session <em>teardown</em>, and nf-test hashes
+          its snapshot files <em>after</em> the session exits. Every <code>snapshot(…)</code>
+          that recorded an md5 recorded a bare path instead. <code>conf/test.config</code>
+          pins both cleanup params away from the shipped defaults, the way it already pins
+          <code>seg_method</code>.
+        </p>
+        <div class="measure">78 of 221 stub tests failed
+— all on snapshot mismatch alone</div>
+      </article>
+
+      <article class="trap">
+        <h3>NF26 stringifies every CLI param</h3>
+        <p>
+          Known for booleans; it is true of integers too, and the benchmark runners passed
+          about forty axes that way. 25.04.7 accepts them, 26.04.6 does not. Anything that
+          builds a Nextflow command line by hand is suspect until checked on both engines.
+        </p>
+        <div class="measure">--reg_qc (1): Value is [string]
+                but should be [integer]</div>
+      </article>
+
+      <article class="trap">
+        <h3>A guard can be inert and green</h3>
+        <p>
+          <code>tests/lib_probe.nf</code> — the only unit-test surface <code>lib/*.groovy</code>
+          has — did not compile under NF26, so every assertion in it was skipped in CI's
+          <code>latest-everything</code> leg. Separately, two fixtures had been referenced with
+          <code>checkIfExists: true</code> and produced by nothing since <code>cea0b47</code>.
+        </p>
+        <div class="measure">assert cond, 'msg'   → NF26: parse error
+closure(x)           → NF26: not defined</div>
+      </article>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">Phase 8</p>
+      <h2>What it costs, and what will bite</h2>
+    </div>
+
+    <p class="prose">
+      The run count is measured from the plan builder rather than counted by hand, so it
+      moves when <code>sweep.yaml</code> does:
+    </p>
+
+    <div class="cmd">python3 -c "import yaml; from benchmarks.build_run_plan import build_run_plan; \
+  print(len(build_run_plan(yaml.safe_load(open('benchmarks/configs/sweep.yaml')), repeats=3)))"
+# 414</div>
+
+    <ul class="prose">
+      <li>
+        <strong>138 configs, 414 runs at three repeats</strong>, on the synthetic matrix.
+        The ashlar arm added 9 of those configs.
+      </li>
+      <li>
+        <strong>The real cohort is separate and dearer.</strong> The arms run whole slides:
+        <code>REGISTER</code> has been observed at 483 GB and
+        <code>MERGE_AND_PYRAMID</code> at 6.5 h.
+      </li>
+      <li>
+        <strong>Two known cliffs.</strong> <code>MERGE_AND_PYRAMID</code> is an absolute
+        node-memory limit around 450 GB, not cgroup pressure;
+        <code>REG_WARP_REF</code> OOMs on merged high-LZW multi-channel references.
+        Historically about <strong>19.6%</strong> of reserved GB·h has been lost to
+        OOM-retry behind green builds.
+      </li>
+      <li>
+        <strong>The cluster path pins <code>NXF_VER=25.04.7</code>.</strong> Its stated
+        reasons were stale and are corrected in place, but the pin stays: nothing has run on
+        26.x on that cluster, and lifting it is an experiment, not an edit. Do one arm first.
+      </li>
+    </ul>
+
+    <div class="note">
+      <p class="eyebrow">A decision worth making before spending the runs</p>
+      <p>
+        The ashlar grid is 9 configs the paper did not previously buy.
+        <code>sweep.yaml</code> argued against it — "not a configuration this project
+        ships" — but <code>nextflow_schema.json</code> lists <code>ashlar</code> in
+        <code>registration_method</code>'s enum, so a user can select it. Measuring it is
+        one option; removing it from the enum so the pipeline stops offering it is the
+        other. Leaving it selectable and unmeasured is the only option that is not honest,
+        and a guard now fails on that state.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">Deliberately not done</p>
+      <h2>Four open items, none of them blocking</h2>
+    </div>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Item</th><th>Detail</th><th>Why it was left</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="what">Nothing is pushed</td>
+            <td>
+              Both branches are local. <code>dev</code> fast-forwards onto the pipeline
+              branch; the benchmarking branch is a normal merge.
+            </td>
+            <td>Pushing is outward-facing and was not asked for.</td>
+          </tr>
+          <tr>
+            <td class="what">The FlowPath issue is not filed</td>
+            <td>
+              <code>docs/migration-2026-08-24.md</code> carries the exact
+              <code>.get()</code> change and the affected key grammar.
+            </td>
+            <td>Opening it is a push to a sibling repository.</td>
+          </tr>
+          <tr>
+            <td class="what">The multi-block nf-test split</td>
+            <td>
+              <code>tests/subworkflows/local/segmentation.nf.test</code> still has two
+              <code>nextflow_workflow</code> blocks, and nf-test 0.9.5 executes only the last.
+              A scratch file whose first block asserted <code>1 == 2</code> reported SUCCESS.
+            </td>
+            <td>
+              Splitting it unhides a real "no reference" failure, which is its own fix
+              with its own review.
+            </td>
+          </tr>
+          <tr>
+            <td class="what">24 private Nextflow parsers</td>
+            <td>
+              Enumerated and held against growth by a discovery-based meta-test with a
+              shrink-only allowlist. Not reduced.
+            </td>
+            <td>
+              Largest known remaining work, and mechanical rather than risky. Two more
+              files were repointed this round; the rest are unchanged.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head">
+      <p class="eyebrow">Reproduce the green</p>
+      <h2>What to run before trusting any of the above</h2>
+    </div>
+
+    <div class="cmd">pytest tests/ --ignore=tests/testdata --ignore=tests/modules \
+       --ignore=tests/subworkflows --ignore=tests/integration -q   # 1039 passed
+
+NXF_VER=25.04.7 nf-test test --tag stub --profile test              # 221/221, ~18 min
+bash tests/cleanup_work.sh                                          # PASS
+pytest benchmarks/tests -q                                          # 237 passed
+ruff check .                                                        # clean</div>
+
+    <p class="prose">
+      Two of those matter more than their run time suggests.
+      <code>tests/cleanup_work.sh</code> is the only check that can see work-directory
+      cleanup at all — it is a session-teardown behaviour, invisible to a static guard and
+      already gone by the time nf-test's assertion context runs. And the nf-test sweep must
+      run on <strong>25.04.x</strong>, the version CI pins; on 26.04.6 the
+      <code>lib_probe</code> leg behaves differently and the numbers are not comparable.
+    </p>
+  </section>
+
+  <footer>
+    <p>
+      Supersedes <em>Mirage Remediation Handoff</em>, 2026-08-25. The plan both documents
+      execute from lives at <code>docs/superpowers/plans/2026-08-24-architecture-review-remediation.md</code>
+      and is gitignored; everything durable from this round is on this page, in the commit
+      messages, and in <code>docs/migration-2026-08-24.md</code>.
+    </p>
+    <p>
+      Phases 0–7 and 9: 39 tasks. No production behaviour changed beyond the defects fixed,
+      the two publishing defaults the user asked for, and two invocations that used to be
+      accepted and now fail at launch.
+    </p>
+  </footer>
+
+</div>

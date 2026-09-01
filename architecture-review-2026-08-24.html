@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review — mirage</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .hatch { background-image: repeating-linear-gradient(45deg, #fecaca 0 6px, #fee2e2 6px 12px); }
+      .deepbox { background: linear-gradient(135deg, #0f172a, #1e293b); }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900">
+    <main class="max-w-6xl mx-auto px-6 py-12 space-y-14">
+
+      <header class="space-y-5">
+        <div class="flex items-baseline justify-between flex-wrap gap-3">
+          <h1 class="text-4xl font-serif tracking-tight">Architecture review — <span class="mono text-3xl">mirage</span></h1>
+          <div class="text-sm text-slate-500 mono">2026-08-24 · main 5be6126 · dev 0c14c6d · benchmarking 103e47c</div>
+        </div>
+        <div class="flex flex-wrap gap-x-6 gap-y-2 text-xs uppercase tracking-wider text-slate-500 border-y border-slate-200 py-3">
+          <span><span class="inline-block w-4 h-3 border border-slate-700 align-middle"></span> module</span>
+          <span><svg class="inline align-middle" width="26" height="8"><line class="seam" x1="0" y1="4" x2="26" y2="4" stroke="#475569" stroke-width="2"/></svg> seam</span>
+          <span><svg class="inline align-middle" width="26" height="8"><line x1="0" y1="4" x2="26" y2="4" stroke="#dc2626" stroke-width="2"/></svg> leakage</span>
+          <span><span class="inline-block w-4 h-3 deepbox align-middle"></span> deep module</span>
+          <span><span class="inline-block w-4 h-3 hatch align-middle"></span> unverified surface</span>
+        </div>
+      </header>
+
+      <section class="space-y-5">
+        <h2 class="text-2xl font-serif">The three branches are one line of history</h2>
+        <div class="grid md:grid-cols-3 gap-4">
+          <div class="rounded-lg border border-red-300 bg-red-50 p-4">
+            <div class="text-xs uppercase tracking-wider text-red-700">main</div>
+            <div class="mono text-sm mt-1">5be6126</div>
+            <div class="mt-3 text-sm">CI <strong>RED at tip</strong> since ~2026-08-11. Does not parse under Nextflow&nbsp;26. 0 unique commits.</div>
+          </div>
+          <div class="rounded-lg border border-emerald-300 bg-emerald-50 p-4">
+            <div class="text-xs uppercase tracking-wider text-emerald-700">dev</div>
+            <div class="mono text-sm mt-1">0c14c6d &nbsp;<span class="text-slate-500">main +251</span></div>
+            <div class="mt-3 text-sm"><strong>939 passed, 9 skipped.</strong> Stub runs green on all three backends. The live pipeline.</div>
+          </div>
+          <div class="rounded-lg border border-amber-300 bg-amber-50 p-4">
+            <div class="text-xs uppercase tracking-wider text-amber-700">benchmarking</div>
+            <div class="mono text-sm mt-1">103e47c &nbsp;<span class="text-slate-500">dev +3</span></div>
+            <div class="mt-3 text-sm">dev + a 74-file harness. <strong>198 tests pass. Zero CI runs on it.</strong></div>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <pre class="mermaid">
+flowchart LR
+  M["main<br/>5be6126"] -->|"+251 commits<br/>(150 touch the pipeline)"| D["dev<br/>0c14c6d"]
+  D -->|"+3 commits<br/>+ benchmarks/ (74 files)"| B["benchmarking<br/>103e47c"]
+  M -.->|"fast-forward: SAFE"| D
+  classDef red fill:#fee2e2,stroke:#dc2626,stroke-width:2px;
+  classDef ok fill:#d1fae5,stroke:#059669,stroke-width:2px;
+  classDef warn fill:#fef3c7,stroke:#d97706,stroke-width:2px;
+  class M red
+  class D ok
+  class B warn
+          </pre>
+        </div>
+
+        <p class="text-sm text-slate-600 leading-relaxed max-w-3xl">
+          <span class="mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">git rev-list --left-right --count main...dev</span>
+          returns <span class="mono">0&nbsp;251</span>. main contributes zero unique commits, so no bug can be <em>unique to main</em> in the sense of code main invented —
+          only defects it still carries because it predates the fix. Likewise <span class="mono">benchmarking</span> is a strict file superset of <span class="mono">dev</span>,
+          so every pipeline defect on dev is by construction also on benchmarking. The only genuinely branch-specific surface is the harness itself.
+        </p>
+      </section>
+
+      <section class="space-y-5">
+        <h2 class="text-2xl font-serif">Is the benchmark complete?</h2>
+        <div class="rounded-lg border-2 border-amber-400 bg-amber-50 p-6">
+          <div class="text-3xl font-serif text-amber-900">INCOMPLETE — and separately, UNRUN</div>
+          <p class="mt-3 text-sm text-amber-900 max-w-3xl">The harness is structurally thorough and its 198 tests pass. But five completeness gaps are confirmed, two of them severe — and no real measurement exists anywhere in the repo.</p>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4">
+          <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-2">
+            <div class="text-xs uppercase tracking-wider text-red-600">Gap 1 · the collision is still live</div>
+            <p class="text-sm">Commit <span class="mono">103e47c</span> separated the arm and sweep hand-offs in the <span class="mono">Makefile</span>, but <span class="mono">git show --stat</span> never touched <span class="mono">submit_arms.sh</span> or <span class="mono">submit_sweep.sh</span>. Both still print <span class="mono">--outdir benchmarks/paper_data</span> as the documented next step, and <span class="mono">pull_to_ihc_method.sh</span> scrapes that directory. The cluster path re-arms the exact corruption the commit claims to have fixed.</p>
+          </div>
+          <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-2">
+            <div class="text-xs uppercase tracking-wider text-red-600">Gap 2 · the ground-truth number reaches nothing</div>
+            <p class="text-sm"><span class="mono">make_figures.py:40</span> takes <span class="mono">reg_eval_csv</span> — present in the signature, the docstring and the call site, <strong>never read in the body</strong>. Every test passes <span class="mono">None</span>, so nothing could detect it. ANHIR/ACROBAT landmark TRE is the only ground-truth registration accuracy number in the benchmark, and it reaches no table and no figure.</p>
+          </div>
+          <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-2">
+            <div class="text-xs uppercase tracking-wider text-amber-600">Gap 3 · run identity is a hardcoded 14 columns</div>
+            <p class="text-sm"><span class="mono">make_tables.py:45-64</span> defines a 33-entry <span class="mono">CONFIG_COLS</span> documented as the run's identity. Nothing imports it. The real carry is <span class="mono">quality.py:293-300</span>. Two swept axes collapse to indistinguishable labels — including <span class="mono">reg_max_image_dim</span>, which <span class="mono">sweep.yaml:111</span> itself calls "THE dominant runtime-and-accuracy axis" of VALIS.</p>
+          </div>
+          <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-2">
+            <div class="text-xs uppercase tracking-wider text-amber-600">Gap 4 · a shipped backend is never swept</div>
+            <p class="text-sm"><span class="mono">ashlar</span> is a schema-valid <span class="mono">registration_method</span> with three params and its own adapter, but <span class="mono">registration_method_grid</span> contains only <span class="mono">tiled</span>. The coverage guard passes because it counts a param as covered when it merely appears in <span class="mono">baseline</span> — "declared and never varied" is indistinguishable from "swept".</p>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-slate-300 bg-white p-5">
+          <div class="text-xs uppercase tracking-wider text-slate-500 mb-3">Nothing has been run</div>
+          <div class="grid sm:grid-cols-3 gap-4 text-sm">
+            <div><span class="mono text-xs">benchmarks/paper_data/</span><div class="text-slate-600 mt-1">does not exist; gitignored</div></div>
+            <div><span class="mono text-xs">runs/run0000, run0001</span><div class="text-slate-600 mt-1">hand-written synthetics — <span class="mono">-</span> timestamps, input sizes at exact powers of two</div></div>
+            <div><span class="mono text-xs">analysis/figures/</span><div class="text-slate-600 mt-1">contains only its own <span class="mono">.gitignore</span></div></div>
+          </div>
+          <p class="text-sm text-slate-600 mt-4 max-w-3xl">To reach a publishable result: one source WSI → <span class="mono">generate_matrix.py --sweep</span>; then ~405 cluster runs (135 configs × 3 repeats); then the real cohort through <span class="mono">submit_arms.sh</span> at real-WSI cost. <strong>Fix Gap 1 first</strong>, or the two experiments overwrite each other's tables exactly as before.</p>
+        </div>
+      </section>
+
+      <section id="candidates" class="space-y-10">
+        <h2 class="text-2xl font-serif">Deepening candidates</h2>
+
+        <article id="c1" class="rounded-xl border border-slate-300 bg-white p-7 space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h3 class="text-xl font-semibold">1 · Give the guard layer one Nextflow source model</h3>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider bg-emerald-600 text-white px-2 py-1 rounded">Strong</span>
+              <span class="text-xs uppercase tracking-wider bg-slate-200 text-slate-700 px-2 py-1 rounded">in-process</span>
+            </div>
+          </div>
+
+          <div class="mono text-sm text-slate-600 space-y-0.5">
+            <div>tests/test_resume_determinism.py</div>
+            <div>tests/test_resource_label_coverage.py</div>
+            <div>tests/test_no_duplicate_param_defaults.py</div>
+            <div>tests/test_step_vocabulary_consistency.py</div>
+            <div>tests/test_container_build_matrix.py · test_container_image_naming.py</div>
+            <div class="text-emerald-700">tests/test_layout.py &nbsp;← already has the right parser</div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — seven private parsers</div>
+              <svg viewBox="0 0 320 240" class="w-full h-56">
+                <g font-size="9" font-family="ui-monospace, monospace" text-anchor="middle">
+                  <rect x="6" y="8" width="86" height="30" fill="#fff" stroke="#475569"/><text x="49" y="27">resume_determ</text>
+                  <rect x="102" y="8" width="86" height="30" fill="#fff" stroke="#475569"/><text x="145" y="27">resource_label</text>
+                  <rect x="198" y="8" width="86" height="30" fill="#fff" stroke="#475569"/><text x="241" y="27">dup_param</text>
+                  <rect x="6" y="48" width="86" height="30" fill="#fff" stroke="#475569"/><text x="49" y="67">step_vocab</text>
+                  <rect x="102" y="48" width="86" height="30" fill="#fff" stroke="#475569"/><text x="145" y="67">build_matrix</text>
+                  <rect x="198" y="48" width="86" height="30" fill="#fff" stroke="#059669"/><text x="241" y="67" fill="#059669">layout</text>
+                  <line x1="49" y1="38" x2="49" y2="128" stroke="#dc2626" stroke-width="1.6"/>
+                  <line x1="145" y1="38" x2="145" y2="128" stroke="#dc2626" stroke-width="1.6"/>
+                  <line x1="241" y1="38" x2="241" y2="128" stroke="#dc2626" stroke-width="1.6"/>
+                  <line x1="49" y1="78" x2="49" y2="128" stroke="#dc2626" stroke-width="1.6"/>
+                  <line x1="145" y1="78" x2="145" y2="128" stroke="#dc2626" stroke-width="1.6"/>
+                  <line x1="241" y1="78" x2="241" y2="128" stroke="#059669" stroke-width="1.6"/>
+                  <text x="160" y="122" font-size="8" fill="#dc2626">each re-implements its own regex parse</text>
+                  <rect x="6" y="132" width="278" height="46" class="hatch" stroke="#dc2626" stroke-dasharray="3 3"/>
+                  <text x="145" y="152" font-size="9">modules/local/*.nf · conf/modules.config</text>
+                  <text x="145" y="167" font-size="8" fill="#991b1b">64 lines of register.nf invisible to one of them</text>
+                  <rect x="6" y="190" width="278" height="42" fill="#fef2f2" stroke="#dc2626"/>
+                  <text x="145" y="206" font-size="8.5" fill="#991b1b">stageAs: 'ref/*' opens a fake block comment</text>
+                  <text x="145" y="221" font-size="8.5" fill="#991b1b">the DOTALL regex then eats to line 86</text>
+                </g>
+              </svg>
+            </div>
+
+            <div class="rounded-lg border-2 border-slate-800 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — one deep module</div>
+              <svg viewBox="0 0 320 240" class="w-full h-56">
+                <g font-size="9" font-family="ui-monospace, monospace" text-anchor="middle">
+                  <rect x="6" y="8" width="86" height="26" fill="#fff" stroke="#94a3b8"/><text x="49" y="25" fill="#475569">resume_determ</text>
+                  <rect x="102" y="8" width="86" height="26" fill="#fff" stroke="#94a3b8"/><text x="145" y="25" fill="#475569">resource_label</text>
+                  <rect x="198" y="8" width="86" height="26" fill="#fff" stroke="#94a3b8"/><text x="241" y="25" fill="#475569">dup_param</text>
+                  <rect x="54" y="42" width="86" height="26" fill="#fff" stroke="#94a3b8"/><text x="97" y="59" fill="#475569">step_vocab</text>
+                  <rect x="150" y="42" width="86" height="26" fill="#fff" stroke="#94a3b8"/><text x="193" y="59" fill="#475569">containers</text>
+                  <line x1="49" y1="34" x2="130" y2="86" stroke="#475569" stroke-width="1.2"/>
+                  <line x1="145" y1="34" x2="145" y2="86" stroke="#475569" stroke-width="1.2"/>
+                  <line x1="241" y1="34" x2="162" y2="86" stroke="#475569" stroke-width="1.2"/>
+                  <line x1="97" y1="68" x2="136" y2="86" stroke="#475569" stroke-width="1.2"/>
+                  <line x1="193" y1="68" x2="156" y2="86" stroke="#475569" stroke-width="1.2"/>
+                  <rect x="30" y="88" width="230" height="18" fill="#334155"/>
+                  <text x="145" y="101" fill="#fff" font-size="8">processes() · withNameBlocks() · scriptBodies() · paramRefs()</text>
+                  <rect x="30" y="106" width="230" height="76" class="deepbox"/>
+                  <text x="145" y="128" fill="#e2e8f0" font-size="9">tests/nfmodel/</text>
+                  <text x="145" y="145" fill="#94a3b8" font-size="8">string-aware tokenizer · brace walk</text>
+                  <text x="145" y="159" fill="#94a3b8" font-size="8">recursive file discovery</text>
+                  <text x="145" y="173" fill="#94a3b8" font-size="8">meta-test guards the parser itself</text>
+                  <rect x="30" y="196" width="230" height="36" fill="#ecfdf5" stroke="#059669"/>
+                  <text x="145" y="212" font-size="8.5" fill="#065f46">modules/local/**/*.nf · conf/modules.config</text>
+                  <text x="145" y="226" font-size="8.5" fill="#065f46">parsed once, correctly, for everyone</text>
+                </g>
+              </svg>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-5 text-sm">
+            <div><div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</div>Seven guards each carry a private, ad-hoc parse of Nextflow source, and each has a different blind spot — so a guard's interface ("it passed") says nothing about whether it read the file.</div>
+            <div><div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</div>One module parses the tree once, string-aware and recursive, and exposes a small query interface. Guards assert against the model, never against text.</div>
+            <div><div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Wins</div>
+              <ul class="list-disc list-inside space-y-0.5"><li>One parser to test</li><li>Blind spots fixed once</li><li>Guards become 3-line asserts</li><li>Deletion test: complexity returns ×7</li></ul>
+            </div>
+          </div>
+
+          <div class="rounded-lg bg-slate-900 text-slate-100 p-4 text-sm space-y-2">
+            <div class="text-xs uppercase tracking-wider text-slate-400">Why this is first — the measured evidence</div>
+            <p><span class="mono text-emerald-300">test_resume_determinism.py:44</span> strips comments with a <span class="mono text-amber-300">DOTALL</span> regex for <span class="mono text-amber-300">/*&nbsp;…&nbsp;*/</span>. Line 23 of <span class="mono">register.nf</span> declares <span class="mono text-amber-300">path(reference, stageAs: 'ref/*')</span> — valid Nextflow, and to a regex with no notion of string literals, an <em>open block comment</em>. The non-greedy match runs to the next <span class="mono">*/</span>, inside the following glob, and keeps going.</p>
+            <p class="mono text-xs bg-black/40 p-3 rounded">match lines 23–86 (64 lines) opener='/*'), path(pre'<br/>&nbsp;&nbsp;SWALLOWED: output: … path "versions.yml" … script:</p>
+            <p><span class="mono">REGISTER</span> is the one process the guard's own docstring cites as causing a measured 20-of-28-task resume cascade — and it is exactly the process rendered invisible. Planting the violation it names returns <span class="mono text-emerald-300">5 passed</span>. The fix already exists in-repo: <span class="mono text-emerald-300">test_layout.py:347 _strip_comments_and_strings</span>, which even carries a meta-test guarding its own parser.</p>
+          </div>
+        </article>
+
+        <article id="c2" class="rounded-xl border border-slate-300 bg-white p-7 space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h3 class="text-xl font-semibold">2 · Make the meta map a module, not a convention</h3>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider bg-emerald-600 text-white px-2 py-1 rounded">Strong</span>
+              <span class="text-xs uppercase tracking-wider bg-slate-200 text-slate-700 px-2 py-1 rounded">in-process</span>
+            </div>
+          </div>
+
+          <div class="mono text-sm text-slate-600 space-y-0.5">
+            <div>subworkflows/local/input_check.nf:87-126 &nbsp;<span class="text-slate-400">the "ONE samplesheet reader"</span></div>
+            <div>subworkflows/local/segmentation.nf:311-316 &nbsp;<span class="text-red-600">a second meta producer</span></div>
+            <div>subworkflows/local/add_cycle.nf · lib/CsvUtils.groovy:344 · lib/Checkpoint.groovy:140</div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — two producers, different key sets</div>
+              <div class="space-y-2">
+                <div class="border border-slate-700 rounded p-2 bg-white">
+                  <div class="text-xs uppercase tracking-wider text-slate-500">INPUT_CHECK</div>
+                  <div class="mono text-xs mt-1 text-emerald-700">patient_id · id · is_reference · channels<br/>keep_channels · channels_count · images_count</div>
+                </div>
+                <div class="text-center text-xs text-slate-400">— no shared interface —</div>
+                <div class="border border-red-500 rounded p-2 bg-red-50">
+                  <div class="text-xs uppercase tracking-wider text-red-700">READ_SEGMENTED_CHECKPOINT</div>
+                  <div class="mono text-xs mt-1">patient_id · id · is_reference · channels</div>
+                  <div class="mono text-xs text-red-700 mt-1">keep_channels ✗ &nbsp; channels_count ✗</div>
+                </div>
+                <svg viewBox="0 0 300 74" class="w-full">
+                  <g font-size="8.5" font-family="ui-monospace, monospace">
+                    <line x1="150" y1="2" x2="150" y2="20" stroke="#dc2626" stroke-width="1.6"/>
+                    <polygon points="150,26 146,18 154,18" fill="#dc2626"/>
+                    <rect x="14" y="28" width="272" height="42" fill="#fef2f2" stroke="#dc2626"/>
+                    <text x="150" y="43" text-anchor="middle" fill="#991b1b">--start postprocessing silently diverges</text>
+                    <text x="150" y="56" text-anchor="middle" fill="#991b1b">SPLIT_CHANNELS emits DAPI,CD3,CD8 not CD3,CD8</text>
+                    <text x="150" y="66" text-anchor="middle" fill="#991b1b">QUANTIFY runs twice; .unique() keeps arrival order</text>
+                  </g>
+                </svg>
+              </div>
+            </div>
+
+            <div class="rounded-lg border-2 border-slate-800 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — one constructor, one invariant</div>
+              <div class="space-y-2">
+                <div class="rounded bg-slate-800 text-slate-100 p-2">
+                  <div class="text-xs uppercase tracking-wider text-slate-400">interface</div>
+                  <div class="mono text-xs mt-1">Meta.fromSamplesheetRow(row, counts)<br/>Meta.fromCheckpointRow(row, counts)</div>
+                </div>
+                <div class="deepbox rounded p-3 text-slate-300">
+                  <div class="mono text-xs">lib/Meta.groovy</div>
+                  <ul class="text-xs mt-2 space-y-1 list-disc list-inside text-slate-400">
+                    <li>assigns <span class="mono">id</span> from row index + patient, never a basename</li>
+                    <li>resolves <span class="mono">keep_channels</span> keyed on identity, not <span class="mono">row.raw</span></li>
+                    <li>fails loudly on a missing key rather than defaulting</li>
+                    <li>upholds the <span class="mono">channels_count</span> dual invariant</li>
+                  </ul>
+                </div>
+                <div class="rounded bg-emerald-50 border border-emerald-500 p-2 text-xs text-emerald-900">every entry point produces the same meta → <span class="mono">--start X</span> is verifiably equivalent to a full run</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-5 text-sm">
+            <div><div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</div><span class="mono">CLAUDE.md</span> calls <span class="mono">input_check.nf</span> the one samplesheet reader, but checkpoint readers build meta independently and omit keys. The meta map is an interface nobody owns.</div>
+            <div><div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</div>One module constructs every meta. Identity is <em>assigned</em> at read time, not derived from a filename. A missing key is an error, not a silent default.</div>
+            <div><div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Wins</div>
+              <ul class="list-disc list-inside space-y-0.5"><li>Closes four confirmed defects</li><li>Entry points become testable</li><li>Basename collisions impossible</li><li>One place to add a key</li></ul>
+            </div>
+          </div>
+
+          <div class="rounded-lg bg-slate-100 border border-slate-300 p-4 text-sm">
+            <div class="text-xs uppercase tracking-wider text-slate-500 mb-2">The four defects this one seam closes</div>
+            <ul class="space-y-1.5 list-disc list-inside">
+              <li><strong>Silent wrong output.</strong> <span class="mono">--start postprocessing</span> emits an extra DAPI plane; <span class="mono">QUANTIFY</span> runs twice and <span class="mono">postprocess.nf:207</span>'s <span class="mono">.unique()</span> keeps whichever arrived first — so the pyramid's DAPI plane comes from a nondeterministic slide. <em>Verified by diffing work dirs.</em></li>
+              <li><strong>Checkpoint corruption.</strong> <span class="mono">meta.id</span> from <span class="mono">simpleName</span> collides across <span class="mono">cycle1/slide.ome.tiff</span> and <span class="mono">cycle2/slide.ome.tiff</span> — the ordinary cyclic-IF layout. Both rows record the same path in <span class="mono">preprocessed.csv</span>.</li>
+              <li><strong>Keep-set collapse.</strong> <span class="mono">CsvUtils.groovy:344</span> keys <span class="mono">perSlide</span> on <span class="mono">row.raw</span>, so the second pass overwrites the first with <span class="mono">[]</span> and <span class="mono">channels_count</span> sums to zero.</li>
+              <li><strong>Unquoted CSV.</strong> <span class="mono">Checkpoint.groovy:140</span> joins on a bare comma; an <span class="mono">--outdir</span> containing a comma shifts every later column, and <span class="mono">null</span> is written as the literal text.</li>
+            </ul>
+          </div>
+        </article>
+
+        <article id="c3" class="rounded-xl border border-slate-300 bg-white p-7 space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h3 class="text-xl font-semibold">3 · Give failure policy a name and a test surface</h3>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider bg-amber-500 text-white px-2 py-1 rounded">Worth exploring</span>
+              <span class="text-xs uppercase tracking-wider bg-slate-200 text-slate-700 px-2 py-1 rounded">local-substitutable</span>
+            </div>
+          </div>
+
+          <div class="mono text-sm text-slate-600 space-y-0.5">
+            <div>conf/modules.config:177 &nbsp;<span class="text-slate-400">the QC selector — 7 processes, on by default</span></div>
+            <div>conf/modules.config:722, :744 &nbsp;<span class="text-red-600">closures that throw</span></div>
+            <div>conf/modules.config:687-692 &nbsp;<span class="text-slate-400">the CSE carve-out</span></div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-4">
+            <pre class="mermaid">
+flowchart TD
+  T["task fails"] --> S{"which selector<br/>matched?"}
+  S -->|"QC block :177"| A["exitStatus in 130..145 or 104?"]
+  A -->|no| I1["ignore — on attempt 1"]
+  A -->|yes| R1["retry x3 then ignore"]
+  S -->|"CSE block :722"| B["attempt below limit?"]
+  B -->|yes| R2["retry"]
+  B -->|no| X["log.warn on ConfigObject<br/>MissingMethodException<br/>RUN ABORTS"]
+  I1 --> G["green run, missing artifacts"]
+  classDef bad fill:#fee2e2,stroke:#dc2626,stroke-width:2px;
+  classDef warn fill:#fef3c7,stroke:#d97706,stroke-width:2px;
+  class X bad
+  class G warn
+            </pre>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-5 text-sm">
+            <div class="rounded-lg border border-red-300 bg-red-50 p-4 space-y-2">
+              <div class="text-xs uppercase tracking-wider text-red-700">The closure that throws</div>
+              <pre class="mono text-xs bg-white p-3 rounded border border-red-200 overflow-x-auto">errorStrategy = {
+    if (task.attempt &lt;= 3) return 'retry'
+    log.warn "SEG_QUALITY_EVAL dropped ..."
+    return 'ignore'
+}</pre>
+              <p><span class="mono">log</span> is not bound in <span class="mono">conf/*.config</span> closures. It resolves against <span class="mono">ConfigObject</span> — the <em>exact</em> silent-resolution trap <span class="mono">CLAUDE.md</span> documents for <span class="mono">lib/</span> classes, but with <span class="mono">log</span>, so it was never recognised as an instance of it. Past the retry budget Nextflow reports an unknown method invocation on <span class="mono">ConfigObject</span> and <strong>exits 1</strong>. The <span class="mono">'ignore'</span> branch is unreachable: the block does the opposite of what its comment promises.</p>
+            </div>
+            <div class="rounded-lg border border-amber-300 bg-amber-50 p-4 space-y-2">
+              <div class="text-xs uppercase tracking-wider text-amber-700">The default-on selector that hides failure</div>
+              <pre class="mono text-xs bg-white p-3 rounded border border-amber-200 overflow-x-auto">errorStrategy = { task.exitStatus in ((130..145) + 104)
+    &amp;&amp; task.attempt &lt;= 3 ? 'retry' : 'ignore' }</pre>
+              <p>An exit 1 — an ordinary Python traceback — is dropped on attempt 1. The selector covers <span class="mono">WARP_SEG_QC</span>, and <span class="mono">reg_qc=2</span> is the <em>default</em>. A broken <span class="mono">warp_seg_qc.py</span> therefore yields a green run with no <span class="mono">*_seg_qc.json</span>, no residual CSVs, and a SpatialData <span class="mono">.zarr</span> missing its <span class="mono">obsm</span> blocks.</p>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-amber-400 bg-amber-50 p-4 text-sm">
+            <strong>Constraint that shapes the seam:</strong> <span class="mono">conf/*.config</span> cannot see <span class="mono">lib/*.groovy</span>, and under Nextflow&nbsp;26's strict parser there is <em>no</em> legal way to share a helper between two <span class="mono">withName:</span> blocks — top-level <span class="mono">def</span> fails to parse, top-level closure assignment is rejected as a dynamic option. So the deepening cannot be "extract a policy class". It has to be: <strong>reduce the number of distinct policies to a small named set, inline each verbatim, and assert on the config text</strong> through Candidate&nbsp;1's model. That is the only seam the platform permits.
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-5 text-sm">
+            <div><div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</div>Failure policy is scattered literal closures in a file no test can execute, in a scope where the obvious refactor is illegal. Two of them are wrong, and both hide it.</div>
+            <div><div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</div>Three named policies — <em>retry-then-fail</em>, <em>retry-then-drop</em>, <em>fail-fast</em> — inlined at each site, plus a guard asserting no <span class="mono">errorStrategy</span> closure calls an unbound identifier.</div>
+            <div><div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Wins</div>
+              <ul class="list-disc list-inside space-y-0.5"><li>Aborting closure caught statically</li><li>"Ignore" becomes a stated choice</li><li>Green run implies complete tree</li></ul>
+            </div>
+          </div>
+        </article>
+
+        <article id="c4" class="rounded-xl border border-slate-300 bg-white p-7 space-y-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <h3 class="text-xl font-semibold">4 · Derive the analysis contract from the sweep, don't restate it</h3>
+            <div class="flex gap-2">
+              <span class="text-xs uppercase tracking-wider bg-emerald-600 text-white px-2 py-1 rounded">Strong</span>
+              <span class="text-xs uppercase tracking-wider bg-slate-200 text-slate-700 px-2 py-1 rounded">in-process</span>
+            </div>
+          </div>
+
+          <div class="mono text-sm text-slate-600 space-y-0.5">
+            <div>benchmarks/configs/sweep.yaml · arms.yaml</div>
+            <div>benchmarks/analysis/make_tables.py:45-64 &nbsp;<span class="text-red-600">CONFIG_COLS — 33 entries, 0 importers</span></div>
+            <div>benchmarks/analysis/lib/quality.py:293-300 &nbsp;<span class="text-amber-600">the real carry — 14 hardcoded</span></div>
+            <div>benchmarks/analysis/make_figures.py:40 &nbsp;<span class="text-red-600">reg_eval_csv — never read</span></div>
+          </div>
+
+          <div class="grid md:grid-cols-2 gap-5">
+            <div class="rounded-lg border border-slate-200 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500 mb-3">Before — three restatements of one truth</div>
+              <svg viewBox="0 0 320 210" class="w-full h-52">
+                <g font-size="8.5" font-family="ui-monospace, monospace" text-anchor="middle">
+                  <rect x="90" y="6" width="140" height="26" fill="#fff" stroke="#475569"/><text x="160" y="23">sweep.yaml — 30+ axes</text>
+                  <line x1="160" y1="32" x2="160" y2="46" stroke="#475569"/>
+                  <polygon points="160,52 156,44 164,44" fill="#475569"/>
+                  <rect x="90" y="54" width="140" height="24" fill="#ecfdf5" stroke="#059669"/><text x="160" y="70" fill="#065f46">run_plan.csv (complete)</text>
+                  <line x1="120" y1="78" x2="70" y2="100" stroke="#475569"/>
+                  <line x1="200" y1="78" x2="250" y2="100" stroke="#dc2626" stroke-width="1.6"/>
+                  <rect x="8" y="102" width="124" height="34" fill="#ecfdf5" stroke="#059669"/>
+                  <text x="70" y="117" fill="#065f46">measurements.csv</text><text x="70" y="129" fill="#065f46" font-size="7.5">every plan column — OK</text>
+                  <rect x="188" y="102" width="124" height="34" fill="#fef2f2" stroke="#dc2626"/>
+                  <text x="250" y="117" fill="#991b1b">quality.py carry</text><text x="250" y="129" fill="#991b1b" font-size="7.5">14 of 30 — hardcoded</text>
+                  <line x1="250" y1="136" x2="250" y2="152" stroke="#dc2626" stroke-width="1.6"/>
+                  <polygon points="250,158 246,150 254,150" fill="#dc2626"/>
+                  <rect x="176" y="160" width="148" height="42" fill="#fef2f2" stroke="#dc2626"/>
+                  <text x="250" y="175" fill="#991b1b" font-size="8">paper_data tables</text>
+                  <text x="250" y="187" fill="#991b1b" font-size="7.5">reg_max_image_dim collapses</text>
+                  <text x="250" y="197" fill="#991b1b" font-size="7.5">seg_qc_match_radius collapses</text>
+                  <rect x="8" y="160" width="124" height="42" class="hatch" stroke="#dc2626" stroke-dasharray="3 3"/>
+                  <text x="70" y="176" fill="#991b1b" font-size="8">CONFIG_COLS (33)</text>
+                  <text x="70" y="190" fill="#991b1b" font-size="7.5">documented as identity</text>
+                  <text x="70" y="199" fill="#991b1b" font-size="7.5">imported by nothing</text>
+                </g>
+              </svg>
+            </div>
+
+            <div class="rounded-lg border-2 border-slate-800 p-4">
+              <div class="text-xs uppercase tracking-wider text-slate-500 mb-3">After — one source, derived downstream</div>
+              <svg viewBox="0 0 320 210" class="w-full h-52">
+                <g font-size="8.5" font-family="ui-monospace, monospace" text-anchor="middle">
+                  <rect x="90" y="6" width="140" height="26" fill="#0f172a"/><text x="160" y="23" fill="#fff">sweep.yaml — the one truth</text>
+                  <line x1="160" y1="32" x2="160" y2="46" stroke="#334155" stroke-width="1.6"/>
+                  <polygon points="160,52 156,44 164,44" fill="#334155"/>
+                  <rect x="60" y="54" width="200" height="20" fill="#334155"/>
+                  <text x="160" y="68" fill="#fff" font-size="8">identity_columns(sweep) · axes(sweep)</text>
+                  <rect x="60" y="74" width="200" height="46" class="deepbox"/>
+                  <text x="160" y="92" fill="#e2e8f0" font-size="8.5">analysis/lib/contract.py</text>
+                  <text x="160" y="106" fill="#94a3b8" font-size="7.5">every varied knob is identity, by construction</text>
+                  <text x="160" y="116" fill="#94a3b8" font-size="7.5">an unread parameter is an error</text>
+                  <line x1="110" y1="120" x2="70" y2="146" stroke="#059669" stroke-width="1.4"/>
+                  <line x1="210" y1="120" x2="250" y2="146" stroke="#059669" stroke-width="1.4"/>
+                  <rect x="8" y="148" width="124" height="48" fill="#ecfdf5" stroke="#059669"/>
+                  <text x="70" y="166" fill="#065f46">measurements.csv</text>
+                  <text x="70" y="180" fill="#065f46" font-size="7.5">+ reg_eval TRE joined in</text>
+                  <text x="70" y="190" fill="#065f46" font-size="7.5">ground truth reaches a table</text>
+                  <rect x="188" y="148" width="124" height="48" fill="#ecfdf5" stroke="#059669"/>
+                  <text x="250" y="166" fill="#065f46">paper_data tables</text>
+                  <text x="250" y="180" fill="#065f46" font-size="7.5">no axis can collapse</text>
+                  <text x="250" y="190" fill="#065f46" font-size="7.5">adding an axis is one edit</text>
+                </g>
+              </svg>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-5 text-sm">
+            <div><div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Problem</div>What identifies a run is stated three times — once correctly in <span class="mono">sweep.yaml</span>, once as dead documentation, once as a hardcoded list that has already drifted.</div>
+            <div><div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Solution</div>Derive the identity set from <span class="mono">sweep.yaml</span> at runtime, and make an unread analysis parameter a hard error rather than a signature decoration.</div>
+            <div><div class="text-xs uppercase tracking-wider text-slate-500 mb-1">Wins</div>
+              <ul class="list-disc list-inside space-y-0.5"><li>New axis reaches tables free</li><li>Ground truth stops vanishing</li><li>Delete 33 dead entries</li><li>Guard stops rewarding "declared"</li></ul>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="space-y-5">
+        <h2 class="text-2xl font-serif">Confirmed defects, by branch</h2>
+        <p class="text-sm text-slate-600 max-w-3xl">Every row was traced to a line and, where marked, reproduced. "All three" means dev never fixed it — a fast-forward does not help.</p>
+
+        <div class="overflow-x-auto rounded-lg border border-slate-300">
+          <table class="w-full text-sm bg-white">
+            <thead class="bg-slate-100 text-xs uppercase tracking-wider text-slate-600">
+              <tr><th class="text-left p-3">Defect</th><th class="text-left p-3">Location</th><th class="text-left p-3 whitespace-nowrap">Branches</th><th class="text-left p-3">Sev</th></tr>
+            </thead>
+            <tbody class="divide-y divide-slate-200">
+              <tr class="bg-red-50">
+                <td class="p-3">Pipeline does not parse under Nextflow 26 — top-level <span class="mono text-xs">workflow.onComplete</span>, an <span class="mono text-xs">import</span>, three top-level <span class="mono text-xs">def f(params)</span></td>
+                <td class="p-3 mono text-xs">main.nf:35 · final_qc.nf:58 · modules.config:38,103,109</td>
+                <td class="p-3 text-xs"><span class="bg-red-600 text-white px-1.5 py-0.5 rounded">main</span></td>
+                <td class="p-3 text-xs font-semibold text-red-700">CRITICAL</td>
+              </tr>
+              <tr class="bg-red-50">
+                <td class="p-3">STARE accepts fabricated control points — correlation error discarded; a manufactured blank tile scores NaN and passes the range gate. <em>292/400 tiles must be rejected; the range gate catches 0.</em></td>
+                <td class="p-3 mono text-xs">tile_residual.py:19 · tiled_solve.py:40 · tiled_reg_tile.py:108</td>
+                <td class="p-3 text-xs"><span class="bg-red-600 text-white px-1.5 py-0.5 rounded">main</span></td>
+                <td class="p-3 text-xs font-semibold text-red-700">CRITICAL</td>
+              </tr>
+              <tr>
+                <td class="p-3"><span class="mono text-xs">RetryContext.__next__</span> raises <span class="mono text-xs">last_exception</span>, escaping the <span class="mono text-xs">for</span> loop — kills a 400+ GB REGISTER task instead of dropping one slide. Makes <span class="mono text-xs">all_attempts_failed</span> dead code.</td>
+                <td class="p-3 mono text-xs">bin/utils/retry.py:112-115</td>
+                <td class="p-3 text-xs"><span class="bg-slate-800 text-white px-1.5 py-0.5 rounded">all three</span></td>
+                <td class="p-3 text-xs font-semibold text-red-700">CRITICAL</td>
+              </tr>
+              <tr class="bg-amber-50">
+                <td class="p-3"><span class="mono text-xs">test_resume_determinism</span> comment stripper eats 64 lines of <span class="mono text-xs">register.nf</span> via <span class="mono text-xs">stageAs: 'ref/*'</span>. <em>Break test: 5 passed.</em></td>
+                <td class="p-3 mono text-xs">tests/test_resume_determinism.py:44</td>
+                <td class="p-3 text-xs"><span class="bg-slate-800 text-white px-1.5 py-0.5 rounded">all three</span></td>
+                <td class="p-3 text-xs font-semibold text-red-700">HIGH</td>
+              </tr>
+              <tr>
+                <td class="p-3"><span class="mono text-xs">errorStrategy</span> closure calls <span class="mono text-xs">log.warn</span> → resolves on <span class="mono text-xs">ConfigObject</span>, throws, run exits 1. The <span class="mono text-xs">'ignore'</span> branch is unreachable. <em>Reproduced.</em></td>
+                <td class="p-3 mono text-xs">conf/modules.config:722, :744</td>
+                <td class="p-3 text-xs"><span class="bg-emerald-700 text-white px-1.5 py-0.5 rounded">dev</span> <span class="bg-amber-600 text-white px-1.5 py-0.5 rounded">bench</span></td>
+                <td class="p-3 text-xs font-semibold text-red-700">HIGH</td>
+              </tr>
+              <tr>
+                <td class="p-3"><span class="mono text-xs">--start postprocessing</span> silently diverges — checkpoint reader omits <span class="mono text-xs">keep_channels</span>; extra DAPI plane, <span class="mono text-xs">QUANTIFY</span> runs twice, winner is arrival-ordered. <em>Verified by work-dir diff.</em></td>
+                <td class="p-3 mono text-xs">segmentation.nf:311-316</td>
+                <td class="p-3 text-xs"><span class="bg-emerald-700 text-white px-1.5 py-0.5 rounded">dev</span> <span class="bg-amber-600 text-white px-1.5 py-0.5 rounded">bench</span></td>
+                <td class="p-3 text-xs font-semibold text-red-700">HIGH</td>
+              </tr>
+              <tr>
+                <td class="p-3"><span class="mono text-xs">skipped = 0</span> then <span class="mono text-xs">skipped[0] += 1</span> → <span class="mono text-xs">TypeError</span>. Any NaN centroid crashes the combined export — <span class="mono text-xs">cells.geojson</span>, the file FlowPath consumes. <strong>Regression dev introduced.</strong></td>
+                <td class="p-3 mono text-xs">bin/export_geojson.py:336,342</td>
+                <td class="p-3 text-xs"><span class="bg-emerald-700 text-white px-1.5 py-0.5 rounded">dev</span> <span class="bg-amber-600 text-white px-1.5 py-0.5 rounded">bench</span></td>
+                <td class="p-3 text-xs font-semibold text-red-700">HIGH</td>
+              </tr>
+              <tr>
+                <td class="p-3"><span class="mono text-xs">meta.id</span> from <span class="mono text-xs">simpleName</span> collides across cycle directories — both rows record the same path in <span class="mono text-xs">preprocessed.csv</span>, then abort <em>after</em> the corrupt manifest is written</td>
+                <td class="p-3 mono text-xs">input_check.nf:93-94</td>
+                <td class="p-3 text-xs"><span class="bg-slate-800 text-white px-1.5 py-0.5 rounded">all three</span></td>
+                <td class="p-3 text-xs font-semibold text-red-700">HIGH</td>
+              </tr>
+              <tr>
+                <td class="p-3"><span class="mono text-xs">MERGE_AND_PYRAMID</span> memory closure iterates a bare <span class="mono text-xs">Path</span>'s name elements on a one-file group → <span class="mono text-xs">No such file or directory: channels</span>. <em>Live repro.</em></td>
+                <td class="p-3 mono text-xs">conf/modules.config:831 (dev) / :483 (main)</td>
+                <td class="p-3 text-xs"><span class="bg-slate-800 text-white px-1.5 py-0.5 rounded">all three</span></td>
+                <td class="p-3 text-xs font-semibold text-red-700">HIGH</td>
+              </tr>
+              <tr>
+                <td class="p-3">QC <span class="mono text-xs">errorStrategy</span> ignores any non-signal exit on attempt 1, covering the default-on <span class="mono text-xs">reg_qc=2</span> chain → green run, <span class="mono text-xs">.zarr</span> missing residuals</td>
+                <td class="p-3 mono text-xs">conf/modules.config:177 (dev) / :197 (main)</td>
+                <td class="p-3 text-xs"><span class="bg-slate-800 text-white px-1.5 py-0.5 rounded">all three</span></td>
+                <td class="p-3 text-xs font-semibold text-red-700">HIGH</td>
+              </tr>
+              <tr>
+                <td class="p-3"><span class="mono text-xs">benchmarking</span> receives no CI at all — <span class="mono text-xs">on.push.branches: [main, dev]</span> and <span class="mono text-xs">pull_request</span> filters the base. 939 + 198 passing tests execute nowhere.</td>
+                <td class="p-3 mono text-xs">.github/workflows/ci.yml:3-8</td>
+                <td class="p-3 text-xs"><span class="bg-amber-600 text-white px-1.5 py-0.5 rounded">bench</span></td>
+                <td class="p-3 text-xs font-semibold text-red-700">HIGH</td>
+              </tr>
+              <tr>
+                <td class="p-3"><span class="mono text-xs">--target nuclei</span> and <span class="mono text-xs">--target cells</span> return the same mask → <span class="mono text-xs">Cytoplasm = Cell − Nucleus</span> empty for every cell, silently</td>
+                <td class="p-3 mono text-xs">bin/segment_instantseg.py:70-98</td>
+                <td class="p-3 text-xs"><span class="bg-emerald-700 text-white px-1.5 py-0.5 rounded">dev</span> <span class="bg-amber-600 text-white px-1.5 py-0.5 rounded">bench</span></td>
+                <td class="p-3 text-xs font-semibold text-red-700">HIGH</td>
+              </tr>
+              <tr>
+                <td class="p-3"><span class="mono text-xs">PhysicalSizeX</span> read without <span class="mono text-xs">PhysicalSizeXUnit</span> — a nm header gives a 1000× scale error into ashlar's shift budget</td>
+                <td class="p-3 mono text-xs">bin/ashlar_retile.py:100-136</td>
+                <td class="p-3 text-xs"><span class="bg-emerald-700 text-white px-1.5 py-0.5 rounded">dev</span> <span class="bg-amber-600 text-white px-1.5 py-0.5 rounded">bench</span></td>
+                <td class="p-3 text-xs font-semibold text-red-700">HIGH</td>
+              </tr>
+              <tr class="bg-amber-50">
+                <td class="p-3"><span class="mono text-xs">test_container_build_matrix</span> greps for a string the rename removed and a sibling guard now forbids — <span class="mono text-xs">referenced</span> is the empty set, <span class="mono text-xs">24 passed</span></td>
+                <td class="p-3 mono text-xs">tests/test_container_build_matrix.py:88-89</td>
+                <td class="p-3 text-xs"><span class="bg-emerald-700 text-white px-1.5 py-0.5 rounded">dev</span> <span class="bg-amber-600 text-white px-1.5 py-0.5 rounded">bench</span></td>
+                <td class="p-3 text-xs font-semibold text-amber-700">MED</td>
+              </tr>
+              <tr class="bg-amber-50">
+                <td class="p-3">Boolean-param <span class="mono text-xs">.sh</span> guard runs in CI only where its targets don't exist — 3 files on dev, 10 on benchmarking (which has no CI)</td>
+                <td class="p-3 mono text-xs">tests/test_no_cli_boolean_params_in_docs.py:158-183</td>
+                <td class="p-3 text-xs"><span class="bg-emerald-700 text-white px-1.5 py-0.5 rounded">dev</span> <span class="bg-amber-600 text-white px-1.5 py-0.5 rounded">bench</span></td>
+                <td class="p-3 text-xs font-semibold text-amber-700">MED</td>
+              </tr>
+              <tr class="bg-amber-50">
+                <td class="p-3"><span class="mono text-xs">ruff.toml:17</span> excludes <span class="mono text-xs">benchmarks</span> with a comment left over from when the dir was gitignored — 41 real errors, 15 in production analysis files, invisible to the gate</td>
+                <td class="p-3 mono text-xs">ruff.toml:17</td>
+                <td class="p-3 text-xs"><span class="bg-amber-600 text-white px-1.5 py-0.5 rounded">bench</span></td>
+                <td class="p-3 text-xs font-semibold text-amber-700">MED</td>
+              </tr>
+              <tr>
+                <td class="p-3"><span class="mono text-xs">optional: true</span> written <em>inside</em> <span class="mono text-xs">path(...)</span> is silently ignored — task fails on a missing PNG, then the failure is swallowed by the QC selector. <em>Reproduced.</em></td>
+                <td class="p-3 mono text-xs">generate_preprocess_qc.nf:14 · generate_postprocessing_qc.nf:14</td>
+                <td class="p-3 text-xs"><span class="bg-slate-800 text-white px-1.5 py-0.5 rounded">all three</span></td>
+                <td class="p-3 text-xs font-semibold text-amber-700">MED</td>
+              </tr>
+              <tr>
+                <td class="p-3">Chained <span class="mono text-xs">add_cycle</span> impossible — <span class="mono text-xs">ADD_CYCLE</span> never calls <span class="mono text-xs">POSTPROCESS</span>, so no <span class="mono text-xs">postprocessed.csv</span> is written and cycle 3 fails launch validation. <em>Correctly documented; still a code gap.</em></td>
+                <td class="p-3 mono text-xs">ParamUtils.groovy:154-162 · add_cycle.nf</td>
+                <td class="p-3 text-xs"><span class="bg-slate-800 text-white px-1.5 py-0.5 rounded">all three</span></td>
+                <td class="p-3 text-xs font-semibold text-amber-700">MED</td>
+              </tr>
+              <tr>
+                <td class="p-3"><span class="mono text-xs">withName: SEGMENT</span>'s <span class="mono text-xs">clusterOptions</span> <em>replaces</em> the slurm profile's <span class="mono text-xs">--account</span>/<span class="mono text-xs">--qos</span> — every process gets the account except the one GPU process</td>
+                <td class="p-3 mono text-xs">conf/modules.config:929</td>
+                <td class="p-3 text-xs"><span class="bg-emerald-700 text-white px-1.5 py-0.5 rounded">dev</span> <span class="bg-amber-600 text-white px-1.5 py-0.5 rounded">bench</span></td>
+                <td class="p-3 text-xs font-semibold text-amber-700">MED</td>
+              </tr>
+              <tr>
+                <td class="p-3">A typo'd <span class="mono text-xs">params.foo</span> in <span class="mono text-xs">workflows/mirage.nf</span> reads <span class="mono text-xs">null</span> — the consistency checker doesn't scan <span class="mono text-xs">workflows/</span> and <span class="mono text-xs">failUnrecognisedParams</span> is at its <span class="mono text-xs">false</span> default</td>
+                <td class="p-3 mono text-xs">tests/check_param_consistency.py:157-163</td>
+                <td class="p-3 text-xs"><span class="bg-slate-800 text-white px-1.5 py-0.5 rounded">all three</span></td>
+                <td class="p-3 text-xs font-semibold text-amber-700">MED</td>
+              </tr>
+              <tr>
+                <td class="p-3"><span class="mono text-xs">add_cycle</span> backend gate is a <em>denylist</em> (<span class="mono text-xs">== 'tiled'</span>) — any method the enum gains passes and is silently registered with VALIS</td>
+                <td class="p-3 mono text-xs">workflows/mirage.nf:89</td>
+                <td class="p-3 text-xs"><span class="bg-red-600 text-white px-1.5 py-0.5 rounded">main</span></td>
+                <td class="p-3 text-xs font-semibold text-amber-700">MED</td>
+              </tr>
+              <tr>
+                <td class="p-3">Security guard against <span class="mono text-xs">DEEPCELL_ACCESS_TOKEN</span> appearing in clear text in <span class="mono text-xs">.command.run</span> carries no CI-collected tag — it runs nowhere</td>
+                <td class="p-3 mono text-xs">tests/modules/segment_deepcell_token.nf.test:19</td>
+                <td class="p-3 text-xs"><span class="bg-slate-800 text-white px-1.5 py-0.5 rounded">all three</span></td>
+                <td class="p-3 text-xs font-semibold text-amber-700">MED</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="space-y-4">
+        <h2 class="text-2xl font-serif">Fast-forwarding main</h2>
+        <div class="grid md:grid-cols-2 gap-5">
+          <div class="rounded-lg border-2 border-emerald-500 bg-emerald-50 p-5">
+            <div class="text-2xl font-serif text-emerald-900">SAFE</div>
+            <p class="text-sm mt-2 text-emerald-900">Nothing on main is absent from dev. Zero params removed; all 5 presets byte-identical; no doc page deleted; <span class="mono text-xs">git diff --diff-filter=D main dev -- docs/</span> is empty; no tag affected; all 11 <span class="mono text-xs">bolt3x/mirage-*</span> tags verified live on Docker Hub. It turns a red build green and clears 12 of 14 main-side defects, including both criticals.</p>
+          </div>
+          <div class="rounded-lg border border-amber-400 bg-amber-50 p-5 space-y-2 text-sm">
+            <div class="text-xs uppercase tracking-wider text-amber-800">Three calls to make first</div>
+            <ul class="list-disc list-inside space-y-1.5 text-amber-900">
+              <li><strong>Fix <span class="mono text-xs">export_geojson.py:342</span> in the same change</strong> — a regression dev introduced, landing on the FlowPath contract.</li>
+              <li><strong><span class="mono text-xs">max_forks</span> 100 → 5</strong> cuts default cluster throughput ~4× and is silent. Two in-tree comments describe it wrongly.</li>
+              <li><strong><span class="mono text-xs">MERGE_AND_PYRAMID</span>'s new memory coefficient is a guess the closure itself flags</strong> — measure the real bytes-per-file-byte ratio before a large-slide run.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="rounded-lg border border-slate-300 bg-white p-5 text-sm">
+          <div class="text-xs uppercase tracking-wider text-slate-500 mb-2">Tell downstream consumers — output semantics change</div>
+          <ul class="list-disc list-inside space-y-1">
+            <li><strong>Darkfield correction is gone.</strong> nf-core <span class="mono text-xs">BASICPY</span> runs at <span class="mono text-xs">get_darkfield=False</span>; the deleted in-house path used <span class="mono text-xs">True</span>. Corrected pixels are <em>not comparable</em> across the merge.</li>
+            <li><strong>NaN measurements are now omitted, not written as <span class="mono text-xs">0.0</span>.</strong> A cell with no nuclear overlap carries 7 of 9 measurement keys. FlowPath code using <span class="mono text-xs">measurements[...]</span> rather than <span class="mono text-xs">.get()</span> breaks.</li>
+            <li><strong>STARE meshes will differ from main's</strong>, by design — the two new gates reject control points main accepted.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="top-recommendation" class="space-y-4">
+        <h2 class="text-2xl font-serif">Top recommendation</h2>
+        <div class="rounded-xl deepbox text-slate-100 p-8 space-y-4">
+          <div class="text-xs uppercase tracking-wider text-slate-400">Tackle first</div>
+          <h3 class="text-2xl font-serif"><a href="#c1" class="underline decoration-slate-600 underline-offset-4">Candidate 1 — one Nextflow source model behind the guard layer</a></h3>
+          <p class="text-slate-300 max-w-3xl">Not because it is the most severe defect — <span class="mono text-sm">retry.py</span> is — but because it is the one that determines whether you can <em>trust anything else you fix</em>. This audit found four guards that pass while checking nothing, and the pattern is always the same shape: a private regex parse with a blind spot nobody can see from the interface. Until the parse is one deep module with its own meta-test, every future green run is an open question, and <span class="mono text-sm">CLAUDE.md</span>'s standing warning — <em>"watch every new guard fail before you trust it"</em> — stays a manual ritual rather than a property of the code.</p>
+          <p class="text-slate-300 max-w-3xl">It is also the cheapest. The correct parser already exists at <span class="mono text-sm text-emerald-300">tests/test_layout.py:347</span>, complete with a meta-test guarding its own blind spot. The first move is an import, not a design.</p>
+          <div class="pt-3 border-t border-slate-700 text-sm text-slate-400">Sequence after that: fix <span class="mono">retry.py</span> and <span class="mono">export_geojson.py:342</span> (two small edits, both on the critical path) → fast-forward <span class="mono">main</span> → add <span class="mono">benchmarking</span> to <span class="mono">ci.yml</span>'s triggers (one line, collapses two findings) → then Candidate 2, which closes four defects at one seam.</div>
+        </div>
+      </section>
+
+      <footer class="pt-8 border-t border-slate-200 text-xs text-slate-500 space-y-1">
+        <div>Five parallel auditors, isolated worktrees. Stub runs on Nextflow 25.04.7; dev suite 939 passed / 9 skipped; benchmark suite 198 passed.</div>
+        <div>Findings marked <em>reproduced</em> were confirmed by minimal pipeline or break test, not by reading alone.</div>
+      </footer>
+    </main>
+  </body>
+</html>
