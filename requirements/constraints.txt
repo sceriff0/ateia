@@ -35,10 +35,26 @@ scipy==1.15.3
 csbdeep==0.8.2
 dask==2026.7.1
 
+# opencv, BOTH distribution names, same release. `containers/regqc` and `containers/merge`
+# install `opencv-python` (they have the display libs); CI installs `opencv-python-headless`
+# (the runners do not). Two distributions, one upstream release -- so no single constraint
+# can cover both, and before they were listed here the two versions were written in two
+# files with nothing tying them: a CVE bump to regqc would have left CI testing
+# bin/utils/qc.py against a different cv2 than production ships, silently.
+#
+# The headless line constrains NO image -- a constraint on a package nobody requests is
+# inert -- so it costs the nine COPYing Dockerfiles nothing. It exists so `requirements/
+# ci.txt` can name `opencv-python-headless` with no version at all, and so the two are one
+# `git diff` apart. tests/test_ci_stack_pinned.py's EQUIVALENT_DISTRIBUTIONS asserts they
+# stay equal, and exempts the headless line from the "installed by more than one image"
+# rule that every other entry here must satisfy.
+opencv-python==4.10.0.82
+opencv-python-headless==4.10.0.82
+
 # ---------------------------------------------------------------------------------------
 # DELIBERATELY NOT CONSTRAINED HERE, and where each one's single copy actually lives.
 #
-# These four are shared between CI and a production image, but a global constraint on them
+# These three are shared between CI and a production image, but a global constraint on them
 # would be WRONG -- in three cases it would break a build outright. They are recorded here
 # so a reader looking for "where is this pinned?" finds the answer in one place, and each
 # authority file is the same file CI installs, so there is still only one copy.
@@ -54,12 +70,6 @@ dask==2026.7.1
 #                  contract it was written for. Not constrained globally because a
 #                  transitive sklearn in an image that never names it (cellSAM's chain)
 #                  would be forced to this version by a constraint it has no reason to meet.
-#
-#   opencv      -> requirements/regqc.txt pins `opencv-python==4.10.0.82`; CI installs the
-#                  HEADLESS build of the same release (the runners have no display libs),
-#                  which is a different DISTRIBUTION name, so no one constraint covers
-#                  both. requirements/ci.txt carries the headless pin and names this as its
-#                  authority.
 #
 #   torch/kornia-> requirements/torch-cpu.txt (2.3.1, CPU index) and requirements/kornia.txt
 #                  (0.7.3). Read by containers/tiled/Dockerfile AND by CI, so they are one

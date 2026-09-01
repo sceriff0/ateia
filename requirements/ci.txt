@@ -7,6 +7,10 @@
 # image takes its version FROM that image's own file, never from a second copy written
 # here. The `-r` lines below are how, and the two exceptions are named and explained.
 #
+# THE ONLY VERSION STRING BELOW IS `anndata<0.12`, and its reason is spelled out where it
+# sits. Everything else is either constrained by constraints.txt or comes from a production
+# image's own file.
+#
 # NOTE ON torch/kornia: they are NOT included here. `requirements/torch-cpu.txt` carries an
 # `--index-url`, which applies to the whole pip resolve if it is pulled in by `-r`. They
 # are installed as two separate `pip install -r` steps after this one, in that order,
@@ -51,12 +55,13 @@ dask[array]
 # tests/test_registration_qc_lazy_read.py both importorskip("cv2") at MODULE scope, so its
 # absence silently deselects 29 tests.
 #
-# This is one of only two version strings in this file. Its authority is
-# requirements/regqc.txt's `opencv-python==4.10.0.82` — the SAME release, but the headless
-# build is a different distribution NAME, so no constraint can cover both. Bump them
-# together. Also: opencv-python-headless>=5 requires numpy>=2 and would collide with the
-# constrained numpy==1.26.4.
-opencv-python-headless==4.10.0.82
+# UNPINNED HERE. requirements/constraints.txt now carries BOTH opencv distribution names
+# at the same release — `opencv-python` (what containers/regqc and containers/merge
+# install) and `opencv-python-headless` (what CI installs) — so this line names no version
+# and the two cannot drift apart. tests/test_ci_stack_pinned.py's EQUIVALENT_DISTRIBUTIONS
+# asserts they stay equal. Also worth knowing: opencv-python-headless>=5 requires numpy>=2
+# and would collide with the constrained numpy==1.26.4.
+opencv-python-headless
 
 # anndata powers tests/test_join_flowpath.py. THIS IS THE ONE GENUINE DIVERGENCE between CI
 # and every shipped image, and it cannot be closed by a constraints file. anndata's only

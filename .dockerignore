@@ -13,6 +13,10 @@
 .nf-test
 docs
 site
+# 4.5 MB of the ~8.5 MB tracked tree, COPY'd by no Dockerfile (all 10 COPY/ADD lines across
+# the 11 Dockerfiles name requirements/ only).
+assets
+research
 work
 results
 benchmarks
