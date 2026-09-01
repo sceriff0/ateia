@@ -5,14 +5,25 @@ importorskip("torch")/importorskip("kornia"). Before this task CI had no torch, 
 those cases skipped silently -- and a silent skip is how an unimplemented front-end
 shipped in the first place.
 
-SCOPE IS PER-FILE, DELIBERATELY. An earlier version of this guard concatenated
+SCOPE IS PER-JOB, DELIBERATELY. An earlier version of this guard concatenated
 *every* file under `.github/workflows/` and asserted against the union. That is a
 mask, not a scope: deleting BOTH torch and kornia installs from
 `.github/workflows/ci.yml` -- the workflow whose `python-tests` job is CI's blocking
 gate -- left `release.yml`'s copy standing, and every assertion here passed (10
 passed). In that state the DISK cases importorskip away in the gate that actually
-runs on every push, which is precisely the regression this file exists to catch. Each
-workflow that runs the pytest suite is therefore checked ON ITS OWN.
+runs on every push, which is precisely the regression this file exists to catch.
+Every job that runs the pytest suite is therefore checked ON ITS OWN.
+
+WHY THAT NOW RESOLVES TO ONE JOB, AND WHY THAT IS NOT A WEAKENING. Since
+2026-09-01 (CI redesign Phase 5) the suite runs in ONE place --
+`.github/workflows/_test-suite.yml`'s `python-tests` job -- which `ci.yml` and
+`release.yml` both call as a reusable workflow. The union-vs-per-file failure this
+file was written against was two COPIES disagreeing; there is no second copy to
+disagree. The per-job form is kept, unchanged, because it is the form that stays
+correct if a second pytest job ever appears: `jobs_running_the_pytest_suite()`
+discovers by COMMAND across every workflow, so the day one does, it is checked on
+its own without an edit here. If that discovery ever returns nothing, the
+non-vacuity assertion in it fails rather than this file going quietly green.
 
 THE VERSIONS ARE NO LONGER READ OUT OF THE WORKFLOW. They live in
 `requirements/torch-cpu.txt` and `requirements/kornia.txt`, which are the SAME files

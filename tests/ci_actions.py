@@ -31,6 +31,34 @@ This module gives guards three views of that:
     `importorskip` away in silence) and no PyYAML (which silently deletes both of
     tests/test_ci_job_hygiene.py's own guards).
 
+THE SECOND KIND OF INDIRECTION (2026-09-01, CI redesign Phase 5): a job whose
+whole body is `uses: ./.github/workflows/<x>.yml` — a REUSABLE WORKFLOW call.
+`.github/workflows/_test-suite.yml` holds the five blocking suites, and both
+`ci.yml` and `release.yml` reach them that way.
+
+That indirection is deliberately NOT folded into the three views above, and the
+reason is the same one that makes `requirement_files_installed` per-job:
+
+  * `job_resolved_run_text(job)` must stay the ONE JOB's commands. A caller job
+    is not five jobs; folding the called workflow in would make `ci.yml`'s
+    one-line `test-suite` job look like an aggregator (it would contain
+    `_test-suite.yml`'s `needs.<job>.result` reads), and would let a sibling LEG
+    of the suite satisfy a per-job claim about another leg — the union problem,
+    one level up.
+  * `requirement_files_installed(job)` likewise. A caller job installs nothing.
+
+The called workflow's jobs are not lost by that: every guard here discovers
+workflows BY GLOB over `.github/workflows/`, so `_test-suite.yml`'s jobs are
+scanned directly, on their own, as the jobs they are. What the glob cannot answer
+is "does the thing this GATE requires include check X", because that crosses a
+file boundary — so it gets its own, explicitly-named view:
+
+  * `called_local_workflows(path)` — `{job_id: Path}` for each job in `path`
+    whose body calls a local reusable workflow.
+  * `workflow_resolved_text(path)` — `resolved_text(path)` plus the resolved text
+    of every local workflow its jobs call, transitively. For scans that ask "does
+    everything this workflow sets in motion include X".
+
 NOT A GENERAL YAML MODEL. It answers exactly the questions this repo's CI guards
 ask. Anything more would be a second parser with its own blind spots.
 
@@ -57,6 +85,14 @@ ACTIONS_DIR = ROOT / ".github" / "actions"
 # `uses: ./.github/actions/...` as an ellipsis, and a name of "..." matched the
 # looser form and was reported as a missing action.
 LOCAL_ACTION_USES_RE = re.compile(r"\./\.github/actions/([A-Za-z0-9_-][A-Za-z0-9._-]*)")
+
+# `uses: ./.github/workflows/<file>.yml` as a JOB body — a reusable-workflow
+# call. Same shape and the same leading-dot exclusion as above; the `.yml`/`.yaml`
+# suffix is required, which is what distinguishes it from prose naming the
+# directory.
+LOCAL_WORKFLOW_USES_RE = re.compile(
+    r"\./\.github/workflows/([A-Za-z0-9_-][A-Za-z0-9._-]*\.ya?ml)"
+)
 
 # `-r requirements/<file>.txt` / `--requirement=requirements/<file>.txt`, and the
 # bare `requirements/<file>.txt` form a `with: requirements:` block writes.
@@ -144,6 +180,116 @@ def resolved_paths(path: Path) -> list[Path]:
 def resolved_text(path: Path) -> str:
     """The text of `path` concatenated with every local action it reaches."""
     return "\n".join(p.read_text() for p in resolved_paths(path))
+
+
+# ---------------------------------------------------------------------------
+# Reusable-workflow calls
+# ---------------------------------------------------------------------------
+def workflow_file(name: str) -> Path | None:
+    """The workflow file for `./.github/workflows/<name>`, or None if missing."""
+    candidate = WORKFLOWS_DIR / name
+    return candidate if candidate.is_file() else None
+
+
+def called_local_workflows(path: Path) -> dict[str, Path]:
+    """`{job_id: called workflow}` for each job in `path` that calls one.
+
+    Only a job whose BODY is `uses: ./.github/workflows/<x>.yml` counts — that is
+    what a reusable-workflow call is. A `uses:` on a STEP is a composite action
+    and belongs to `local_actions_used`; GitHub does not allow a workflow there.
+    """
+    out: dict[str, Path] = {}
+    for job_id, job in load_jobs(path).items():
+        if not isinstance(job, dict):
+            continue
+        for name in LOCAL_WORKFLOW_USES_RE.findall(str(job.get("uses", ""))):
+            called = workflow_file(name)
+            if called is not None:
+                out[job_id] = called
+    return out
+
+
+def called_workflow_closure(path: Path) -> list[Path]:
+    """Every local workflow reachable from `path` through job-level `uses:`.
+
+    Transitive and cycle-safe. `path` itself is not included.
+    """
+    out: list[Path] = []
+    pending = list(called_local_workflows(path).values())
+    seen = {path}
+    while pending:
+        nxt = pending.pop(0)
+        if nxt in seen:
+            continue
+        seen.add(nxt)
+        out.append(nxt)
+        pending.extend(called_local_workflows(nxt).values())
+    return out
+
+
+def workflow_resolved_text(path: Path) -> str:
+    """`resolved_text(path)` plus that of every local workflow its jobs call.
+
+    The view for "does everything this workflow sets in motion include X". It is
+    deliberately NOT what `job_resolved_run_text` returns: that one is per JOB and
+    must not gain a whole other workflow's contents. See this module's docstring.
+
+    RAW text, comments included — use `workflow_run_scripts` for any scan that
+    asks whether a COMMAND is run.
+    """
+    parts = [resolved_text(path)]
+    parts += [resolved_text(p) for p in called_workflow_closure(path)]
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Comment-blind command view
+# ---------------------------------------------------------------------------
+# TWICE ON 2026-09-01 A GUARD ON THIS REPOSITORY PASSED BECAUSE A COMMENT
+# SATISFIED IT: a comment naming `nextflow plugin install` satisfied a
+# release-parity needle, and a commit's header prose naming an owner satisfied an
+# owner check. A scan that asks "is this command RUN" must therefore read `run:`
+# bodies only, and must drop the shell comments inside them too — a `#` line in a
+# script explaining why a step was removed necessarily quotes the thing removed.
+
+
+def _run_bodies_of_file(path: Path) -> list[str]:
+    """Every `run:` script in one file: workflow jobs' steps and an action's steps."""
+    data = yaml.safe_load(path.read_text()) or {}
+    out: list[str] = []
+    for job in (data.get("jobs") or {}).values():
+        if isinstance(job, dict):
+            out += [str(s["run"]) for s in steps_of(job) if "run" in s]
+    for step in ((data.get("runs") or {}).get("steps") or []):
+        if isinstance(step, dict) and "run" in step:
+            out.append(str(step["run"]))
+    return out
+
+
+def _strip_shell_comments(script: str) -> str:
+    return "\n".join(
+        line for line in script.splitlines() if not line.lstrip().startswith("#")
+    )
+
+
+def run_scripts(path: Path) -> str:
+    """Every `run:` body in `path` and in every local action it uses, comment-free.
+
+    Whole-line `#` comments are dropped from each script. What is left is what the
+    runner executes, which is the only thing a "does CI run this command" guard
+    may be allowed to match.
+    """
+    scripts: list[str] = []
+    for p in resolved_paths(path):
+        scripts += _run_bodies_of_file(p)
+    return "\n".join(_strip_shell_comments(s) for s in scripts)
+
+
+def workflow_run_scripts(path: Path) -> str:
+    """`run_scripts(path)` plus that of every local workflow its jobs call."""
+    parts = [run_scripts(path)]
+    parts += [run_scripts(p) for p in called_workflow_closure(path)]
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------

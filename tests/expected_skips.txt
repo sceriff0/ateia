@@ -59,10 +59,11 @@ tests/test_no_dead_bin_modules.py::test_bin_utils_module_has_a_real_importer[til
 
 # --- DEBT, not an exemption. Read this one before adding anything like it.
 # ---
-# --- This case skips when stardist/csbdeep are not importable. NEITHER pytest
-# --- job installs them -- not ci.yml's `python-tests`, not release.yml's
-# --- `test-python` -- so it does not merely skip here, it skips EVERYWHERE and
-# --- has never run in CI. It is listed rather than fixed because Phase 0's
+# --- This case skips when stardist/csbdeep are not importable. The pytest job
+# --- does not install them -- _test-suite.yml's `python-tests`, which is the
+# --- ONE job running this suite since CI redesign Phase 5 merged ci.yml's and
+# --- release.yml's copies -- so it does not merely skip here, it skips
+# --- EVERYWHERE and has never run in CI. It is listed rather than fixed because Phase 0's
 # --- mandate is to put a floor under the suite, not to change what CI
 # --- installs; making the floor red on day one over a pre-existing condition
 # --- would just get the floor reverted.

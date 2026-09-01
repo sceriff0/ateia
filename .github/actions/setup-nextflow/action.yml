@@ -83,9 +83,12 @@
 # and tests/test_ci_stack_pinned.py, tests/test_ci_job_hygiene.py,
 # tests/test_disk_test_actually_runs.py and
 # tests/test_release_workflow_graph.py all go through it. In particular the
-# `nextflow plugin install` line below is one of the release gate's parity
-# needles (test_release_workflow_graph.BLOCKING_CHECKS) — it is asserted here,
-# not in the workflows, so do not inline it back into one of them.
+# `nextflow plugin install` line below is one of the blocking checks
+# test_release_workflow_graph.BLOCKING_CHECKS enumerates — asserted here, not in
+# the workflows, so do not inline it back into one of them. Since Phase 5 that
+# table is checked against `.github/workflows/_test-suite.yml`, the reusable
+# workflow ci.yml and release.yml both call, rather than against two copies of a
+# gate.
 # =============================================================================
 name: 'Set up Nextflow'
 description: >-
