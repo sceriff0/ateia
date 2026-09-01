@@ -267,17 +267,50 @@ def _run_bodies_of_file(path: Path) -> list[str]:
 
 
 def _strip_shell_comments(script: str) -> str:
-    return "\n".join(
-        line for line in script.splitlines() if not line.lstrip().startswith("#")
-    )
+    """Drop `#` comments from a shell script — whole-line AND trailing.
+
+    QUOTE-AWARE, because a naive "cut at the first `#`" is wrong on this
+    repository's own scripts: `VERSION="${VERSION#v}"` (build-images.yml) and
+    `echo "version_no_v=${VERSION#v}"` (release.yml) both carry a `#` inside
+    double quotes that is parameter expansion, not a comment. Cutting there would
+    silently truncate two real commands.
+
+    The rule implemented is the shell's own: a `#` starts a comment when it is
+    outside quotes and is either at the start of the line or preceded by
+    whitespace. `${VERSION#v}` fails the second half (it follows `N`), and both
+    occurrences fail the first half as well (they are inside `"`).
+
+    The trailing case is closed rather than documented-around because "a comment
+    satisfied a guard" has fired three separate times on this repository. The one
+    real trailing comment in the tree is `nf-core lint --dir . || true  # nf-core
+    lint is advisory, not blocking`, which is exactly the shape someone would use
+    to leave a command's name behind after deleting it.
+    """
+    out = []
+    for line in script.splitlines():
+        in_single = in_double = False
+        cut = None
+        for i, ch in enumerate(line):
+            if ch == "'" and not in_double:
+                in_single = not in_single
+            elif ch == '"' and not in_single:
+                in_double = not in_double
+            elif ch == "#" and not in_single and not in_double:
+                if i == 0 or line[i - 1].isspace():
+                    cut = i
+                    break
+        kept = line if cut is None else line[:cut]
+        if kept.strip():
+            out.append(kept.rstrip())
+    return "\n".join(out)
 
 
 def run_scripts(path: Path) -> str:
     """Every `run:` body in `path` and in every local action it uses, comment-free.
 
-    Whole-line `#` comments are dropped from each script. What is left is what the
-    runner executes, which is the only thing a "does CI run this command" guard
-    may be allowed to match.
+    Both whole-line and TRAILING `#` comments are dropped from each script (see
+    `_strip_shell_comments`). What is left is what the runner executes, which is
+    the only thing a "does CI run this command" guard may be allowed to match.
     """
     scripts: list[str] = []
     for p in resolved_paths(path):

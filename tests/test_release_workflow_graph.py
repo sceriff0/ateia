@@ -772,8 +772,66 @@ def test_the_shared_test_suite_gate_covers_every_job_in_it():
     uncovered = sorted(set(jobs) - covered - {gate_id})
     assert not uncovered, (
         f"{suite.name}: job(s) {uncovered} are not in `{gate_id}`'s `needs:`, so a skip "
-        "or a removal there is invisible to both gates. Add them, and remember the "
-        "aggregator's script must treat anything that is not a success as a failure."
+        "or a removal there is invisible to both gates. Add them, and see "
+        "test_every_gate_aggregator_reads_every_result_it_needs for the other half: "
+        "being in `needs:` is not the same as being CHECKED."
+    )
+
+
+def test_every_gate_aggregator_reads_every_result_it_needs():
+    """`needs:` is the plumbing. The SCRIPT is the check, and they can disagree.
+
+    A job listed in an aggregator's `needs:` but never read in its `run:` body is
+    a leg nothing looks at. The aggregator carries `if: always()`, so it runs
+    whatever its dependencies did; if the script never compares that leg's
+    `result`, the aggregator exits 0, the workflow concludes `success`, and every
+    caller reads `success`. That is exactly the all-skipped hazard the aggregators
+    exist to close, one level down -- per LEG instead of per suite.
+
+    Measured, on a tree where it was possible: deleting the four-line
+    `needs.ruff.result` block from the shared suite's aggregator while leaving
+    `ruff` in its `needs:` list left this whole file GREEN (43 passed). Add a
+    `paths:` filter to `ruff` after that and a skipped lint merges.
+
+    REPO-WIDE, over every aggregator this file can discover -- not only the one
+    that was found broken. `ci.yml`'s `all-tests` and `release.yml`'s `test` have
+    the same shape (each needs one job and reads one result), and the shape is
+    what is being checked, not one instance of it.
+    """
+    offenders = []
+    checked = 0
+    for path in workflow_files():
+        for gate_id, gate in result_aggregator_jobs(path).items():
+            deps = needs_of(gate)
+            # An aggregator that needs nothing cannot be checking anything, and
+            # would otherwise contribute zero to the floor below and pass.
+            assert deps, (
+                f"{path.name}: gate aggregator `{gate_id}` declares no `needs:` at all, "
+                "so it reports on nothing while looking like a gate."
+            )
+            text = run_text(gate)
+            for dep in deps:
+                checked += 1
+                if f"needs.{dep}.result" not in text:
+                    offenders.append(
+                        f"{path.name}: `{gate_id}` needs `{dep}` but never reads "
+                        f"`needs.{dep}.result` in its script, so that job's result "
+                        "cannot fail the gate"
+                    )
+    # Non-vacuity: this is a "must not find" scan over a DISCOVERED set. The
+    # current count is 7 (ci.yml `all-tests` 1, release.yml `test` 1, the shared
+    # suite's aggregator 5); the floor is below that so a matrix or a legitimate
+    # graph change does not trip it, but a collapse to nothing does.
+    assert checked >= 5, (
+        f"only {checked} aggregator dependency(ies) examined across "
+        f"{[p.name for p in workflow_files()]}. The shared test suite's aggregator "
+        "alone needs five jobs, so this scan did not read what it thinks it read."
+    )
+    assert not offenders, (
+        "gate aggregator(s) list a job in `needs:` and never check its result:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nAn `if: always()` aggregator runs regardless of what its dependencies "
+        "did, so an unchecked leg can fail or skip and the gate still exits 0."
     )
 
 
