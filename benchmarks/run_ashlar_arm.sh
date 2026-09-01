@@ -92,7 +92,12 @@ for pid in $patients; do
 
   ref_name=$(basename "$ref_img"); ref_name="${ref_name%%.*}"
   ref_gj="$gj_dir/${ref_name}.geojson"
-  [[ -f "$ref_gj" ]] || ref_gj=$(ls "$gj_dir"/*"${ref_name}"*.geojson 2>/dev/null | head -1 || true)
+  if [[ ! -f "$ref_gj" ]]; then
+    # `ls` exits 1 on no match and this script runs under `set -o pipefail`, so the
+    # no-match case has to be written as the ASSIGNMENT it is. Nothing is swallowed:
+    # the emptiness is asserted immediately below.
+    ref_gj=$(ls "$gj_dir"/*"${ref_name}"*.geojson 2>/dev/null | head -1) || ref_gj=""
+  fi
   if [[ -z "$ref_gj" ]]; then
     echo "[$ARM/$pid] SKIP: no reference geojson matching '$ref_name' in $gj_dir" >&2
     rc=1; continue
@@ -113,7 +118,12 @@ for pid in $patients; do
     # empty transform that scores as a perfect identity — a silent pass, not an error.
     mov_name=$(basename "$mov_img"); mov_name="${mov_name%%.*}"
     mov_gj="$gj_dir/${mov_name}.geojson"
-    [[ -f "$mov_gj" ]] || mov_gj=$(ls "$gj_dir"/*"${mov_name}"*.geojson 2>/dev/null | head -1 || true)
+    if [[ ! -f "$mov_gj" ]]; then
+      # `ls` exits 1 on no match and this script runs under `set -o pipefail`, so the
+      # no-match case has to be written as the ASSIGNMENT it is. Nothing is swallowed:
+      # the emptiness is asserted immediately below.
+      mov_gj=$(ls "$gj_dir"/*"${mov_name}"*.geojson 2>/dev/null | head -1) || mov_gj=""
+    fi
     if [[ -z "$mov_gj" ]]; then
       echo "[$ARM/$pid] SKIP $mov_name: no geojson in $gj_dir" >&2; rc=1; continue
     fi

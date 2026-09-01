@@ -24,13 +24,27 @@ test ever executes a bin/ script in CI again.
 from __future__ import annotations
 
 import ast
+import importlib
 import re
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github" / "workflows" / "benchmarks.yml"
+JOB = "benchmarks"
 PKG = REPO / "benchmarks"
+REQUIREMENTS = REPO / "requirements"
+
+# THE RESOLVER IS SHARED, NOT PRIVATE. `tests/ci_actions.py` is the repository's one
+# reader of workflow/composite-action structure; seven guards here once carried seven
+# private parses of the same files and each had a different blind spot. This module used
+# to carry an eighth -- a line-oriented `pip install` scanner -- which stopped seeing
+# anything the moment the CI redesign moved every install behind
+# `.github/actions/setup-python-env`. It now asks ci_actions which requirements/ files
+# the `benchmarks` JOB installs, and expands them here.
+if str(REPO / "tests") not in sys.path:
+    sys.path.insert(0, str(REPO / "tests"))
+ci_actions = importlib.import_module("ci_actions")
 
 # import name -> the distribution that provides it, where they differ.
 DIST_OF = {
@@ -63,23 +77,48 @@ def _is_first_party(mod: str) -> bool:
     return False
 
 
-def _installed_distributions() -> set[str]:
-    """Distribution names benchmarks.yml pip-installs, minus version pins and flags."""
-    # Join backslash continuations FIRST. A multi-line `pip install a \\\n b` has most of
-    # its packages on lines that do not themselves start with "pip install"; scanning
-    # line-by-line silently drops them, and this guard would then pass while checking a
-    # fraction of the install. test_the_install_parser_actually_finds_packages caught
-    # exactly that bug in this function's first draft.
-    text = re.sub(r"\\\s*\n\s*", " ", WORKFLOW.read_text())
+def _expand(req: Path, seen: set[Path] | None = None) -> set[str]:
+    """Distribution names a requirements file installs, following its `-r` chain.
+
+    `-c` lines are NOT followed. A constraints file bounds a version; it installs
+    nothing, so counting `-c constraints.txt` would report every harmonised package as
+    installed by every file that merely constrains itself -- which is how a guard reports
+    coverage it does not have.
+    """
+    seen = seen if seen is not None else set()
+    req = req.resolve()
+    if req in seen or not req.is_file():
+        return set()
+    seen.add(req)
     names: set[str] = set()
-    for line in text.splitlines():
-        line = line.strip().lstrip("|").strip()
-        if not line.startswith("pip install"):
+    for raw in req.read_text().splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
             continue
-        for tok in line[len("pip install"):].split():
-            if tok.startswith("-"):          # --index-url consumes the rest of the command
-                break
-            names.add(re.split(r"[=<>!~\[]", tok)[0].lower())
+        if line.startswith(("-r ", "--requirement ")):
+            names |= _expand(req.parent / line.split(None, 1)[1].strip(), seen)
+            continue
+        if line.startswith("-"):              # -c, --index-url, --extra-index-url, ...
+            continue
+        names.add(re.split(r"[=<>!~\[;\s]", line)[0].strip().lower())
+    return {n for n in names if n}
+
+
+def _requirement_files() -> list[str]:
+    """The requirements/ files the `benchmarks` job installs, per ci_actions."""
+    jobs = ci_actions.load_jobs(WORKFLOW)
+    assert JOB in jobs, (
+        f"{WORKFLOW.name} has no `{JOB}` job any more, so this guard resolves the "
+        f"install of nothing. Jobs found: {sorted(jobs)}"
+    )
+    return ci_actions.requirement_files_installed(jobs[JOB])
+
+
+def _installed_distributions() -> set[str]:
+    """Every distribution the benchmarks job installs, via requirements/."""
+    names: set[str] = set()
+    for rel in _requirement_files():
+        names |= _expand(REPO / rel)
     return names
 
 
@@ -159,21 +198,47 @@ def test_the_scanner_actually_finds_imports():
     assert "numpy" in mods, sorted(mods)
 
 
-def test_the_install_parser_actually_finds_packages():
-    """Likewise for the workflow side.
+def test_the_install_resolver_actually_finds_packages():
+    """Likewise for the workflow side: a resolver that returns nothing makes the
+    guard above pass by finding no requirement to check against.
 
-    The three names are chosen to exercise the parser, not just to be present:
+    THIS IS NOT A HYPOTHETICAL. Its ancestor scanned `benchmarks.yml` for a literal
+    `pip install <names>` line, and the CI redesign moved every install in the
+    repository behind `.github/actions/setup-python-env` -- at which point the old
+    scanner returned an EMPTY SET and would have reported every import as missing.
+    The rewrite resolves through `tests/ci_actions.py` instead, so the same move
+    cannot silently blind it again.
 
-      numpy          the FIRST name on the pip line
-      scikit-learn   a name on a BACKSLASH-CONTINUATION line, and one whose distribution
-                     name differs from its import name (`sklearn`) -- so this also proves
-                     DIST_OF is applied rather than the import name matched raw
-      ruff           the last name, guarding against an off-by-one that drops the tail
+    The three names exercise the resolver rather than merely being present:
 
-    `torch` used to stand for "reads a SECOND pip install command"; it was removed with
-    the stare_bench rung, and there is only one pip command now. Continuation-line
-    coverage is the property that survived, which is why scikit-learn replaced it rather
-    than the set simply shrinking.
+      ruff           comes from a DIFFERENT requirements file (lint.txt) than the
+                     other two, so a resolver that reads only the first `requirements:`
+                     line loses it
+      scikit-learn   reached only through requirements/ci.txt's `-r segeval.txt`, so
+                     this proves the `-r` chain is followed one hop deep; its
+                     distribution name also differs from its import name (`sklearn`),
+                     so DIST_OF is proved applied rather than the import name matched raw
+      numpy          named in segeval.txt AND tiled.txt, i.e. reached twice -- the cycle
+                     guard in _expand must not drop it
     """
+    files = _requirement_files()
+    assert files, (
+        "ci_actions resolved NO requirements file for the `benchmarks` job, so "
+        "_installed_distributions() is empty and the guard above checks nothing."
+    )
     installed = _installed_distributions()
     assert {"numpy", "scikit-learn", "ruff"} <= installed, sorted(installed)
+
+
+def test_a_constraints_file_does_not_count_as_an_install():
+    """`-c` bounds a version; it installs nothing.
+
+    requirements/constraints.txt names opencv-python, which NO file here `-r`-installs
+    (CI installs the headless distribution). If `_expand` followed `-c`, it would come
+    back as installed and this guard would credit the job with a package it does not
+    have -- the same "declared counts as covered" mistake the sweep coverage guard was
+    fixed for.
+    """
+    assert (REQUIREMENTS / "constraints.txt").is_file()
+    assert "opencv-python" in _expand(REQUIREMENTS / "constraints.txt")
+    assert "opencv-python" not in _installed_distributions()

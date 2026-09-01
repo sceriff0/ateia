@@ -202,10 +202,15 @@ while IFS=',' read -r -a vals; do
   pids+=("$!")
   # Throttle to CONCURRENCY in-flight runs. Wait on the OLDEST pid (FIFO) rather than `wait -n`
   # (bash 4.3+ only) so this works on the older bash found on many clusters. This never exceeds
-  # CONCURRENCY runs at once (the property that matters); `|| true` so `wait` on a run that exited
-  # non-zero — already logged RUN FAILED — is not itself treated as an error here.
+  # CONCURRENCY runs at once (the property that matters). A run that exited non-zero has
+  # already logged RUN FAILED and must not abort the sweep here -- but its status is
+  # RECORDED rather than discarded, so a child that died before logging anything (an
+  # OOM-killed subshell) is still visible. tests/test_no_swallowed_failures.py forbids
+  # the `|| true` form this line used to carry.
   if (( ${#pids[@]} >= CONCURRENCY )); then
-    wait "${pids[0]}" || true
+    reap_rc=0
+    wait "${pids[0]}" || reap_rc=$?
+    (( reap_rc == 0 )) || echo "[reap] pid ${pids[0]} exited $reap_rc" >&2
     pids=("${pids[@]:1}")
   fi
 done < <(tail -n +2 "$RUN_PLAN" | tr -d '\r')

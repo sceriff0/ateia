@@ -103,7 +103,7 @@ col_val() {
 # benchmarks/params_json.py, which reads each param's declared type out of the
 # schema rather than guessing from the text.
 PAIRS=()
-add_param() { [[ -n "${2:-}" ]] && PAIRS+=("$1=$2") || true; }
+add_param() { if [[ -n "${2:-}" ]]; then PAIRS+=("$1=$2"); fi; }
 
 launch() {                       # launch <run_id> <arm> <input> <outdir> <name=value...>
   local run_id="$1" arm="$2" in_csv="$3" outdir="$4"; shift 4
@@ -169,8 +169,16 @@ filtered_sheet() {
 # ---------------------------------------------------------------------------
 pids=()
 reap() {                          # block until under the concurrency cap
+  local rc
   while (( ${#pids[@]} >= CONCURRENCY )); do
-    wait "${pids[0]}" || true
+    # The status is RECORDED, not discarded. Every launched child already prints its
+    # own `[run_id] FAILED`, so reaping a non-zero pid must not abort the pass -- but
+    # `|| true` here meant the reap itself said nothing, and a run that died before
+    # printing anything (an sbatch that never started, an OOM-killed subshell) reaped
+    # in silence. tests/test_no_swallowed_failures.py forbids the `|| true` form.
+    rc=0
+    wait "${pids[0]}" || rc=$?
+    (( rc == 0 )) || echo "[reap] pid ${pids[0]} exited $rc" >&2
     pids=("${pids[@]:1}")
   done
 }
@@ -281,7 +289,13 @@ for kind in preprocess registration external segmentation compute; do
   # compute arm should not contend with the QC arms for nodes while it is being
   # timed — a cost measurement taken under self-inflicted contention is not the
   # cost of the pipeline.
-  for p in "${pids[@]+"${pids[@]}"}"; do wait "$p" || true; done
+  # Same as reap: report the status rather than discarding it, so a child that
+  # died without printing its own failure is still visible at the barrier.
+  for p in "${pids[@]+"${pids[@]}"}"; do
+    rc=0
+    wait "$p" || rc=$?
+    (( rc == 0 )) || echo "[barrier] pid $p exited $rc" >&2
+  done
   pids=()
 done
 

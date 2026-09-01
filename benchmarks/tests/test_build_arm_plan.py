@@ -851,7 +851,22 @@ def test_submit_matrix_resolves_python_and_preflights_deps():
     """The matrix job is hours long; a missing numpy must cost seconds, not the
     whole walltime. And `python` may not exist even with a conda env active."""
     code = (BENCH / "submit_matrix.sh").read_text()
-    assert 'PYTHON="${PYTHON:-$(command -v python3' in code
+    # ASSERTED ON THE PROPERTY, NOT ON ONE LITERAL SPELLING. This line used to match
+    # the exact string `PYTHON="${PYTHON:-$(command -v python3`, and it broke the
+    # moment that line's trailing `|| true` was rewritten into the assignment chain
+    # tests/test_no_swallowed_failures.py requires -- a guard failing on a change that
+    # made the code strictly better is a guard testing the wrong thing. The three
+    # properties below are what actually matters and none of them moved:
+    #   1. an operator-supplied PYTHON wins (a conda env can put the right one
+    #      somewhere neither name finds);
+    #   2. python3 is TRIED, because `python` may not exist even with an env active;
+    #   3. an unresolved interpreter is a NAMED error here, not a `command not found`
+    #      hundreds of lines into a multi-hour job.
+    assert "${PYTHON:-}" in code or "${PYTHON:-$" in code, \
+        "an operator-supplied PYTHON must still win"
+    assert "command -v python3" in code, "python3 must be tried"
+    assert "no python3/python on PATH" in code, \
+        "an unresolved interpreter must abort with a named error"
     assert "python deps OK" in code and "numpy" in code
     assert "from bioio import BioImage" in code, "ND2 sources need a bioio check"
 

@@ -81,7 +81,12 @@ conda activate "$CONDA_ENV"
 # Resolve the interpreter rather than assuming `python`. Observed on this cluster:
 # with nf-env active, `python` does not exist and `python3` silently resolves to
 # /usr/bin/python3, which has no numpy.
-PYTHON="${PYTHON:-$(command -v python3 || command -v python || true)}"
+if [ -z "${PYTHON:-}" ]; then
+    # Written as a chain of assignments rather than `$(... || true)`: `command -v`
+    # exits 1 to mean NOT FOUND, which is data, and the emptiness is asserted on the
+    # next line. tests/test_no_swallowed_failures.py forbids the `|| true` form.
+    PYTHON=$(command -v python3) || PYTHON=$(command -v python) || PYTHON=""
+fi
 [ -n "$PYTHON" ] || { echo "no python3/python on PATH (check CONDA_ENV=$CONDA_ENV)"; exit 1; }
 echo "Using python: $PYTHON ($("$PYTHON" --version 2>&1))"
 

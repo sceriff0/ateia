@@ -77,7 +77,12 @@ command -v nextflow >/dev/null || { echo "nextflow not on PATH (check CONDA_ENV)
 # `base`), and with no `set -e` here a bare `python ...` would fail, the plan
 # would not be written, and the launch would proceed against a stale one. Observed
 # on this cluster: "line 112: python: command not found".
-PYTHON="${PYTHON:-$(command -v python3 || command -v python || true)}"
+if [ -z "${PYTHON:-}" ]; then
+    # Written as a chain of assignments rather than `$(... || true)`: `command -v`
+    # exits 1 to mean NOT FOUND, which is data, and the emptiness is asserted on the
+    # next line. tests/test_no_swallowed_failures.py forbids the `|| true` form.
+    PYTHON=$(command -v python3) || PYTHON=$(command -v python) || PYTHON=""
+fi
 [ -n "$PYTHON" ] || { echo "no python3/python on PATH (check CONDA_ENV)"; exit 1; }
 echo "Using python: $PYTHON ($("$PYTHON" --version 2>&1))"
 # The plan builder needs PyYAML. If PYTHON resolved to a system interpreter rather
