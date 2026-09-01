@@ -54,3 +54,17 @@ tests/test_no_dead_bin_modules.py::test_bin_utils_module_has_a_real_importer[til
 # --- path is. Phase 1 (requirements/) is where this gets settled: either
 # --- csbdeep lands in the CI set and this line is deleted, or the case is.
 tests/test_segment_lazy_dapi_read.py::test_segment_py_delegation_is_live_when_importable
+
+# --- ENVIRONMENT-CONDITIONAL (`?` prefix: suppressed when they fire, exempt from
+# --- the stale-entry check). These six skip in CI's python-tests job, which
+# --- deliberately does not install Nextflow, and do NOT skip on a developer
+# --- machine where nextflow is on PATH. Each names where its compensating check
+# --- runs, so the coverage is not lost -- it moves to a job that has an engine.
+# --- Found by this floor going red on its own first CI run, which is the floor
+# --- doing its job: the allowlist had been calibrated locally.
+?tests/test_channels_count_invariant.py::test_channels_count_dual_invariant_holds_for_a_within_slide_duplicate
+?tests/test_channels_count_invariant.py::test_the_probe_actually_contains_the_within_slide_duplicate_case
+?tests/test_cleanup_validation.py::test_add_cycle_at_a_cleaning_level_is_refused
+?tests/test_cleanup_validation.py::test_an_unknown_level_names_the_valid_set
+?tests/test_cleanup_validation.py::test_start_past_preprocessing_at_a_cleaning_level_says_something
+?tests/test_cleanup_validation.py::test_the_default_path_still_launches

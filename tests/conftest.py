@@ -119,17 +119,42 @@ def _allowlist():
     including a new parametrised case of an already-listed function -- is still
     reported. A file-level or prefix allowlist would have blinded this check to
     exactly the cascade it exists to catch.
+
+    An entry may be prefixed `?` to mark it ENVIRONMENT-CONDITIONAL: it suppresses
+    the skip when it happens, but is exempt from the stale-entry check, because
+    whether it fires depends on the environment rather than on the repo. That
+    distinction is load-bearing and was learned the hard way -- the floor was first
+    calibrated on a developer machine, where `nextflow` is on PATH, and went red on
+    CI's python-tests job, which deliberately does not install it. Six real,
+    documented skips appear there and nowhere else.
+
+    Keep `?` for exactly that: a skip that a DIFFERENT, equally-valid environment
+    would not produce. An unconditional entry that stops matching is still a
+    failure, because that is an exemption quietly widening -- which is the thing
+    this allowlist exists to prevent.
     """
     global _allowlist_cache
     if _allowlist_cache is None:
-        entries = set()
+        entries, conditional = set(), set()
         if ALLOWLIST_PATH.exists():
             for raw in ALLOWLIST_PATH.read_text().splitlines():
                 line = raw.strip()
-                if line and not line.startswith("#"):
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("?"):
+                    nodeid = line[1:].strip()
+                    entries.add(nodeid)
+                    conditional.add(nodeid)
+                else:
                     entries.add(line)
-        _allowlist_cache = entries
-    return _allowlist_cache
+        _allowlist_cache = (entries, conditional)
+    return _allowlist_cache[0]
+
+
+def _conditional_allowlist():
+    """Entries marked `?` -- exempt from the stale check. See _allowlist()."""
+    _allowlist()
+    return _allowlist_cache[1]
 
 
 def _committed_floor():
@@ -223,7 +248,7 @@ def pytest_sessionfinish(session, exitstatus):
                 f"{FLOOR_PATH.relative_to(ROOT)}."
             )
         # Only meaningful on a full run -- which `collected >= floor` establishes.
-        stale = sorted(_allowlist() - _allowlist_hits)
+        stale = sorted(_allowlist() - _allowlist_hits - _conditional_allowlist())
         if stale:
             _problems.append(
                 "allowlist entr(y/ies) in "
