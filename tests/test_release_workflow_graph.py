@@ -898,6 +898,28 @@ def test_no_gate_aggregator_treats_skipped_as_a_pass(path):
         )
 
 
+# `needs.<dep>.result` followed by a comparison. The gate writes
+#     if [ "${{ needs.ruff.result }}" != "success" ]; then
+# so between the `}}` and the operator there is a closing quote and whitespace; an
+# occurrence with nothing comparable after it (an `echo` reporting the value) yields
+# no match, which is exactly the distinction this is for.
+_RESULT_COMPARISON_TEMPLATE = (
+    r"needs\.{dep}\.result\s*\}}\}}\s*[\"\']?\s*(!=|==)\s*[\"\']?([A-Za-z_]+)"
+)
+
+
+def _result_comparisons(text: str, dep: str) -> set:
+    """`{(operator, literal)}` for every comparison applied to `needs.<dep>.result`.
+
+    A dependency can be MENTIONED without being CHECKED -- every branch in these
+    aggregators echoes the value it just rejected -- so "the substring appears" is
+    not the question. The operator is not either: `== "failure"` reads like a check
+    and passes `cancelled`, `skipped` and every future conclusion GitHub adds.
+    """
+    pattern = _RESULT_COMPARISON_TEMPLATE.format(dep=re.escape(dep))
+    return set(re.findall(pattern, text))
+
+
 @pytest.mark.parametrize("path", workflow_files(), ids=lambda p: p.name)
 def test_every_gate_aggregator_reads_every_job_it_needs(path):
     """A job in the gate's `needs:` that the gate never CHECKS is not gated.
@@ -921,13 +943,34 @@ def test_every_gate_aggregator_reads_every_job_it_needs(path):
     """
     for job_id, job in result_aggregator_jobs(path).items():
         text = run_text(job)
-        unread = [dep for dep in needs_of(job) if f"needs.{dep}.result" not in text]
-        assert not unread, (
-            f"{path.name}: job `{job_id}` lists {unread} in `needs:` but never reads "
-            f"`needs.<job>.result` for them. With `if: always()` on the aggregator "
-            "that dependency cannot fail the gate at all -- it is required in "
-            "appearance and advisory in fact. Add a branch for each, or take it out "
-            "of `needs:` and put the job in a workflow nothing is gated on."
+        problems = []
+        for dep in needs_of(job):
+            comparisons = _result_comparisons(text, dep)
+            if not comparisons:
+                problems.append(
+                    f"`{dep}`: never compared at all"
+                    + (
+                        " (the name appears, but only in a message)"
+                        if f"needs.{dep}.result" in text
+                        else ""
+                    )
+                )
+            elif ("!=", "success") not in comparisons:
+                problems.append(
+                    f"`{dep}`: compared as {sorted(comparisons)}, never as "
+                    '`!= "success"`'
+                )
+        assert not problems, (
+            f"{path.name}: job `{job_id}`'s `needs:` and its result checks disagree:\n  "
+            + "\n  ".join(problems)
+            + "\n\nWith `if: always()` on the aggregator -- which every one here carries "
+            "so that it reports rather than vanishes -- a FAILED dependency no longer "
+            "stops the job, so the comparison in the script IS the gate. A dependency "
+            "with no comparison is required in appearance and advisory in fact; one "
+            "compared as `== \"failure\"` instead of `!= \"success\"` lets `cancelled` "
+            "and `skipped` straight through, which is the same hole one operator to "
+            "the left. Add a `!= \"success\"` branch for each, or take it out of "
+            "`needs:` and put the job in a workflow nothing is gated on."
         )
 
 

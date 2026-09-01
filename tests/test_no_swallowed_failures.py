@@ -32,8 +32,19 @@ a rule with no history:
 
 SCOPE. Every `run:` body in `.github/workflows/**` and `.github/actions/**`
 (resolved through `tests/ci_actions.py`, never a private parse), every tracked shell
-script, `.readthedocs.yaml`, and every Nextflow process `script:`/`stub:` body (via
-`tests/nfmodel`, never a private regex).
+script, `.readthedocs.yaml`, every Nextflow process `script:`/`stub:` body (via
+`tests/nfmodel`, never a private regex), **every `containers/*/Dockerfile`**, and the
+`Makefile`.
+
+THE LAST TWO WERE ADDED IN FIX ROUND 1, AND THE OMISSION IS THE POINT. The first
+version of this file scanned the four scopes above and stopped -- in the same commit
+series that moved build-time verification INTO `RUN` lines across all eleven
+Dockerfiles, on the release path. A reviewer appended `RUN echo scope-probe || true`
+to `containers/merge/Dockerfile` and a `|| true` recipe line to the `Makefile` and
+this file stayed green, 49/4. The file class where the next swallowed failure will
+land had just been created by the same work, and the guard could not see it. Both
+probes are reproduced in `test_the_scan_covers_the_build_files` below, so the gap
+cannot silently reopen.
 
 COMMENT-BLIND, in the direction that matters. Comments here can only make the scan
 report MORE, never less -- a `#` line explaining a removed `|| true` necessarily
@@ -96,13 +107,39 @@ ALLOWED: dict[tuple[str, str], str] = {
 MIN_CI_COMMAND_LINES = 100
 MIN_SHELL_SCRIPTS = 3
 MIN_PROCESSES = 15
+# containers/images.json lists eleven images and each has a Dockerfile, plus the
+# Makefile: twelve. Expressed as a floor rather than an equality so a twelfth image
+# does not fail this, but low enough that a broken `git ls-files` pattern does.
+MIN_BUILD_FILES = 12
+
+
+def _tracked(*patterns: str) -> list[Path]:
+    """Tracked files matching `patterns`, via `git ls-files`.
+
+    Tracked rather than globbed, deliberately: `.gitignore` covers per-worktree
+    scratch (`tests/testdata/`, `.nf-test/`, virtualenvs), and a glob would scan
+    those and report a `|| true` nobody committed.
+    """
+    out = subprocess.run(
+        ["git", "ls-files", *patterns], cwd=REPO, capture_output=True, text=True, check=True
+    ).stdout.split()
+    return [REPO / rel for rel in out]
 
 
 def _shell_scripts() -> list[Path]:
-    out = subprocess.run(
-        ["git", "ls-files", "*.sh"], cwd=REPO, capture_output=True, text=True, check=True
-    ).stdout.split()
-    return [REPO / rel for rel in out]
+    return _tracked("*.sh")
+
+
+def _build_files() -> list[Path]:
+    """The container Dockerfiles and the Makefile.
+
+    Both are shell: a Dockerfile `RUN` body is `/bin/sh -c`, and a Makefile recipe
+    line is a shell command whose exit status Make reads. `|| true` swallows a
+    failure in either exactly as it does in a workflow step -- and since Phase 6
+    each Dockerfile ends in `RUN bash /usr/local/bin/mirage-smoke.sh`, which runs on
+    the release path.
+    """
+    return _tracked("containers/*/Dockerfile", "Makefile")
 
 
 def _clean(text: str) -> str:
@@ -131,6 +168,9 @@ def _all_hits() -> list[tuple[str, str]]:
     rtd = REPO / ".readthedocs.yaml"
     if rtd.is_file():
         hits += _hits(".readthedocs.yaml", _clean(rtd.read_text()))
+
+    for path in _build_files():
+        hits += _hits(path.relative_to(REPO).as_posix(), _clean(path.read_text()))
 
     for proc in processes().values():
         rel = proc.path.relative_to(REPO).as_posix()
@@ -161,6 +201,11 @@ def test_the_scan_actually_read_something():
     assert len(processes()) >= MIN_PROCESSES, (
         f"tests.nfmodel found {len(processes())} process(es); modules/local/ holds far "
         "more, so the model read nothing."
+    )
+    assert len(_build_files()) >= MIN_BUILD_FILES, (
+        f"git ls-files matched {len(_build_files())} build file(s); this repo tracks "
+        "eleven containers/*/Dockerfile plus a Makefile, so the pattern is wrong and "
+        "the scope this file was widened to cover is being read as empty."
     )
 
 
@@ -196,6 +241,40 @@ def test_nothing_swallows_a_failure_with_or_true():
         "of discarding the answer. Only if neither is possible, add it to ALLOWED "
         "with the command and a reason.\n\n" + "\n".join(offenders)
     )
+
+
+@pytest.mark.parametrize(
+    "rel",
+    ["containers/merge/Dockerfile", "Makefile"],
+)
+def test_the_scan_covers_the_build_files(rel):
+    """The two files a reviewer probed and this scan did not read.
+
+    This is not a restatement of the scope constant: it appends the reviewer's EXACT
+    probe to a real file on disk, asserts the scan reports it, and restores the file.
+    A scope list can be right and the reader that consumes it wrong -- which is what
+    happened: `_all_hits` simply had no branch for either path, and the constant that
+    would have said so did not exist yet.
+    """
+    path = REPO / rel
+    assert path.is_file(), f"{rel} is gone; this probe is checking nothing"
+    original = path.read_text()
+    probe = (
+        "RUN echo scope-probe || true\n"
+        if rel.endswith("Dockerfile")
+        else "scope-probe:\n\techo scope-probe || true\n"
+    )
+    try:
+        path.write_text(original + "\n" + probe)
+        seen = {where for where, _ in _all_hits()}
+        assert rel in seen, (
+            f"a `|| true` appended to {rel} is invisible to this scan. {rel} is shell "
+            "that CI and the release path execute; add it to _build_files()."
+        )
+    finally:
+        path.write_text(original)
+    # ...and the tree is back the way it was, so the main scan is clean again.
+    assert rel not in {where for where, _ in _all_hits()}
 
 
 @pytest.mark.parametrize(
