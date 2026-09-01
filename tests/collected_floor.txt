@@ -12,6 +12,15 @@
 # integration of all six CI-redesign branches (handoff guards + Phases 1-7):
 # 1280 passed, 12 skipped, 0 failed.
 #
+# RE-MEASURED 2026-09-01 on ci/merge-staging after containers/regqc's dead
+# basicpy/dipy dependencies were deleted: 1280 passed, 12 skipped, unchanged.
+# That fix adds and removes no test -- it deletes two pip lines -- so the number
+# below is confirmed current rather than carried over unchecked. (An earlier
+# attempt at that fix exempted the image from requirements/constraints.txt
+# instead, which DID move the count to 1294 by adding two derived
+# parametrisations; deleting the dead dependencies is the shipped fix and the
+# count returns here.)
+#
 # The previous entry was 1262, measured on ci/phase-6-7 alone. The integrated
 # tree is larger than any one branch because the six are disjoint additions:
 # the handoff guards (test_figures_match_the_pipeline.py,

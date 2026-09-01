@@ -51,12 +51,16 @@ COPY requirements/constraints.txt requirements/regqc.txt /tmp/requirements/
 
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Core scientific + GPU packages
+# Core scientific + GPU packages.
+#
+# scipy is deliberately NOT here. It is pinned in requirements/regqc.txt, which is the LAST pip
+# step below -- because a pin in THIS layer is only as good as what the later steps do to it, and
+# for the life of this image a later step silently downgraded it (BaSiCPy, now removed, capped
+# scipy<1.13). scikit-image pulls scipy anyway and `-c` holds it at the harmonised version.
 RUN pip install --no-cache-dir -c /tmp/requirements/constraints.txt \
     numpy==1.26.4 \
     pandas==2.3.3 \
     scikit-image==0.25.2 \
-    scipy==1.15.3 \
     gputools \
     edt
 
