@@ -68,10 +68,10 @@ ci_actions = importlib.import_module("ci_actions")
 WORKFLOWS = ROOT / ".github" / "workflows"
 RELEASE = WORKFLOWS / "release.yml"
 CI = WORKFLOWS / "ci.yml"
-BUILD_IMAGES = WORKFLOWS / "build-images.yml"
+CONTAINERS = WORKFLOWS / "containers.yml"
 
 # The reusable image-build workflow, exactly as release.yml must name it.
-BUILD_IMAGES_USES = "./.github/workflows/build-images.yml"
+CONTAINERS_USES = "./.github/workflows/containers.yml"
 
 # The shared blocking test suite is DISCOVERED, never named. It is defined as
 # "the local reusable workflow that BOTH gates transitively require", which is
@@ -163,7 +163,7 @@ def artifact_producing_jobs() -> dict:
     """Jobs whose OUTPUT is a release artifact — DISCOVERED, never named.
 
     Two kinds, and they are the two things a release ships:
-      * the job that calls the reusable image build (`uses:` build-images.yml); and
+      * the job that calls the reusable image build (`uses:` containers.yml); and
       * any job that tars up `mirage-<version>.tar.gz`.
 
     Naming them instead would let a third artifact job be added tomorrow with a
@@ -175,7 +175,7 @@ def artifact_producing_jobs() -> dict:
     for job_id, job in release_jobs().items():
         if not isinstance(job, dict):
             continue
-        if BUILD_IMAGES_USES in str(job.get("uses", "")):
+        if CONTAINERS_USES in str(job.get("uses", "")):
             found[job_id] = job
             continue
         text = run_text(job)
@@ -203,9 +203,9 @@ def _gate_ancestors(jobs: dict, roots: list[str]) -> set[str]:
 
     Distinct from `_needs_dag_connected` below, which walks both directions on
     purpose. Here the question is "what does the gate REQUIRE", and release.yml's
-    downstream publish chain (`publish-images`, which calls build-images.yml) is
+    downstream publish chain (`publish-images`, which calls containers.yml) is
     emphatically not part of that. Walking both directions would have made
-    `build-images.yml` come back as a workflow the release gate requires.
+    `containers.yml` come back as a workflow the release gate requires.
     """
     reached = set(roots)
     changed = True
@@ -353,7 +353,7 @@ def test_every_gate_job_checks_out_the_one_pinned_commit():
     must name the pinned SHA -- or it CALLS a reusable workflow, in which case it
     has no steps at all and the SHA has to be handed over as an input, because a
     called workflow does its own checkout against the CALLER's `github.ref`. That
-    is the same defect build-images.yml's `workflow_call` block documents, one
+    is the same defect containers.yml's `workflow_call` block documents, one
     step to the left: here it would make the gate TEST a commit other than the one
     `bump-and-tag` tags.
 
@@ -433,13 +433,13 @@ def test_artifact_jobs_depend_on_bump_and_tag():
     `bump-and-tag` in it, the tarball and the images are built in parallel with the
     version bump, from the un-bumped tree."""
     producers = artifact_producing_jobs()
-    # Non-vacuity: the discovery is by shape (a `uses:` of build-images.yml, or a
+    # Non-vacuity: the discovery is by shape (a `uses:` of containers.yml, or a
     # `tar` of mirage-*.tar.gz). If it finds nothing, every assertion below is over
     # an empty set.
     assert len(producers) >= 2, (
         f"discovered only {sorted(producers)} as release-artifact producers. Expected at "
         "least the image build and the archive job — the discovery predicates "
-        "(a `uses:` of build-images.yml, or a `tar` of a mirage-* archive) no longer "
+        "(a `uses:` of containers.yml, or a `tar` of a mirage-* archive) no longer "
         "match what release.yml does."
     )
     missing = [
@@ -463,13 +463,13 @@ def test_artifact_jobs_build_from_the_created_tag():
 
     wrong = []
     for job_id, job in producers.items():
-        if BUILD_IMAGES_USES in str(job.get("uses", "")):
+        if CONTAINERS_USES in str(job.get("uses", "")):
             # A reusable workflow does its own checkout and sees the CALLER's
             # github.ref, so the tag has to be handed to it as an input.
             passed = str((job.get("with") or {}).get("ref", ""))
             if RELEASE_TAG not in passed:
                 wrong.append(
-                    f"{job_id}: calls {BUILD_IMAGES_USES} with ref={passed!r}; a reusable "
+                    f"{job_id}: calls {CONTAINERS_USES} with ref={passed!r}; a reusable "
                     f"workflow checks out the CALLER's github.ref unless given "
                     f"`ref: ${{{{ {RELEASE_TAG} }}}}`"
                 )
@@ -485,21 +485,21 @@ def test_artifact_jobs_build_from_the_created_tag():
     )
 
 
-def test_build_images_honours_the_ref_it_is_given():
+def test_containers_workflow_honours_the_ref_it_is_given():
     """The other half of the same invariant, in the called workflow. release.yml can
-    pass `ref:` all it likes; if build-images.yml's own `actions/checkout` steps ignore
+    pass `ref:` all it likes; if containers.yml's own `actions/checkout` steps ignore
     it, the images are still built from the caller's ref."""
-    data = load(BUILD_IMAGES)
+    data = load(CONTAINERS)
     triggers = data.get("on") or data.get(True) or {}
     call_inputs = ((triggers.get("workflow_call") or {}).get("inputs")) or {}
     assert "ref" in call_inputs, (
-        "build-images.yml's `workflow_call` declares no `ref` input, so release.yml "
+        "containers.yml's `workflow_call` declares no `ref` input, so release.yml "
         "cannot tell it which commit to build the images from."
     )
 
     seen = 0
     ignoring = []
-    for job_id, job in jobs_of(BUILD_IMAGES).items():
+    for job_id, job in jobs_of(CONTAINERS).items():
         if not isinstance(job, dict):
             continue
         for step in checkout_steps(job):
@@ -507,11 +507,11 @@ def test_build_images_honours_the_ref_it_is_given():
             if "inputs.ref" not in str((step.get("with") or {}).get("ref", "")):
                 ignoring.append(f"{job_id}: `{step.get('name', '<unnamed>')}`")
     assert seen >= 2, (
-        f"found {seen} checkout step(s) in build-images.yml; both the matrix-resolving "
+        f"found {seen} checkout step(s) in containers.yml; both the matrix-resolving "
         "`setup` job and the `build` job check out the repo, so this scan missed one."
     )
     assert not ignoring, (
-        "build-images.yml checkout step(s) ignore the `ref` input, so a release builds "
+        "containers.yml checkout step(s) ignore the `ref` input, so a release builds "
         "images from the caller's ref rather than the tag:\n" + "\n".join(ignoring)
     )
 
@@ -729,7 +729,7 @@ def test_the_two_gates_require_the_same_reusable_test_suite():
     same YAML, once.
 
     It is asserted UPSTREAM-ONLY. release.yml's publish chain also calls a
-    reusable workflow (build-images.yml), downstream of the gate; counting that
+    reusable workflow (containers.yml), downstream of the gate; counting that
     would make the release gate look like it requires the image build.
     """
     suite = shared_gate_suite()  # asserts there is exactly one, with the reason
@@ -783,7 +783,7 @@ def test_the_shared_test_suite_honours_the_ref_it_is_given():
     A caller can pass `ref:` all it likes; if the called workflow's own
     `actions/checkout` steps ignore it, every job there checks out the CALLER's
     `github.ref` instead. On the release path that means the gate tests a
-    different commit from the one `bump-and-tag` tags — build-images.yml's
+    different commit from the one `bump-and-tag` tags — containers.yml's
     `workflow_call` block records the same defect one step to the right, where it
     built ten container images from an un-bumped tree.
     """
@@ -953,10 +953,10 @@ def test_no_workflow_branches_on_the_workflow_call_event_name():
     Inside a REUSABLE workflow the event payload is the CALLER's — GitHub's own
     words: "the event payload in the called workflow is the same event payload
     from the calling workflow". So `github.event_name` is never `workflow_call`;
-    on a published release reaching build-images.yml through release.yml's
+    on a published release reaching containers.yml through release.yml's
     `publish-images`, it is `release`.
 
-    build-images.yml's version resolver branched on exactly that, could not match,
+    containers.yml's version resolver branched on exactly that, could not match,
     fell through to its `push`-trigger default of `PUSH="false"`, and gave the
     operator a fully green "Publish Images" job with ZERO images on Docker Hub —
     while `modules/local/*.nf` pull `bolt3x/mirage-<component>:<manifest.version>`
@@ -1061,7 +1061,7 @@ def test_every_job_is_connected_to_its_workflows_gate():
     A job with no `needs:` and nothing needing it is invisible to the gate and
     fully visible in the run status -- the worst of both. That was `nf-test-real`.
 
-    Workflows with no gate aggregator (build-images.yml, nightly.yml) are out of
+    Workflows with no gate aggregator (containers.yml, nightly.yml) are out of
     scope BY CONSTRUCTION, not by exemption: there is no gate for a job to be
     disconnected from, and nightly.yml being one of them is the entire point of
     it existing. They are counted, not skipped -- a skip is not a pass in this

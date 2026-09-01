@@ -29,7 +29,7 @@
 # THE `ref` INPUT IS NOT OPTIONAL, AND THE REPO ALREADY LEARNED WHY
 # -----------------------------------------------------------------------------
 # A called workflow does its OWN checkout and sees the CALLER's `github.ref`, not
-# whatever the caller checked out. `build-images.yml`'s `workflow_call` block
+# whatever the caller checked out. `containers.yml`'s `workflow_call` block
 # carries the measured consequence: a workflow_dispatch release built ten images
 # from the dispatch branch's un-bumped tree while `bump-and-tag` was still
 # running, so `mirage-<component>:1.0.0` was built from a tree still saying the

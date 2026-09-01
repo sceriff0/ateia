@@ -185,7 +185,7 @@ jobs:
   #
   # `ref` IS THE LOAD-BEARING INPUT. A reusable workflow does its OWN checkout
   # and sees the CALLER's `github.ref`, not whatever the caller checked out --
-  # the property build-images.yml's `workflow_call` block documents after it
+  # the property containers.yml's `workflow_call` block documents after it
   # built ten container images from the wrong tree. Here the consequence would be
   # worse: the gate would TEST a commit other than the one `bump-and-tag` tags.
   # `needs.validate.outputs.sha` is the SHA `validate` pinned once, so the whole
@@ -351,14 +351,17 @@ jobs:
 
   # ===========================================================================
   # Job 4 - build & push all container images to Docker Hub (one descriptive tag
-  # per image). Reuses build-images.yml via workflow_call.
+  # per image). Reuses containers.yml via workflow_call -- the SAME reusable workflow
+  # ci.yml calls on a pull request to build the changed images and nightly.yml calls
+  # to build all eleven. This job is the only caller that passes a `version`, and a
+  # non-empty version is exactly what makes containers.yml push (see its resolver).
   #
   # `needs: bump-and-tag` and `ref: <tag>` are both load-bearing. The images pin
   # manifest.version into what modules/local/*.nf pull, so building them from an
   # un-bumped tree publishes mirage-<component>:1.0.0 built from a tree that
   # still says the previous version. A reusable workflow does its OWN checkout
   # and sees the CALLER's github.ref, so the tag has to be passed in explicitly;
-  # build-images.yml takes it as its `ref` input.
+  # containers.yml takes it as its `ref` input.
   #
   # `needs: verify-config` is the third load-bearing one, and it covers the
   # `release: published` trigger, where nothing bumps anything: the operator
@@ -384,7 +387,7 @@ jobs:
       && needs.test.result == 'success'
       && (needs.bump-and-tag.result == 'success' || needs.bump-and-tag.result == 'skipped')
       && (needs.verify-config.result == 'success' || needs.verify-config.result == 'skipped')
-    uses: ./.github/workflows/build-images.yml
+    uses: ./.github/workflows/containers.yml
     with:
       version: ${{ needs.validate.outputs.version }}
       ref: ${{ needs.validate.outputs.version }}

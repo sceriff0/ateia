@@ -1,4 +1,4 @@
-# The container build context is the REPOSITORY ROOT (.github/workflows/build-images.yml
+# The container build context is the REPOSITORY ROOT (.github/workflows/containers.yml
 # passes `context: .`), because every Dockerfile under containers/ COPYs its pins from
 # requirements/ — the same files the workflows install. A per-directory context cannot
 # reach outside itself, so the context had to widen; this file keeps what is actually

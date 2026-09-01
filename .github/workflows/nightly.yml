@@ -88,6 +88,37 @@ env:
 
 jobs:
   # ============================================================================
+  # Container images — the full static matrix, build-only
+  # ============================================================================
+  # ADDED 2026-09-01 (CI redesign, Phase 6). THIS IS THE ONLY MECHANISM IN THE
+  # REPOSITORY THAT CAN DETECT AN IMAGE WHICH STOPPED BUILDING FOR A REASON OUTSIDE
+  # THE REPOSITORY, and that is a failure this project has already had: an apt repo
+  # that moves, a wheel that is yanked, a git host that deletes a project.
+  # containers/regqc carried `pip install git+https://github.com/sceriff0/cudipy.git`
+  # for months after that repository ceased to exist -- the image could not be built
+  # AT ALL -- and nothing noticed, because `build-images.yml` only ran when someone
+  # pushed a change to containers/**. ci.yml's changed-only build closes the "a PR
+  # broke it" half; this closes the "nobody touched it and it broke anyway" half.
+  # Neither alone is enough.
+  #
+  # Build-only, and build-only is the whole cost story: no `version:` input means
+  # containers.yml resolves push=false, and ten of the eleven images come back from
+  # the `type=gha` layer cache in minutes. The cost is paid only by whichever image's
+  # upstream actually broke -- which is exactly the run you want to be paying for.
+  #
+  # ADVISORY BY LOCATION, like everything else here: nothing in this workflow is in
+  # any merge gate, and nothing here is `continue-on-error` or `|| true`. A nightly
+  # image build that fails FAILS, visibly, in this workflow's own status.
+  containers:
+    name: Container images (full matrix)
+    uses: ./.github/workflows/containers.yml
+    # Every input defaulted on purpose: no `version` (build only, never push), no
+    # `ref` (the default branch), `scope: all` (all eleven from
+    # containers/images.json), no `only` filter.
+    permissions:
+      contents: read
+
+  # ============================================================================
   # nf-test real suite
   # ============================================================================
   nf-test-real:

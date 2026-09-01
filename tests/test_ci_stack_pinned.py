@@ -442,7 +442,7 @@ def test_image_installing_a_constrained_package_reads_the_constraints_file(conta
         f"second copy of the version authority again. Add "
         f"`COPY requirements/constraints.txt /tmp/requirements/constraints.txt` and pass "
         f"`-c /tmp/requirements/constraints.txt` to pip. (The build context is the "
-        f"repository root; see .github/workflows/build-images.yml.)"
+        f"repository root; see .github/workflows/containers.yml.)"
     )
     uncovered = _uncovered_invocations(container)
     assert not uncovered, (

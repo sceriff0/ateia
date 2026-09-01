@@ -87,7 +87,7 @@ jobs:
   #
   # `ref: ${{ github.sha }}` IS LOAD-BEARING, not decoration. A called workflow
   # does its own checkout and sees the CALLER's `github.ref`, not whatever the
-  # caller checked out -- the property build-images.yml's `workflow_call` block
+  # caller checked out -- the property containers.yml's `workflow_call` block
   # documents at length after it built ten container images from the wrong tree.
   # Passing the SHA pins this run to one commit: on a pull_request `github.sha`
   # is the merge commit the run is about, and on a push it is the pushed commit.
@@ -106,6 +106,46 @@ jobs:
       contents: read
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  # ============================================================================
+  # Container images — build only what this change touched, and prove it runs
+  # ============================================================================
+  # ADDED 2026-09-01 (CI redesign, Phase 6). Until then NOTHING built a container
+  # image on a pull request: `build-images.yml` triggered on a push to main and on
+  # a manual dispatch only. So a Dockerfile could stop building and the PR that
+  # broke it was green; the failure surfaced on main, or on the release path, where
+  # it costs a half-published image set. containers/regqc carried a
+  # `pip install git+https://github.com/sceriff0/cudipy.git` for months after that
+  # repository ceased to exist, and nothing in CI could have noticed.
+  #
+  # `scope: changed` is what makes this affordable: `containers.yml` diffs the
+  # change against its base and builds only the images whose build context (or a
+  # requirements file their Dockerfile actually COPYs) moved. A PR that touches no
+  # image resolves to an empty matrix and its `build` job legitimately skips.
+  #
+  # IT IS IN THE `all-tests` GATE, and that is a deliberate departure from the
+  # redesign spec, which said not to make the build a required check because an
+  # empty matrix hard-fails and the gate would have to tolerate a skip. It does not
+  # have to here: what the gate depends on is THIS job -- the caller -- which has no
+  # `if:` and never skips. The skip happens one level down, on `containers.yml`'s
+  # matrix job, and a called workflow's conclusion is `success` when a job inside it
+  # skips. So `all-tests` keeps "anything that is not a success fails", and a
+  # Dockerfile that stops building blocks the merge instead of being noticed later.
+  # (`containers.yml`'s own `resolve` job never skips, which is what stops the
+  # "every job skipped concludes success" hazard `_test-suite.yml`'s `suite-gate`
+  # exists for.)
+  containers:
+    name: Container images
+    uses: ./.github/workflows/containers.yml
+    with:
+      # Same reason as `test-suite` above: a called workflow does its own checkout
+      # against the CALLER's github.ref, so the commit has to be handed over.
+      ref: ${{ github.sha }}
+      scope: changed
+      # No `version:` -- an empty version is how a caller says "build, never push".
+      # containers.yml's resolver reads that, not github.event_name.
+    permissions:
+      contents: read
 
   # ============================================================================
   # Linting (nf-core structure lint — advisory, not a merge gate)
@@ -163,7 +203,11 @@ jobs:
     # nightly.yml holds the two advisory suites (`nf-test-real`,
     # `nf-test-integration`); when the real suite goes green it comes back into
     # the shared suite, not into this list directly.
-    needs: [test-suite]
+    #
+    # `containers` joined the list in Phase 6. It is the CALLER job, which has no
+    # `if:` and therefore never skips, so requiring `success` from it does not
+    # depend on whether there was anything to build -- see that job's header.
+    needs: [test-suite, containers]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -181,6 +225,10 @@ jobs:
         run: |
           if [ "${{ needs.test-suite.result }}" != "success" ]; then
             echo "The shared test suite did not pass (result: ${{ needs.test-suite.result }})"
+            exit 1
+          fi
+          if [ "${{ needs.containers.result }}" != "success" ]; then
+            echo "The container build did not pass (result: ${{ needs.containers.result }})"
             exit 1
           fi
           echo "All required tests passed!"
