@@ -73,6 +73,13 @@ BUILD_IMAGES = WORKFLOWS / "build-images.yml"
 # The reusable image-build workflow, exactly as release.yml must name it.
 BUILD_IMAGES_USES = "./.github/workflows/build-images.yml"
 
+# The shared blocking test suite is DISCOVERED, never named. It is defined as
+# "the local reusable workflow that BOTH gates transitively require", which is
+# the property Phase 5 exists to create; hardcoding `_test-suite.yml` here would
+# make a rename of that file look like a passing test over a broken graph, and
+# would make "the two gates run the same thing" unfalsifiable by construction.
+# See shared_gate_suite() below.
+
 # `validate` resolves these; everything downstream reads them. Expressed as the
 # expression text the workflow must contain, because that is what actually has
 # to match for the checkout to land on the right commit.
@@ -100,14 +107,34 @@ def needs_of(job: dict) -> list[str]:
 
 
 def run_text(job: dict) -> str:
-    """A job's `run:` bodies PLUS the local composite actions it uses.
+    """WHAT A JOB RUNS: its `run:` bodies plus those of the composite actions it
+    uses, with comments stripped.
 
-    RESOLVED, not raw. A gate job that calls `./.github/actions/setup-nextflow`
-    really does run `nextflow plugin install`; a scan that reads only the job's
-    own `run:` blocks would report that the release gate stopped provisioning
-    plugins the day the step was de-duplicated.
+    RESOLVED. A gate job that calls `./.github/actions/setup-nextflow` really does
+    run `nextflow plugin install`; a scan that reads only the job's own `run:`
+    blocks would report that the release gate stopped provisioning plugins the day
+    the step was de-duplicated.
+
+    AND COMMENT-BLIND. Every caller of this helper asks a "does this job run X"
+    question -- discovery of a gate aggregator, of an artifact producer, of an
+    advisory suite; the `rev-parse HEAD` check; the inline version check; the
+    `!= "success"` comparison. On the raw view a COMMENT naming X answers all of
+    them, and a commented-out command is the likelier way any of these actually
+    gets disabled: it is what someone does to a flaky check under time pressure,
+    and it leaves the literal string behind for a raw-text scan to find.
+
+    Measured: with `job_resolved_run_text` here, commenting out the four-line
+    `needs.ruff.result` block in the shared suite's aggregator -- leaving the
+    string `needs.ruff.result` sitting in a comment --
+    `test_every_gate_aggregator_reads_every_result_it_needs` PASSED, over a gate
+    that no longer checks that leg at runtime. That is the same bug that guard was
+    written to close, one level in.
+
+    If a future check here genuinely asks about the files' literal bytes (a
+    `uses:` line, a cache key), call `ci_actions.job_resolved_run_text` at that
+    site and say why -- do not widen this helper back.
     """
-    return ci_actions.job_resolved_run_text(job)
+    return ci_actions.job_run_scripts(job)
 
 
 def checkout_steps(job: dict) -> list[dict]:
@@ -186,6 +213,69 @@ def gate_jobs() -> dict:
     )
     ids = needs_of(jobs["test"])
     return {job_id: jobs[job_id] for job_id in ids if job_id in jobs}
+
+
+# ---------------------------------------------------------------------------
+# The shared blocking suite, DISCOVERED from the two gates
+# ---------------------------------------------------------------------------
+def _gate_ancestors(jobs: dict, roots: list[str]) -> set[str]:
+    """Jobs a gate transitively `needs:` — UPSTREAM ONLY.
+
+    Distinct from `_needs_dag_connected` below, which walks both directions on
+    purpose. Here the question is "what does the gate REQUIRE", and release.yml's
+    downstream publish chain (`publish-images`, which calls build-images.yml) is
+    emphatically not part of that. Walking both directions would have made
+    `build-images.yml` come back as a workflow the release gate requires.
+    """
+    reached = set(roots)
+    changed = True
+    while changed:
+        changed = False
+        for job_id in list(reached):
+            job = jobs.get(job_id)
+            if not isinstance(job, dict):
+                continue
+            for dep in needs_of(job):
+                if dep not in reached:
+                    reached.add(dep)
+                    changed = True
+    return reached - set(roots)
+
+
+def gate_required_workflows(path: Path) -> set[Path]:
+    """Local reusable workflows the gate in `path` transitively requires."""
+    jobs = jobs_of(path)
+    aggregators = sorted(result_aggregator_jobs(path))
+    required = _gate_ancestors(jobs, aggregators)
+    return {
+        called
+        for job_id, called in ci_actions.called_local_workflows(path).items()
+        if job_id in required
+    }
+
+
+def shared_gate_suite() -> Path:
+    """The one reusable workflow BOTH gates require. Discovered, not named.
+
+    This IS Phase 5's invariant, expressed as a lookup rather than as prose: if
+    the two gates stop reaching the same file, every needle test below fails at
+    this call instead of quietly checking one workflow twice.
+    """
+    ci_required = gate_required_workflows(CI)
+    release_required = gate_required_workflows(RELEASE)
+    shared = ci_required & release_required
+    assert len(shared) == 1, (
+        "ci.yml's gate and release.yml's gate do not require exactly one reusable "
+        f"workflow in common (ci: {sorted(p.name for p in ci_required)}, release: "
+        f"{sorted(p.name for p in release_required)}, shared: "
+        f"{sorted(p.name for p in shared)}).\n"
+        "Since 2026-09-01 the blocking suites live in ONE reusable workflow that both "
+        "gates call, which is what makes CI/release parity structural instead of a "
+        "claim in two headers that had already diverged once. Restore the shared "
+        "`uses:`, or -- if the suites really were split again -- restore the parity "
+        "comparison this file deleted when they were merged."
+    )
+    return next(iter(shared))
 
 
 # ---------------------------------------------------------------------------
@@ -273,28 +363,61 @@ def test_no_job_in_release_yml_does_a_bare_checkout():
 
 
 def test_every_gate_job_checks_out_the_one_pinned_commit():
-    """The five gate jobs run on five separate runners. If each resolves `main` (or
-    the tag) for itself, a push landing mid-run splits the gate across two trees and
-    nothing reports it. `validate` resolves the ref ONCE to a SHA and every gate job
-    checks out that SHA."""
+    """The gate runs on several runners. If each resolves `main` (or the tag) for
+    itself, a push landing mid-run splits the gate across two trees and nothing
+    reports it. `validate` resolves the ref ONCE to a SHA and the whole gate runs
+    on that SHA.
+
+    TWO SHAPES since 2026-09-01, and the second is the one that matters. A gate
+    job either checks the repository out itself -- then its `actions/checkout`
+    must name the pinned SHA -- or it CALLS a reusable workflow, in which case it
+    has no steps at all and the SHA has to be handed over as an input, because a
+    called workflow does its own checkout against the CALLER's `github.ref`. That
+    is the same defect build-images.yml's `workflow_call` block documents, one
+    step to the left: here it would make the gate TEST a commit other than the one
+    `bump-and-tag` tags.
+
+    The floor is no longer "five jobs": the five hand-copied gate jobs became one
+    `uses:` of the shared suite. What replaces that non-vacuity is
+    `test_the_shared_test_suite_honours_the_ref_it_is_given`, which asserts the
+    called workflow really has the jobs and really reads the input.
+    """
     gate = gate_jobs()
-    assert len(gate) >= 5, (
-        f"release.yml's `test` job needs {sorted(gate)} — fewer than the five blocking "
-        "checks ci.yml's `all-tests` requires. Either the gate shrank or its `needs:` "
-        "no longer names the gate jobs, and the per-job assertions here cover less than "
-        "they claim."
+    assert gate, (
+        "release.yml's `test` job needs nothing this file can resolve to a job. Either "
+        "the gate lost its `needs:` or the job ids no longer exist, and every "
+        "assertion below is over an empty set."
     )
     wrong = []
+    saw_pinned = 0
     for job_id, job in gate.items():
+        called = str(job.get("uses", ""))
+        if called:
+            passed = str((job.get("with") or {}).get("ref", ""))
+            if PINNED_SHA not in passed:
+                wrong.append(
+                    f"{job_id}: calls {called} with ref={passed!r}; a reusable workflow "
+                    f"checks out the CALLER's github.ref unless given "
+                    f"`ref: ${{{{ {PINNED_SHA} }}}}`"
+                )
+            else:
+                saw_pinned += 1
+            continue
         steps = checkout_steps(job)
         assert steps, f"gate job `{job_id}` never checks out the repository at all"
         for step in steps:
             ref = str((step.get("with") or {}).get("ref", ""))
             if PINNED_SHA not in ref:
                 wrong.append(f"{job_id}: checks out {ref!r}, not {PINNED_SHA}")
+            else:
+                saw_pinned += 1
     assert not wrong, (
-        "gate job(s) do not check out the commit `validate` pinned, so the five gate "
-        "jobs can test different trees:\n" + "\n".join(wrong)
+        "gate job(s) do not run on the commit `validate` pinned, so the gate can test "
+        "a different tree from the one that gets tagged:\n" + "\n".join(wrong)
+    )
+    assert saw_pinned >= 1, (
+        f"no gate job names {PINNED_SHA} at all ({sorted(gate)}). An empty `wrong` list "
+        "here would only mean the scan found no checkout and no reusable call."
     )
 
 
@@ -532,14 +655,28 @@ def test_jobs_needing_verify_config_tolerate_it_being_skipped():
 
 
 # ---------------------------------------------------------------------------
-# Invariant 5: the gate runs what CI blocks on.
+# Invariant 5: both gates run the same blocking checks, and it is still a real
+# list of checks rather than an empty agreement.
 # ---------------------------------------------------------------------------
-
-# One entry per blocking check ci.yml's `all-tests` gate requires, keyed on the
-# COMMAND rather than the job name (the two workflows name their jobs differently
-# and always will). The second element is what makes this non-vacuous: the same
-# substring must be found in ci.yml, so a typo'd or reworded needle fails on the
-# ci.yml side instead of silently matching nothing on both.
+# REWRITTEN 2026-09-01 (CI redesign Phase 5), AND THE HALF THAT WAS DELETED IS
+# NAMED HERE so the next reader can judge the trade rather than trust it.
+#
+# What this used to assert, per needle: (a) the command appears in ci.yml, and
+# (b) the command appears in the `run:` bodies of release.yml's gate jobs. Half
+# (b) is gone. It compared two hand-maintained copies of the same five jobs, and
+# there is now ONE copy: both gates reach the blocking suites through
+# `uses: ./.github/workflows/<the shared suite>`, so "the release gate runs what
+# CI blocks on" is a fact about `uses:` and `needs:`, checked once by
+# test_the_two_gates_require_the_same_reusable_test_suite, instead of a
+# string-by-string comparison of two files that can drift.
+#
+# What is NOT redundant, and is therefore kept verbatim: the list itself. Parity
+# between two gates says nothing about whether either runs anything -- two gates
+# agreeing on an empty suite agree perfectly. So every needle below is now
+# asserted against the SHARED SUITE, and separately against each caller's
+# transitive text, which is what would fail if a caller dropped the `uses:`.
+#
+# One entry per blocking check, keyed on the COMMAND rather than the job name.
 BLOCKING_CHECKS = [
     ("python unit suite", "pytest -v tests/"),
     ("DISK front-end non-skip proof", "tests/test_coarse_frontend.py"),
@@ -563,28 +700,245 @@ BLOCKING_CHECKS = [
 
 
 @pytest.mark.parametrize("label,needle", BLOCKING_CHECKS, ids=[c[0] for c in BLOCKING_CHECKS])
-def test_the_release_gate_runs_every_check_ci_blocks_on(label, needle):
-    """release.yml's header claims the release is gated on the same checks CI runs.
+def test_the_shared_test_suite_runs_every_blocking_check(label, needle):
+    """Each blocking check must still be RUN, in the suite both gates require.
 
-    It ran 5 of these 13. Absent were the whole nf-test stub suite, ruff, the DEEPCELL
-    token-leak guard and its collection assertion, tests/lib_probe.nf,
-    check_profiles_parse.sh, check_param_consistency.py, cleanup_work.sh and the
-    shipped-defaults stub run — so a release could ship a broken lib/ class, a leaking
-    token, an unparseable profile or a param/schema mismatch, and be green.
+    The 13 in this list are the ones release.yml did not run while claiming it
+    did: the whole nf-test stub suite, ruff, the DEEPCELL token-leak guard and its
+    collection assertion, tests/lib_probe.nf, check_profiles_parse.sh,
+    check_param_consistency.py, cleanup_work.sh and the shipped-defaults stub run.
+    Merging the two copies fixed WHERE they run; it does not stop one of them being
+    deleted, and a deleted check has no symptom.
+
+    Resolved through the composite actions, so a check that moves into
+    `.github/actions/**` (as `nextflow plugin install` already has) still resolves.
+
+    COMMENT-BLIND, and that is not a detail. The previous version of this test
+    matched against the whole file text, so a COMMENT naming a command satisfied
+    it -- which happened, on this repository, on 2026-09-01: a comment naming
+    `nextflow plugin install` passed the needle for a workflow that had stopped
+    running it. `ci_actions.run_scripts` reads `run:` bodies only and drops the
+    shell comments inside them. Proved by putting each needle in a comment and
+    watching this fail.
     """
+<<<<<<< HEAD
     # Non-vacuity, and a typo detector: the needle must be a command ci.yml really
     # runs. A misspelled needle fails HERE rather than passing vacuously on both sides.
     assert needle in ci_actions.resolved_run_text(CI), (
         f"{needle!r} ({label}) does not appear in ci.yml, so it is not a check CI runs "
         "and this parametrised case is asserting against a string that matches nothing."
+=======
+    suite = shared_gate_suite()
+    assert needle in ci_actions.run_scripts(suite), (
+        f"{needle!r} ({label}) is not RUN anywhere in {suite.name}, the suite both "
+        "gates require. It was a BLOCKING check in ci.yml; if it was deliberately "
+        "removed, remove it from BLOCKING_CHECKS in the same commit, and say why. "
+        "(A comment mentioning it does not count -- this reads `run:` bodies with "
+        "their comments stripped.)"
+    )
+    # And each caller must actually reach it. This is what would fail if ci.yml or
+    # release.yml dropped the `uses:` — the case the deleted string-by-string
+    # comparison used to cover, at one assertion instead of two files' worth.
+    for caller in (CI, RELEASE):
+        assert needle in ci_actions.workflow_run_scripts(caller), (
+            f"{caller.name} does not reach {needle!r} ({label}) through anything it "
+            f"calls. {suite.name} runs it, so {caller.name} has stopped calling the "
+            "shared suite."
+        )
+
+
+def test_the_two_gates_require_the_same_reusable_test_suite():
+    """PHASE 5's INVARIANT, and the reason the parity comparison above shrank.
+
+    `ci.yml`'s `all-tests` and `release.yml`'s `test` must both transitively
+    require the SAME local reusable workflow. While that holds, "the release gate
+    runs what CI blocks on" is not a claim about two files' contents — it is the
+    same YAML, once.
+
+    It is asserted UPSTREAM-ONLY. release.yml's publish chain also calls a
+    reusable workflow (build-images.yml), downstream of the gate; counting that
+    would make the release gate look like it requires the image build.
+    """
+    suite = shared_gate_suite()  # asserts there is exactly one, with the reason
+
+    # Non-vacuity: the shared file must be a real suite, not an empty stub that
+    # two gates trivially agree about.
+    suite_jobs = jobs_of(suite)
+    assert len(suite_jobs) >= 5, (
+        f"{suite.name} declares only {sorted(suite_jobs)}. Both gates agreeing on a "
+        "suite that runs almost nothing is a perfect agreement about nothing."
+    )
+    triggers = load(suite).get("on") or load(suite).get(True) or {}
+    assert "workflow_call" in triggers, (
+        f"{suite.name} has no `workflow_call:` trigger, so neither gate can actually "
+        "call it and this graph does not run."
+>>>>>>> ci/phase-5
     )
 
-    gate_text = "\n".join(run_text(job) for job in gate_jobs().values())
-    assert gate_text.strip(), "the release gate jobs contain no `run:` steps at all"
-    assert needle in gate_text, (
-        f"release.yml's gate does not run {needle!r} ({label}), which ci.yml's blocking "
-        "`all-tests` gate requires. A release can therefore ship what CI would have "
-        "rejected."
+
+def test_the_shared_test_suite_gate_covers_every_job_in_it():
+    """A leg missing from the suite's own aggregator is invisible to both gates.
+
+    A caller reads ONE result: the called workflow's conclusion. A workflow whose
+    jobs were all SKIPPED concludes `success`, so the enumeration of legs has to
+    exist somewhere, and it lives in the suite's aggregator. A job left out of
+    that `needs:` list can stop running without either gate noticing — the exact
+    "a needed job that stops running must block the merge" failure both callers'
+    aggregators were rewritten to close.
+    """
+    suite = shared_gate_suite()
+    jobs = jobs_of(suite)
+    aggregators = sorted(result_aggregator_jobs(suite))
+    assert len(aggregators) == 1, (
+        f"{suite.name} carries {aggregators} gate aggregator(s); it needs exactly one "
+        "job that reads every leg's `needs.<job>.result`, or the callers' single "
+        "result check is the only thing standing between a skipped leg and a green "
+        "merge."
+    )
+    gate_id = aggregators[0]
+    covered = set(needs_of(jobs[gate_id]))
+    uncovered = sorted(set(jobs) - covered - {gate_id})
+    assert not uncovered, (
+        f"{suite.name}: job(s) {uncovered} are not in `{gate_id}`'s `needs:`, so a skip "
+        "or a removal there is invisible to both gates. Add them, and see "
+        "test_every_gate_aggregator_reads_every_result_it_needs for the other half: "
+        "being in `needs:` is not the same as being CHECKED."
+    )
+
+
+def test_every_gate_aggregator_reads_every_result_it_needs():
+    """`needs:` is the plumbing. The SCRIPT is the check, and they can disagree.
+
+    A job listed in an aggregator's `needs:` but never read in its `run:` body is
+    a leg nothing looks at. The aggregator carries `if: always()`, so it runs
+    whatever its dependencies did; if the script never compares that leg's
+    `result`, the aggregator exits 0, the workflow concludes `success`, and every
+    caller reads `success`. That is exactly the all-skipped hazard the aggregators
+    exist to close, one level down -- per LEG instead of per suite.
+
+    Measured, on a tree where it was possible: deleting the four-line
+    `needs.ruff.result` block from the shared suite's aggregator while leaving
+    `ruff` in its `needs:` list left this whole file GREEN (43 passed). Add a
+    `paths:` filter to `ruff` after that and a skipped lint merges.
+
+    REPO-WIDE, over every aggregator this file can discover -- not only the one
+    that was found broken. `ci.yml`'s `all-tests` and `release.yml`'s `test` have
+    the same shape (each needs one job and reads one result), and the shape is
+    what is being checked, not one instance of it.
+    """
+    offenders = []
+    checked = 0
+    for path in workflow_files():
+        for gate_id, gate in result_aggregator_jobs(path).items():
+            deps = needs_of(gate)
+            # An aggregator that needs nothing cannot be checking anything, and
+            # would otherwise contribute zero to the floor below and pass.
+            assert deps, (
+                f"{path.name}: gate aggregator `{gate_id}` declares no `needs:` at all, "
+                "so it reports on nothing while looking like a gate."
+            )
+            text = run_text(gate)
+            for dep in deps:
+                checked += 1
+                if f"needs.{dep}.result" not in text:
+                    offenders.append(
+                        f"{path.name}: `{gate_id}` needs `{dep}` but never reads "
+                        f"`needs.{dep}.result` in its script, so that job's result "
+                        "cannot fail the gate"
+                    )
+    # Non-vacuity: this is a "must not find" scan over a DISCOVERED set. The
+    # current count is 7 (ci.yml `all-tests` 1, release.yml `test` 1, the shared
+    # suite's aggregator 5); the floor is below that so a matrix or a legitimate
+    # graph change does not trip it, but a collapse to nothing does.
+    assert checked >= 5, (
+        f"only {checked} aggregator dependency(ies) examined across "
+        f"{[p.name for p in workflow_files()]}. The shared test suite's aggregator "
+        "alone needs five jobs, so this scan did not read what it thinks it read."
+    )
+    assert not offenders, (
+        "gate aggregator(s) list a job in `needs:` and never check its result:\n  "
+        + "\n  ".join(offenders)
+        + "\n\nAn `if: always()` aggregator runs regardless of what its dependencies "
+        "did, so an unchecked leg can fail or skip and the gate still exits 0."
+    )
+
+
+def test_the_shared_test_suite_honours_the_ref_it_is_given():
+    """The other half of the pinned-commit invariant, inside the called workflow.
+
+    A caller can pass `ref:` all it likes; if the called workflow's own
+    `actions/checkout` steps ignore it, every job there checks out the CALLER's
+    `github.ref` instead. On the release path that means the gate tests a
+    different commit from the one `bump-and-tag` tags — build-images.yml's
+    `workflow_call` block records the same defect one step to the right, where it
+    built ten container images from an un-bumped tree.
+    """
+    suite = shared_gate_suite()
+    call_inputs = (
+        ((load(suite).get("on") or load(suite).get(True) or {}).get("workflow_call") or {}).get(
+            "inputs"
+        )
+    ) or {}
+    assert "ref" in call_inputs, (
+        f"{suite.name}'s `workflow_call` declares no `ref` input, so neither caller "
+        "can tell it which commit to test."
+    )
+    assert call_inputs["ref"].get("required") is True, (
+        f"{suite.name}'s `ref` input is not `required: true`. An optional ref means a "
+        "caller that forgets it silently tests the caller's github.ref, which on the "
+        "release path is not the commit being tagged."
+    )
+    assert "default" not in call_inputs["ref"], (
+        f"{suite.name}'s `ref` input declares a default, which is the same hole as "
+        "making it optional."
+    )
+
+    seen = 0
+    ignoring = []
+    for job_id, job in jobs_of(suite).items():
+        if not isinstance(job, dict):
+            continue
+        for step in checkout_steps(job):
+            seen += 1
+            if "inputs.ref" not in str((step.get("with") or {}).get("ref", "")):
+                ignoring.append(f"{job_id}: `{step.get('name', '<unnamed>')}`")
+    assert seen >= 5, (
+        f"found {seen} checkout step(s) in {suite.name}; every one of its jobs checks "
+        "the repository out, so this scan missed some."
+    )
+    assert not ignoring, (
+        f"{suite.name} checkout step(s) ignore the `ref` input, so the gate runs on the "
+        "caller's ref rather than the commit it was handed:\n" + "\n".join(ignoring)
+    )
+
+
+def test_every_reusable_workflow_call_in_release_yml_names_its_ref():
+    """A `uses:` of a local workflow IS a checkout, and takes the same rule.
+
+    test_no_job_in_release_yml_does_a_bare_checkout scans `actions/checkout`
+    steps, which a reusable-workflow call has none of — so without this, the one
+    shape that produced this workflow's worst bug (ten images built from the wrong
+    tree) would be the one shape exempt from the rule.
+    """
+    allowed = (PINNED_SHA, RELEASE_TAG, GATE_REF)
+    calls = ci_actions.called_local_workflows(RELEASE)
+    assert len(calls) >= 2, (
+        f"release.yml calls {sorted(calls)} local reusable workflow(s). It calls the "
+        "shared test suite and the image build, so a smaller number means the "
+        "discovery no longer matches a `uses: ./.github/workflows/...` job body."
+    )
+    offenders = []
+    for job_id, called in sorted(calls.items()):
+        passed = str((jobs_of(RELEASE)[job_id].get("with") or {}).get("ref", "")).strip()
+        if not any(token in passed for token in allowed):
+            offenders.append(
+                f"{job_id}: calls {called.name} with ref={passed or '<none>'!r}, which is "
+                f"none of {allowed}"
+            )
+    assert not offenders, (
+        "release.yml reusable-workflow call(s) do not name the commit they are for. A "
+        "called workflow checks out the CALLER's github.ref, so an unset `ref:` input "
+        "silently runs against a different tree:\n" + "\n".join(offenders)
     )
 
 
@@ -702,7 +1056,10 @@ def test_no_workflow_branches_on_the_workflow_call_event_name():
     saw_event_name = 0
     for path in workflow_files():
         for lineno, line in enumerate(path.read_text().splitlines(), start=1):
-            code = line.split("#", 1)[0]
+            # Quote-aware, shared with every other comment-blind scan in this
+            # file. `line.split("#", 1)[0]` was the previous form and truncates
+            # `VERSION="${VERSION#v}"` mid-expansion.
+            code = ci_actions.strip_line_comment(line)
             if "github.event_name" not in code:
                 continue
             saw_event_name += 1

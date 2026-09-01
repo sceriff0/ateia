@@ -448,6 +448,9 @@ def jobs_running_the_pytest_suite() -> list[tuple[Path, str, dict]]:
     """(workflow, job id, the job) for every JOB that runs the whole suite.
 
     The step walk is `tests/ci_actions.py`'s -- see the ONE RESOLVER note above.
+    `job_run_scripts` is the COMMAND view (`run:` bodies only, whole-line and
+    trailing comments stripped); `job_resolved_run_text` would let a comment
+    naming `pytest tests/` manufacture a hit, and is for `uses:` questions.
     """
     hits: list[tuple[Path, str, dict]] = []
     files_with_a_hit: set[Path] = set()
@@ -455,7 +458,7 @@ def jobs_running_the_pytest_suite() -> list[tuple[Path, str, dict]]:
         for job_id, job in ci_actions.load_jobs(wf).items():
             if not isinstance(job, dict):
                 continue
-            if _RUNS_THE_PYTEST_SUITE_RE.search(ci_actions.job_resolved_run_text(job)):
+            if _RUNS_THE_PYTEST_SUITE_RE.search(ci_actions.job_run_scripts(job)):
                 hits.append((wf, job_id, job))
                 files_with_a_hit.add(wf)
     assert hits, (
