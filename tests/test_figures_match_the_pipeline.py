@@ -11,10 +11,14 @@ Three claim classes are checked, chosen because a test can actually settle them:
 
 1. **Parameter names.** Every `--<name>` and `params.<name>` a figure writes
    must be declared in `nextflow.config`'s `params {}` block.
-2. **Pipeline names.** Every ``UPPER_SNAKE_CASE`` token must resolve to a
-   process, a named workflow/subworkflow, or an aliased include.
-3. **Parameter defaults.** Every ``<td class="k">name</td><td class="v">value</td>``
-   row whose key is a declared parameter must state that parameter's actual
+2. **Pipeline names.** Two scans, unioned. A ``UPPER_SNAKE_CASE`` token
+   anywhere in the figure, and *any* all-caps token written as code
+   (``<code>``, ``.nm``, ``.name``) -- the second is what puts single-word
+   names like ``REGISTER`` and ``SEGMENT`` under the check. Each must resolve
+   to a process, a named workflow/subworkflow, or an aliased include.
+3. **Parameter rows.** Every ``<td class="k">`` key inside a ``<table
+   class="pr">`` that reads as a parameter key must name a declared parameter.
+4. **Parameter defaults.** Every such row must state that parameter's actual
    `nextflow.config` default.
 
 What this does **not** cover, and cannot:
@@ -28,6 +32,13 @@ What this does **not** cover, and cannot:
 * **Whether a figure is COMPLETE.** A figure that omits a whole stage passes.
 * **Diagram topology.** The arrows are SVG; that a name exists says nothing
   about whether it is drawn in the right place.
+* **A single-word pipeline name written as bare prose.** `REGISTER` inside
+  `<code>` is checked; the same word in a running sentence is not, because a
+  figure legitimately writes SEGMENT, REGISTER, INPUT and STEP as English.
+  Marking a name as code is the claim this file can hold you to.
+* **The VALUE half of a compound parameter row.** A key like `seg_pmin /
+  seg_pmax` carries two defaults in one cell (`1.0 / 99.8`). Both NAMES are
+  checked for existence; neither value is compared.
 
 The floors in each test are what stop the checks becoming vacuous if the
 markup is restyled: a restyle that silently stopped matching would otherwise
@@ -90,9 +101,25 @@ NON_PIPELINE_NAMES = {
     "DEEPCELL_ACCESS_TOKEN": "an environment variable read by the DeepCell backend",
     "KNOWN_ARTIFACT_KINDS": "a lib/ParamUtils.groovy constant",
     "STEP_ORDER": "a lib/ParamUtils.groovy constant",
+    "STEPS": "a lib/ParamUtils.groovy constant, written as `ParamUtils.STEPS`",
     "UNIVERSAL_QC_KINDS": "a lib/ParamUtils.groovy constant",
     "DEFAULT_BAND_BYTES": "a bin/utils constant",
     "RUSAGE_SELF": "Python's resource.RUSAGE_SELF",
+    # Reached by the code-scoped scan below, which is not restricted to
+    # underscore-bearing tokens and so sees ordinary all-caps literals.
+    "DAPI": "a channel/marker name, not a pipeline name",
+    "CD3": "a channel/marker name, not a pipeline name",
+    "CELLTOX": "a channel/marker name, not a pipeline name",
+    "CYX": "a TIFF axis order, written as `axes=\"CYX\"`",
+    "PREPROCESS": "the published subdirectory `qc/preprocess`, not a process",
+}
+
+# `<td class="k">` keys inside a `<table class="pr">` that read as a parameter
+# key but name no parameter. Same honesty rule as the two lists above: an entry
+# must NOT be a declared parameter, and must still appear in a checked figure.
+NOT_A_PARAM_ROW = {
+    "max_dim": "a Python keyword argument of the lazy readers, not a parameter",
+    "factor": "a decimation factor computed at runtime, not a parameter",
 }
 
 # --------------------------------------------------------------------------
@@ -112,7 +139,30 @@ _VAR_REF = re.compile(r"var\(\s*--[A-Za-z0-9_-]+\s*\)")
 # excluded structurally rather than by name.
 _FLAG = re.compile(r"--([a-z][a-z0-9_]*)(?![A-Za-z0-9_-])")
 _PARAMS_DOT = re.compile(r"params\.([a-z][a-z0-9_]*)")
+# Two complementary name scans; the union is what gets resolved.
+#
+# `_UPPER` is shape-driven and runs over the WHOLE figure, so it catches a name
+# written as bare prose -- which is how `REG_TILE` was caught in
+# pipeline-schematic.html's resource footnote, outside any <code>. It requires
+# an underscore, because a shape scan without one matches every all-caps
+# English word in the document (measured: 132 unresolvable tokens).
+#
+# `_CODE_SPAN` is context-driven: anything a figure marks up AS CODE is a claim
+# that that identifier exists, so inside those spans the underscore requirement
+# is dropped. That is what puts the single-word process names under the check --
+# REGISTER (6 occurrences) and SEGMENT (7) were matched by nothing before, so
+# renaming either left every figure that names it green. Measured: 44 tokens,
+# of which 6 need an exemption.
 _UPPER = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
+_CODE_SPAN = re.compile(
+    r"<code[^>]*>(.*?)</code>"
+    r"|<(?:div|span)[^>]*class=\"(?:nm|name)\"[^>]*>(.*?)</(?:div|span)>",
+    re.S,
+)
+_CODE_TOKEN = re.compile(r"(?<![A-Za-z0-9_])[A-Z][A-Z0-9_]{2,}(?![A-Za-z0-9_])")
+# The parameter tables. Every other k/v table in these figures (`qa`, `rc`,
+# `own`, `ss`, `bk`) pairs prose with prose.
+_PR_TABLE = re.compile(r'<table class="pr">(.*?)</table>', re.S)
 
 _TAG = re.compile(r"<[^>]+>")
 # Key and value cells of one parameter row. Neither capture may span a `</td>`,
@@ -254,12 +304,21 @@ def test_non_param_flags_are_really_not_params():
 # --------------------------------------------------------------------------
 # 2. pipeline names
 # --------------------------------------------------------------------------
+def _names_used(path):
+    """Every token in this figure that is a claim about a pipeline name."""
+    text = path.read_text()
+    named = {m.group(0) for m in _UPPER.finditer(text)}
+    for span in _CODE_SPAN.finditer(text):
+        fragment = _TAG.sub("", span.group(1) or span.group(2) or "")
+        named |= {m.group(0) for m in _CODE_TOKEN.finditer(fragment)}
+    return named
+
+
 def _name_problems(path, known):
-    named = {m.group(0) for m in _UPPER.finditer(path.read_text())}
     return [
         f"{path.name}: names `{name}`, which is not a process, a workflow or an "
         "aliased include anywhere in the pipeline"
-        for name in sorted(named)
+        for name in sorted(_names_used(path))
         if name not in known and name not in NON_PIPELINE_NAMES
     ]
 
@@ -274,10 +333,20 @@ def test_every_pipeline_name_a_figure_uses_exists():
     problems, seen = [], set()
     for path in _live_figures():
         problems += _name_problems(path, known)
-        seen |= {m.group(0) for m in _UPPER.finditer(path.read_text())} & known
+        seen |= _names_used(path) & known
     assert len(seen) >= 20, (
         f"only {len(seen)} known pipeline names found across the figures -- the "
         "extractor has stopped matching"
+    )
+    # The single-word case, pinned by name. It is the blind spot this scan was
+    # widened to close: both are real processes (modules/local/register.nf,
+    # segment.nf), both are named repeatedly in the figures, and until the
+    # code-scoped scan existed a rename of either left every figure green.
+    missing = {"REGISTER", "SEGMENT"} - seen
+    assert not missing, (
+        f"{sorted(missing)} no longer reach the resolver. Either the process was "
+        "renamed (fix the figures) or the code-scoped scan stopped matching (fix "
+        "this file) -- single-word names must not fall out of coverage again."
     )
     assert not problems, "\n".join(problems)
 
@@ -287,7 +356,7 @@ def test_non_pipeline_names_are_really_not_pipeline_names():
     known = _known_names()
     used = set()
     for path in _live_figures():
-        used |= {m.group(0) for m in _UPPER.finditer(path.read_text())}
+        used |= _names_used(path)
     problems = []
     for name in NON_PIPELINE_NAMES:
         if name in known:
@@ -306,19 +375,59 @@ def test_non_pipeline_names_are_really_not_pipeline_names():
 # --------------------------------------------------------------------------
 # 3. parameter defaults
 # --------------------------------------------------------------------------
-def _default_rows(path, defaults):
-    """`(param, figure_value)` for every k/v row whose key is a declared param.
+def _param_rows(path):
+    """`(key, value)` for every k/v row inside a `<table class="pr">`.
 
-    A row whose key is not a bare identifier is skipped on purpose: the figures
-    use the same table markup for compound keys (`seg_n_tiles_y / _x`) and for
-    rows that are not parameters at all (`step 1 · features`). Those carry no
-    single default to compare against, and check 1 above is what catches a
-    misspelled parameter NAME.
+    Scoped to that one table class because it is the only one these figures use
+    for parameters; `qa`, `rc`, `own`, `ss` and `bk` pair prose with prose
+    (`step 1 · features`, `eager whole-array write`). Unscoped, every prose row
+    would have to be excused by name.
     """
-    for m in _KV_ROW.finditer(path.read_text()):
-        key = _cell_text(m.group(1))
-        if re.fullmatch(r"[a-z][a-z0-9_]*", key) and key in defaults:
-            yield key, _cell_text(m.group(2))
+    for table in _PR_TABLE.finditer(path.read_text()):
+        for m in _KV_ROW.finditer(table.group(1)):
+            yield _cell_text(m.group(1)), _cell_text(m.group(2))
+
+
+def _row_keys(key):
+    """The parameter names a row key claims. `a / b` claims two."""
+    return [
+        part.strip()
+        for part in key.split("/")
+        if re.fullmatch(r"[a-z][a-z0-9_]*", part.strip())
+    ]
+
+
+def _row_key_problems(path, defaults):
+    """A parameter-table key that reads as a param key but names none.
+
+    This is the hole that made a misspelling invisible: such a row escapes the
+    name check above (a table key carries no `--`/`params.` prefix) and used to
+    be DROPPED before the value comparison, so `reg_qcc = 7` passed both.
+    """
+    problems = []
+    for key, _value in _param_rows(path):
+        for name in _row_keys(key):
+            if name not in defaults and name not in NOT_A_PARAM_ROW:
+                problems.append(
+                    f"{path.name}: parameter table row `{key}` names `{name}`, "
+                    "which nextflow.config's params {} block does not declare"
+                )
+    return problems
+
+
+def _default_rows(path, defaults):
+    """`(param, figure_value)` for every parameter row carrying ONE default.
+
+    A compound key (`seg_pmin / seg_pmax`, value `1.0 / 99.8`) has both of its
+    NAMES checked by `_row_key_problems`; splitting its VALUE is bespoke per
+    row and is not attempted -- see the module docstring.
+    """
+    for key, value in _param_rows(path):
+        if "/" in key:
+            continue  # compound: the value cell carries two defaults, not one
+        names = _row_keys(key)
+        if len(names) == 1 and names[0] in defaults:
+            yield names[0], value
 
 
 def _value_problems(path, defaults, unparsed_type):
@@ -338,6 +447,49 @@ def _value_problems(path, defaults, unparsed_type):
                 f"declares {expected!r}"
             )
     return problems
+
+
+def test_every_parameter_row_key_is_a_real_parameter():
+    """A misspelled key in a parameter table must FAIL, not vanish.
+
+    Measured hole, reproduced by the reviewer: changing qc-schematic's
+    `<td class="k">reg_qc</td><td class="v">2</td>` to `reg_qcc`/`7` gave 7
+    passed. Both halves were invisible -- the wrong NAME because a table key
+    carries no `--` prefix for the name check to see, and the wrong VALUE
+    because the row was dropped before the comparison for having an unknown key.
+    """
+    defaults, _ = _config_defaults()
+    problems, keys = [], 0
+    for path in _live_figures():
+        problems += _row_key_problems(path, defaults)
+        keys += sum(len(_row_keys(k)) for k, _ in _param_rows(path))
+    assert keys >= 60, (
+        f"only {keys} parameter-table keys extracted -- the table markup has "
+        "changed and this test would pass on an empty loop"
+    )
+    assert not problems, "\n".join(problems)
+
+
+def test_not_a_param_rows_are_really_not_params():
+    """The NOT_A_PARAM_ROW counterpart of the two exemption checks above."""
+    defaults, _ = _config_defaults()
+    used = set()
+    for path in _live_figures():
+        for key, _value in _param_rows(path):
+            used |= set(_row_keys(key))
+    problems = []
+    for name in NOT_A_PARAM_ROW:
+        if name in defaults:
+            problems.append(
+                f"{name} IS a declared parameter now -- remove it from "
+                "NOT_A_PARAM_ROW, it is exempting a real one"
+            )
+        if name not in used:
+            problems.append(
+                f"{name} no longer appears in a checked parameter table -- "
+                "remove it from NOT_A_PARAM_ROW"
+            )
+    assert not problems, "\n".join(problems)
 
 
 def test_every_default_a_figure_states_matches_nextflow_config():
@@ -383,6 +535,7 @@ def test_the_allowlist_only_shrinks():
         problems = (
             _flag_problems(path, defaults)
             + _name_problems(path, known)
+            + _row_key_problems(path, defaults)
             + _value_problems(path, defaults, unparsed)
         )
         if not problems:
