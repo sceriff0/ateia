@@ -248,7 +248,18 @@ def test_the_scanned_files_actually_install_something():
 #   nightly.yml::nf-test-integration testdata.txt
 # requirements/nf-core.txt was in this set until Phase 7 deleted the `nf-core lint`
 # job that installed it; no released nf-core/tools version can lint this repository
-# (see .nf-core.yml's header), so the job went rather than the pin.
+# (the nf-core tools config at the repository root carries the version-by-version
+# measurement in its header), so the job went rather than the pin.
+#
+# THAT PARENTHESIS IS DELIBERATELY NOT WRITTEN AS THE FILENAME, and the reason is
+# worth one sentence because it bit twice in five minutes. tests/test_nfmodel.py
+# discovers "guards that read Nextflow source" by a SUBSTRING test for the Nextflow
+# file extension, and the nf-core config filename starts with that same substring --
+# so naming the file here got this module reported as a private Nextflow parser,
+# which it is not. Writing the explanation out then tripped it a second time.
+# Recorded rather than worked around in silence: the heuristic has the same false
+# positive on tests/test_test_profile_fixture_compat.py today, and tightening it to
+# a non-word-boundary form drops exactly those two and nothing else (measured).
 EXPECTED_CI_REQUIREMENTS = {
     "requirements/ci.txt",
     "requirements/torch-cpu.txt",
