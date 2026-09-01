@@ -8,21 +8,27 @@
 #   pytest tests/ --ignore=tests/testdata --ignore=tests/modules \
 #                 --ignore=tests/subworkflows --ignore=tests/integration
 #
-# and equal to passed + skipped. Measured 2026-09-01 on ci/phase-6-7 (CI redesign
-# Phases 6-7, fix round 1, base c17b7f4): 1250 passed, 12 skipped, 0 failed.
+# and equal to passed + skipped. Measured 2026-09-01 on ci/merge-staging, the
+# integration of all six CI-redesign branches (handoff guards + Phases 1-7):
+# 1280 passed, 12 skipped, 0 failed.
 #
-# The previous entry was 1161, measured 2026-09-01 on dev@1ed35df (1151 passed,
-# 10 skipped). +99 since: Phases 1-5 of the CI redesign; then Phase 6's
-# tests/test_container_smoke_tests.py, which is 45 cases on its own (four
-# parametrisations over the eleven images in containers/images.json, plus one
-# whole-workflow case); then Phase 7's +10 (test_no_swallowed_failures.py's four,
-# test_no_legacy_frontends.py's new dead-exemption case, and
-# test_every_gate_aggregator_reads_every_job_it_needs over five workflows); then fix
-# round 1's +2, which is test_no_swallowed_failures.py's build-file scope probe over
-# containers/merge/Dockerfile and the Makefile.
+# The previous entry was 1262, measured on ci/phase-6-7 alone. The integrated
+# tree is larger than any one branch because the six are disjoint additions:
+# the handoff guards (test_figures_match_the_pipeline.py,
+# test_join_reg_residuals_convention.py) never met Phases 1-7, and each phase
+# added its own guards on top of its predecessor's first commit.
+#
+# 37 node ids present on some branch are absent here, every one accounted for:
+# 13 tests Phase 1 deleted with the per-package pin model (eec3ff0), 14 that
+# Phase 5 renamed (test_the_release_gate_runs_every_check_ci_blocks_on ->
+# test_the_shared_test_suite_runs_every_blocking_check), 6 that are the same
+# parametrised cases under shifted expectedN indices, 2 that followed
+# build-images.yml into containers.yml, 1 renamed with its widened scope
+# (test_the_workflows_ -> test_the_scanned_files_actually_install_something),
+# and 1 renamed per-JOB (test_every_pytest_workflow_ -> _job_installs_torch_and_kornia).
 #
 # The check is `>=`, so adding tests never fails it. But a floor that is allowed
 # to fall arbitrarily far behind stops being a floor, so conftest.py also fails
 # once the suite has grown FLOOR_DRIFT (50) tests past this number, with the
 # replacement value in the message. Re-ratcheting is then one line, here.
-1262
+1292
