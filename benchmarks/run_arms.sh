@@ -173,6 +173,45 @@ run_pass() {
     from_csv=$(col_val from_csv "${vals[@]}")
     only_patient=$(col_val only_patient "${vals[@]}")
 
+    # EXTERNAL ARMS ARE NOT NEXTFLOW LAUNCHES. Dispatched here, before any --flag is
+    # assembled, because nothing in these rows is a pipeline param -- see
+    # build_arm_plan.py::_external_arms. They run in their own pass (see the pass list at
+    # the bottom), after registration, because they reuse a registration arm's published
+    # QC nuclei.
+    if [[ "$kind" == "external" ]]; then
+      local ext_tool ext_from_arm ext_tile ext_overlap ext_shift preproc_csv
+      ext_tool=$(col_val ext_tool "${vals[@]}")
+      ext_from_arm=$(col_val ext_from_arm "${vals[@]}")
+      ext_tile=$(col_val ext_tile_size "${vals[@]}")
+      ext_overlap=$(col_val ext_overlap "${vals[@]}")
+      ext_shift=$(col_val ext_max_shift_um "${vals[@]}")
+      if [[ "$ext_tool" != "ashlar" ]]; then
+        echo "[$run_id] SKIP: unknown ext_tool '$ext_tool'" >&2; continue
+      fi
+      preproc_csv="$ROOT/$from_arm/csv/${from_csv}.csv"
+      if [[ ! -f "$preproc_csv" ]]; then
+        echo "[$run_id] SKIP: $preproc_csv missing — arm '$from_arm' did not complete" >&2
+        continue
+      fi
+      if [[ ! -d "$ROOT/$ext_from_arm" ]]; then
+        echo "[$run_id] SKIP: $ROOT/$ext_from_arm missing — no QC nuclei to score against" >&2
+        continue
+      fi
+      reap
+      mkdir -p "$ROOT/$arm"
+      (
+        "$PIPELINE_DIR/benchmarks/run_ashlar_arm.sh" "$ROOT" "$arm" "$ext_from_arm" "$preproc_csv" \
+            "$ext_tile" "$ext_overlap" "$ext_shift" \
+            > "$ROOT/$arm/ashlar.stdout.log" 2> "$ROOT/$arm/ashlar.stderr.log" \
+          || {
+            echo "[$run_id] FAILED" >&2
+            tail -n 25 "$ROOT/$arm/ashlar.stderr.log" >&2 2>/dev/null
+          }
+      ) &
+      pids+=($!)
+      continue
+    fi
+
     ARGS=()
     add_param start                "$start"
     add_param stop                 "$stop"
@@ -186,8 +225,10 @@ run_pass() {
     add_param reg_tiled_mode       "$(col_val reg_tiled_mode "${vals[@]}")"
     # THE THREE reg_ashlar_* FLAGS ARE GONE. ashlar stopped being a pipeline backend at
     # :fire: 6a54479, so nextflow.config declares none of them and the schema would reject
-    # all three. The external ashlar baseline is now driven by benchmarks/ashlar/ instead of
-    # through this launcher; see the long note in build_arm_plan.py::_registration_arms.
+    # all three. The external ashlar baseline is an arm_kind='external' row instead, and
+    # never reaches this flag block at all -- it is dispatched below, before in_csv is even
+    # resolved. Note that every column it carries is ext_-prefixed for exactly that reason:
+    # no ext_* name can collide with one of the add_param calls above.
 
     local in_csv="$INPUT"
     if [[ -n "$from_arm" ]]; then
@@ -214,7 +255,9 @@ run_pass() {
 }
 
 # preprocess FIRST: every registration arm resumes from its csv/preprocessed.csv.
-for kind in preprocess registration segmentation compute; do
+# external AFTER registration (it reuses a registration arm's published QC nuclei) and
+# BEFORE compute (which is being timed and must not contend for nodes).
+for kind in preprocess registration external segmentation compute; do
   echo "=== pass: $kind ==="
   run_pass "$kind"
   # Barrier between passes: segmentation needs registration's checkpoint, and the

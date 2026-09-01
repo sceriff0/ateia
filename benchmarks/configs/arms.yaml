@@ -209,15 +209,23 @@ compute_profile:
 # pipeline would reject it at launch.
 #
 # It is instead driven directly by benchmarks/ashlar/ (retile.py + solve.py, relocated from
-# bin/ when the backend was removed) and scored by benchmarks/stare_bench/cli.py with
-# method="ashlar". That split is the right one on its own merits: comparing against an
-# external tool should not require the pipeline to ADOPT the external tool.
+# bin/ when the backend was removed) and scored by the PIPELINE'S OWN reg_qc=2 scorer,
+# bin/warp_seg_qc.py --method tiled. That split is the right one on its own merits:
+# comparing against an external tool should not require the pipeline to ADOPT it.
+#
+# IT IS A ROW OF THIS PLAN, under arm_kind='external'. build_arm_plan.py::_external_arms
+# emits it; run_arms.sh runs it in its own pass, after registration, dispatching to
+# benchmarks/run_ashlar_arm.sh instead of Nextflow. It writes the same
+# <root>/<arm>/<patient>/qc/registration/*_seg_qc.json every other arm writes, so it lands
+# in the SAME table with the SAME columns and ihc_method reads it with no path added.
 #
 # WHY IT IS COMPARABLE AT ALL: solve.py rewrites ashlar's per-tile placements into the same
-# M0 + mesh manifest STARE emits, so the method-agnostic scorer reads it unchanged. Scored
-# any other way it would produce numbers in a different metric family that share no column
-# with this table -- which is exactly what the earlier out-of-band ashlar harness did, and
-# why that harness was deleted rather than maintained.
+# M0 + mesh manifest STARE emits, and warp_seg_qc.py --method tiled loads that manifest
+# JVM-free. Scored any other way it would produce numbers in a different metric family that
+# share no column with this table -- which is exactly what the earlier out-of-band ashlar
+# harness did, and why that harness was deleted rather than maintained. The synthetic
+# ground-truth rung (benchmarks/stare_bench) that used to score it was deleted for the same
+# reason: exact EPE against an injected field cannot be ranked against tissue Dice.
 #
 # TILE SIZE IS A FAIRNESS KNOB, NOT A COST KNOB, which is why it is a LIST. ashlar computes
 # one independent shift per tile, so a finer grid buys it more local (still piecewise-
@@ -229,12 +237,24 @@ compute_profile:
 # quantify what non-rigid buys: ashlar attempts no non-rigid warp at all, so reporting only
 # the second overstates VALIS's advantage.
 #
-# It has no *_ctrl.json and no STARE gate, so it carries no gate-ROC columns; score_pair
-# REFUSES controls passed with method != "tiled" rather than reporting STARE's confusion
-# matrix under another backend's label.
+# It has no *_ctrl.json and no STARE gate, so it carries no gate columns. That is a real
+# gap, not a formatting one: ashlar's own accept/reject behaviour is invisible here, and the
+# max_discard_fraction below is the only handle on it.
 external_baseline:
   ashlar:
     enabled: true
+
+    # WHOSE NUCLEI THIS IS SCORED ON. The ashlar arm does NOT re-segment: it reuses the QC
+    # nuclei this registration arm already published to
+    # <root>/<from_arm>/<patient>/qc/registration/geojson/. Those geojsons come from the
+    # NATIVE slides, so they are identical across registration arms that share a
+    # seg_method -- which is exactly why reusing them is sound, and why scoring ashlar
+    # against a fresh segmentation instead would confound the comparison with segmenter
+    # noise. Same factoring, same reason, as segmentation_arms.from_arm above.
+    #
+    # It must name an arm THIS FILE produces; build_arm_plan.py raises if it does not.
+    from_arm: valis_high_micro2
+
     tile_size: [1024, 4096]                # the fairness knob against reg_tiled_tile
     overlap_fraction: 0.1
 

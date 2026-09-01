@@ -23,10 +23,17 @@ images cannot imitate.
 
 ---
 
-## The three arms
+## The arms
 
 Defined in `benchmarks/configs/arms.yaml`. They are **factored, not crossed** —
 registration is the expensive half, so it is paid for once.
+
+At the shipped settings that is **23 launches**: 1 shared preprocessing, 14
+registration (12 arms + 2 QC-segmenter cross), 4 external (ASHLAR), 3
+segmentation, 1 compute profile. **All but the compute profile launch the whole
+cohort**, so the launch count is not the run count — for a 6-patient cohort,
+22 × 6 = 132 patient-runs plus the compute launch. `build_arm_plan.py` prints
+this multiplier; read the arm counts below as per-patient multipliers.
 
 ### 1. Registration arms — *which configuration aligns real tissue best?*
 
@@ -56,20 +63,38 @@ changes the staged registration QC. **12 arms**:
   an operator picks, and each row of `RegPresets.STARE` moves all five tier-owned
   values coherently. The sweep already crosses those knobs singly over 27 cells on
   synthetic images, where a cell is cheap; here a cell is a real WSI.
-ASHLAR is no longer one of these arms, and that is not a downgrade of its role.
-It was **× tile size = 2** here while it was a third `registration_method`;
-`v1.0.0` removed that backend (`registration_method` is now `valis | tiled`), so
-an arm here would be rejected at launch. It remains the ranking's **external
-baseline** — driven directly by `benchmarks/ashlar/` and scored by
-`benchmarks/stare_bench/cli.py` with `method="ashlar"`, configured under
-`external_baseline:` in `arms.yaml`. Comparing against an external tool should
-not require the pipeline to adopt it as a backend, so this split is the right
-one independently of why it happened.
+### 1b. ASHLAR — the external baseline, **4 runs**
+
+ASHLAR is not a *registration* arm: `v1.0.0` removed it as a backend
+(`registration_method` is now `valis | tiled`), so a registration arm would be
+rejected at launch. It is an `arm_kind=external` row instead — planned by
+`build_arm_plan.py::_external_arms`, run by `benchmarks/run_ashlar_arm.sh`, and
+configured under `external_baseline:` in `arms.yaml`. Comparing against an
+external tool should not require the pipeline to adopt it as a backend.
+
+`tile_size` [1024, 4096] × `maximum_shift_um` [30, 60] = **4 runs**, each over
+the whole cohort. It runs in its own pass, after the registration arms, because
+it **reuses `from_arm`'s published QC nuclei**
+(`<root>/<from_arm>/<patient>/qc/registration/geojson/`) rather than
+re-segmenting — the same factoring the segmentation arms use, and for the same
+reason: scoring ASHLAR against different nuclei than the arms it is ranked
+against would confound the comparison with segmenter noise.
+
+`maximum_shift_um` is two values because it **fails silently**: ASHLAR's
+`LayerAligner` substitutes a model prediction for an out-of-range tile rather
+than erroring, so a shift-starved run does not crash — it quietly degrades and
+lands in the table as a genuine loss for ASHLAR. If 30 and 60 agree the budget
+was not binding; if they disagree, the 30 row must not be reported as ASHLAR's
+accuracy.
 
 ASHLAR is comparable at all only because `benchmarks/ashlar/solve.py` rewrites
-its per-tile placements into the same `M0` + mesh manifest STARE emits, so the
-method-agnostic seg-overlap scorer reads it unchanged. Scored any other way it
-would land in a different metric family that shares no column with this table.
+its per-tile placements into the same `M0` + mesh manifest STARE emits — so
+`bin/warp_seg_qc.py --method tiled`, the pipeline's **own** `reg_qc=2` scorer,
+reads it unchanged and writes the same `*_seg_qc.json` into the same tree. Same
+metric family, same columns, one layout, and `ihc_method` picks it up with no
+path added. Scored any other way it would land in a different metric family that
+shares no column with this table — which is what the deleted synthetic
+ground-truth rung did, and why it could never be ranked against these arms.
 Its `tile_size` stays a **fairness** knob, not a cost one — ASHLAR takes one
 independent shift per tile, so a finer grid buys it more local freedom, the
 direct analogue of STARE's `reg_tiled_tile`, which the synthetic sweep varies

@@ -20,10 +20,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-BENCH = Path(__file__).parents[1]
-REPO_ROOT = BENCH.parent
-ARMS_YAML = BENCH / "configs" / "arms.yaml"
-
 from benchmarks.build_arm_plan import (
     arms_manifest_rows,
     build_arm_plan,
@@ -31,6 +27,11 @@ from benchmarks.build_arm_plan import (
     schema_enums,
     validate_against_schema,
 )
+
+BENCH = Path(__file__).parents[1]
+REPO_ROOT = BENCH.parent
+ARMS_YAML = BENCH / "configs" / "arms.yaml"
+
 
 
 def _param_checker():
@@ -227,34 +228,73 @@ def test_no_ashlar_arms_reach_the_pipeline_plan(plan):
     out. An ashlar row here would emit --registration_method ashlar and be rejected at
     launch, so this is now the assertion with teeth in the same place.
 
-    This does NOT say ashlar is un-benchmarked. It is still the ranking's only EXTERNAL
-    baseline; it is simply driven by benchmarks/ashlar/ and scored through
-    stare_bench/cli.py (method="ashlar") rather than reached through this launcher.
+    This does NOT say ashlar is un-benchmarked. It IS a row of this plan -- under
+    arm_kind='external', dispatched by run_arms.sh to benchmarks/run_ashlar_arm.sh, never
+    to Nextflow. So the property with teeth is the narrower one: no ashlar row may carry a
+    value that run_pass() would forward as a --flag.
+
+    Asserting the old, broader "no ashlar row exists" would now fail on a correct plan,
+    and weakening it to nothing would let a genuine `--registration_method ashlar`
+    regression through. The forwarded-column list is restated here rather than imported,
+    on purpose: if someone adds a column to run_pass()'s add_param calls without adding it
+    here, that is a gap this test SHOULD be updated for, not one it should silently absorb.
     """
-    offenders = [r["arm"] for r in plan
-                 if r.get("backend") == "ashlar"
-                 or str(r.get("registration_method", "")) == "ashlar"
-                 or "ashlar" in r["arm"]]
-    assert not offenders, (
-        "ashlar reached the PIPELINE arm plan, which cannot run it: " f"{offenders}")
+    FORWARDED = ("start", "stop", "seg_method", "reg_qc", "registration_method",
+                 "memory_mode", "reg_micro_reg", "reg_tiled_mode")
+    ashlar_rows = [r for r in plan if r.get("backend") == "ashlar"]
+    assert ashlar_rows, (
+        "no ashlar arm in the plan at all -- external_baseline.ashlar.enabled is the "
+        "switch, and losing the only external comparator silently is exactly the "
+        "'green while proving nothing' failure this file guards")
+
+    for r in ashlar_rows:
+        assert r["arm_kind"] == "external", (
+            f"ashlar arm {r['arm']!r} is arm_kind={r['arm_kind']!r}; only 'external' is "
+            "dispatched away from Nextflow, so any other kind would be launched as a "
+            "pipeline run and rejected by validateParameters()")
+        set_params = {k: r[k] for k in FORWARDED if str(r.get(k, "")).strip()}
+        assert not set_params, (
+            f"ashlar arm {r['arm']!r} carries pipeline params {set_params} -- run_arms.sh "
+            "forwards these as --flags and the pipeline would reject the run")
+
+    # And the inverse: no ashlar row may sit in the kinds that ARE launched.
+    launched = [r["arm"] for r in plan
+                if r["arm_kind"] != "external"
+                and ("ashlar" in r["arm"] or r.get("registration_method") == "ashlar")]
+    assert not launched, (
+        f"ashlar reached a LAUNCHED arm kind, which cannot run it: {launched}")
 
 
 def test_the_ashlar_comparator_still_has_a_driver():
     """The other half of the test above, and the reason it is safe.
 
     Removing ashlar from the pipeline plan is only correct while the comparator is still
-    driven SOMEWHERE -- otherwise the two tests together would happily certify a benchmark
-    that quietly lost its external baseline, which is exactly the "green while proving
-    nothing" failure this repo keeps hitting. So assert the driver exists and still emits
-    STARE's manifest shape, which is what makes ashlar comparable at all.
+    Keeping ashlar OUT of the pipeline launch path is only correct while the comparator is
+    still driven SOMEWHERE -- otherwise the two tests together would happily certify a
+    benchmark that quietly lost its external baseline, which is exactly the "green while
+    proving nothing" failure this repo keeps hitting. So assert the driver exists and still
+    emits STARE's manifest shape, which is what makes ashlar comparable at all -- and that
+    the arm runner that now scores it exists and reaches the pipeline's own scorer.
     """
     import benchmarks.ashlar.solve as solve
     assert hasattr(solve, "main"), "the ashlar comparator driver lost its entry point"
     src = (Path(__file__).parents[1] / "ashlar" / "solve.py").read_text()
     assert "build_manifest" in src, (
         "benchmarks/ashlar/solve.py no longer builds a STARE-shaped manifest; without it "
-        "predict_from_manifest cannot read ashlar and the comparison silently changes "
-        "metric family")
+        "warp_seg_qc.py --method tiled cannot read ashlar and the comparison silently "
+        "changes metric family")
+
+    runner = Path(__file__).parents[1] / "run_ashlar_arm.sh"
+    assert runner.exists(), (
+        "benchmarks/run_ashlar_arm.sh is gone; the external arm has no runner, so "
+        "arm_kind='external' rows would be planned and never scored")
+    body = runner.read_text()
+    # The three legs. Asserted by NAME because each one silently degrades rather than
+    # erroring if dropped: no retile -> solve reads nothing; no solve -> no manifest;
+    # no warp_seg_qc -> the arm dir exists, is empty, and the consumer renders a gap.
+    for needed in ("benchmarks.ashlar.retile", "benchmarks.ashlar.solve",
+                   "warp_seg_qc.py", "--method tiled"):
+        assert needed in body, f"run_ashlar_arm.sh no longer invokes {needed!r}"
 
 
 def test_valis_arms_are_preset_x_depth_not_a_grid_of_equals(plan):
