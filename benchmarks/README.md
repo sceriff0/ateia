@@ -45,7 +45,7 @@ Rendered overview: `docs/benchmarks.md`.
   needed for the test suite.
 - **Cluster (the sweeps):** Nextflow >= 25.04, Docker/Singularity, the pipeline
   containers (including the VALIS image), and `bash`. `run_sweep.sh` /
-  `run_registration.sh` use indexed-array lookups (no `declare -A`), so macOS
+  `run_arms.sh` use indexed-array lookups (no `declare -A`), so macOS
   `/bin/bash` 3.2 works for the tested paths; if you hit an array error, `brew install bash`.
 
 Verify the whole harness with no data at all:
@@ -217,36 +217,51 @@ Verify the whole harness with no data at all:
 
 ---
 
-## B. External landmark validation — REMOVED
+## B. Ground-truth registration validation — REMOVED (twice)
 
-The optional ANHIR/ACROBAT landmark harness (`benchmarks/registration_eval/`) was deleted.
-It drove `bin/register.py` and `bin/tiled_register.py` directly on public challenge pairs
-and scored true landmark TRE/rTRE/um against each method's self-reported accuracy.
+Two harnesses have occupied this slot and both are gone. The section is kept because
+what was LOST is a property of the current benchmark, not history.
 
-**Why it went.** It had stopped being runnable: `bin/tiled_register.py` was the single-task
-STARE entry point, removed when STARE became the four-stage fan-out, and it exists on no
-branch — so the STARE half of every pair errored, and a two-method comparison with one
-method missing is not a cross-check. Its data was also doubly account-gated (ANHIR needs a
-grand-challenge account; ACROBAT's landmarks are behind the challenge), so it never ran in
-CI and could not run here.
+**1. The ANHIR/ACROBAT landmark harness** (`benchmarks/registration_eval/`) drove
+`bin/register.py` and `bin/tiled_register.py` on public challenge pairs and scored true
+landmark TRE/rTRE. It went because `bin/tiled_register.py` — the single-task STARE entry
+point — was removed when STARE became the four-stage fan-out and exists on no branch, so
+the STARE half of every pair errored. Its data was also doubly account-gated, so it never
+ran in CI.
 
-**What survived, and why.** The landmark-TRE PRIMITIVES moved into `stare_bench`, because
-that block genuinely depends on them:
+**2. The synthetic ground-truth rung** (`benchmarks/stare_bench/`) replaced it: generated
+image pairs from a known displacement field, plus physics (photobleach, PSF, shot/read
+noise, autofluorescence, seams, focus) and an 11-point blank-fraction sweep, scored by
+exact endpoint error, landmark TRE, field quality and a gate ROC. It was frozen at
+`1.0.0` and fully tested (135 tests) — and **never run above the unit rung**: zero of its
+528 planned records were ever scored, no competitor was ever scored through it, and its
+headline claim (STARE peak RSS ≤ 8 GB at gigapixel scale) was never measured.
 
-  benchmarks/stare_bench/landmarks.py   LandmarkPair, per-landmark TRE, rTRE, um summary
-  benchmarks/stare_bench/tre.py         transform loaders + evaluate_pair + the
-                                        valis-rTRE / STARE-_tre.json readers
+**Why it went.** Its numbers could not be ranked against the arm table. It scored exact
+EPE against an injected field; `docs/benchmarks_real.md` ranks configurations by tissue
+Dice and centroid displacement. Two metric families sharing no column, one of which had
+produced no data — and it was the ONLY consumer of the ashlar comparator, which is the
+number the manuscript actually needs. ASHLAR now runs as an arm of the real-sample
+benchmark instead (`arm_kind=external`, `benchmarks/run_ashlar_arm.sh`), scored by the
+pipeline's own `reg_qc=2` scorer into the same table as VALIS and STARE.
 
-`stare_bench/cli.py` imports `default_loader` from the second, and `generate.py`'s synthetic
-pairs are built specifically so `tre.evaluate_pair` scores them unchanged. The deleted
-module's `main()` did NOT survive — it was the harness's per-pair CLI and imported the
-ANHIR adapter.
+**What was lost, and it is not nothing.** There is now **no ground truth of any kind** in
+this benchmark — no public landmarks, no synthetic field. Every accuracy number is a
+reference-free agreement measure on tissue: `dice_matched` and centroid displacement
+between paired nuclei, plus VALIS's self-reported rTRE. Those rank configurations against
+each other; they cannot say any of them is *correct*. Two specific consequences:
 
-**What was lost.** The only PUBLIC-landmark ground truth. `stare_bench` (Section C) still
-has exact ground truth, but it is SYNTHETIC — a reviewer who discounts synthetic deformation
-no longer has a public-benchmark number to fall back on.
+- A reviewer asking "what is the absolute registration error in microns against known
+  correspondences?" has no answer here.
+- The **gate-ROC family is gone entirely** — STARE's per-tile accept/reject decision was
+  the one metric no competitor reports, and it was scorable only against a known
+  registrable/not-registrable label. `Finding 1` from the freeze record (the default
+  `reg_tiled_gate_tre=1.0` collapsing the mesh toward identity on sub-pixel fields) was
+  produced by that harness and is not reproducible by anything remaining.
 
----
+Recoverable from history if either is wanted again: the landmark primitives
+(`landmarks.py`, `tre.py`) and the whole generator went with the deletion.
+
 
 ## Inputs -> outputs at a glance
 
@@ -257,9 +272,13 @@ no longer has a public-benchmark number to fall back on.
 | `run_sweep.sh` | manifest + run plan | per-run `trace.txt` + `input_sizes.csv` + QC JSONs (`*_seg_qc.json`) |
 | **`make_tables`** | results + run plan | **`paper_data/{runs_master,scaling_fits,registration_accuracy,registration_valis_rtre,segmentation_agreement,param_matrix}.csv` (+ `.dict.md`)** — the paper DATA |
 | `make_figures` (optional) | results + run plan | `measurements.csv` + `resource_models.csv` + `resource_stats.csv` + `scaling_*.pdf/svg` + `modules.optimized.config` |
-| `prepare_pairs.py` (optional) | `pairs.csv` (+ downloaded data) | per-pair input dirs + `pairs_manifest.csv` |
-| `run_registration.sh` (optional) | pairs manifest | `eval_*.json` (landmark TRE) |
-| `aggregate_eval` (optional) | eval JSONs | `reg_eval.csv` + `reg_eval_agg.csv` |
+| `build_arm_plan.py` | `arms.yaml` + real `input.csv` | `arm_plan.csv` + `arms.csv` (label manifest) |
+| `run_arms.sh` | arm plan + real `input.csv` | per-arm `<root>/<arm>/<patient>/qc/registration/*_seg_qc.json` |
+| `run_ashlar_arm.sh` | preprocessed CSV + a registration arm's QC nuclei | the ashlar external baseline, in that SAME tree |
+
+The last three are the real-sample arm sweep — see `docs/benchmarks_real.md`. The rows for
+`prepare_pairs.py` / `run_registration.sh` / `aggregate_eval` were removed: those scripts
+went with the landmark harness (Section B) and had been listed here naming nothing.
 
 The fastest way to see every component work end-to-end **without any real data** is
 `python -m pytest benchmarks/tests -q` — the suite drives the whole harness on tiny

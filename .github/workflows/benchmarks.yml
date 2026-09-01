@@ -9,55 +9,48 @@ on:
 jobs:
   stare-bench:
     runs-on: ubuntu-latest
-    # The DISK+LightGlue COARSE front-end runs on CPU here, and it is slow: the
-    # stare_bench suite measured 23m33s locally on the pinned stack, against ~20s
-    # when COARSE was still a classical corner detector. 60 leaves headroom on a
-    # slower runner while still failing far short of GitHub's 360-minute default.
-    timeout-minutes: 60
+    # 15, down from 60. The 60 was sized for the stare_bench unit rung, which ran the
+    # DISK+LightGlue COARSE front-end on CPU (23m33s locally). That rung is deleted; what
+    # remains is the plan/analysis layer on tiny synthetic fixtures, ~5s locally. Left
+    # well above the measured time so an under-provisioned runner does not flake, but low
+    # enough that a hang fails in minutes instead of an hour.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install
-        # torch + kornia power the DISK+LightGlue COARSE front-end that
-        # bin/utils/coarse_align.py::estimate_rigid now calls unconditionally --
-        # the classical front-ends it used to fall back to were deleted from the
-        # pipeline. stare_bench's unit rung drives the real
-        # bin/tiled_*.py entry points IN-PROCESS (benchmarks/stare_bench/run_unit.py),
-        # outside any container, so without these the whole unit rung errors out.
-        #
-        # ORDER IS LOAD-BEARING, and mirrors containers/tiled/Dockerfile: torch
-        # first and from the CPU index, because kornia pulls torch from PyPI --
-        # the CUDA wheel, ~2.5 GB -- if torch is not already satisfied.
-        #
-        # scikit-learn + matplotlib are for the ANALYSIS layer, not stare_bench:
+        # scikit-learn + matplotlib are for the ANALYSIS layer:
         # benchmarks/analysis/lib/regress.py imports sklearn.linear_model and
         # test_plotting.py imports matplotlib. Without them pytest dies during
         # COLLECTION with exit 2 -- four ImportErrors, zero tests run -- which is
         # how this job failed on 2026-08-26 and 2026-08-27 while looking like an
-        # ordinary red build. Versions match ci.yml's pins.
+        # ordinary red build. Kept in step with the imports by
+        # tests/test_ci_installs_what_benchmarks_import.py.
         #
-        # zarr / numcodecs / imagecodecs are for the SUBPROCESS leg. run_unit.py shells
-        # out to bin/tiled_{coarse,reg_tile,solve}.py, and bin/utils/tiled_io.py imports
-        # zarr -- inside a function, so it is invisible to any top-level import scan, and
-        # it surfaced only as `tiled_coarse.py failed (1): No module named 'zarr'` at
-        # runtime. The pipeline's own deps are part of this job's contract precisely
-        # because the unit rung runs the pipeline's real entry points.
+        # torch + kornia + zarr/numcodecs/imagecodecs are GONE with the stare_bench rung.
+        # They were there because run_unit.py drove bin/tiled_*.py IN-PROCESS, outside any
+        # container; nothing under benchmarks/ executes a pipeline entry point in CI any
+        # more. benchmarks/run_ashlar_arm.sh does, but it runs on the cluster inside the
+        # images that already carry those deps -- see the note in the test file.
         run: |
           # Pinned to the SAME versions ci.yml pins (tests/test_ci_stack_pinned.py
           # enforces the `==` form): an unpinned imaging stack lets this job resolve
           # different numerics than the production containers.
           pip install numpy==1.26.4 scipy==1.15.3 scikit-image==0.25.2 \
                       tifffile==2025.5.10 pandas pyyaml pytest ruff \
-                      scikit-learn==1.5.2 matplotlib==3.8.4 \
-                      zarr==2.18.3 numcodecs==0.13.1 imagecodecs==2025.3.30
-          pip install torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
-          pip install kornia==0.7.3
+                      scikit-learn==1.5.2 matplotlib==3.8.4
       - name: Test
         run: python -m pytest benchmarks/tests -v
       # benchmarks/ is excluded in ruff.toml as "benchmarking scratch";
       # --no-force-exclude lints the explicitly-named paths anyway. The
       # deliberate-violation step in this task's plan verifies that it really does.
       - name: Lint
-        run: ruff check --no-force-exclude benchmarks/stare_bench benchmarks/tests/stare_bench benchmarks/analysis/make_tables.py
+        # NOT `benchmarks/tests` wholesale: benchmarks/ is excluded in ruff.toml as
+        # "benchmarking scratch", and the previously-linted set was stare_bench plus
+        # make_tables.py. Widening to every test file surfaces 33 pre-existing violations
+        # (E702/E731/I001) in files this lint never covered -- unrelated work, and
+        # silently reformatting them would bury the change that widened the scope.
+        # Listed explicitly so growing the set stays a decision.
+        run: ruff check --no-force-exclude benchmarks/ashlar benchmarks/analysis/make_tables.py benchmarks/build_arm_plan.py benchmarks/tests/test_build_arm_plan.py benchmarks/tests/test_ci_installs_what_benchmarks_import.py

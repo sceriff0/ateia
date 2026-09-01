@@ -8,7 +8,7 @@ from benchmarks.analysis import make_tables
 
 FIX = Path(__file__).parent / "fixtures"
 TABLES = ("runs_master", "scaling_fits", "registration_accuracy", "registration_valis_rtre",
-          "segmentation_agreement", "registration_synthetic_gt", "param_matrix")
+          "segmentation_agreement", "param_matrix")
 
 
 def test_build_paper_data_emits_all_tables_and_dicts(tmp_path):

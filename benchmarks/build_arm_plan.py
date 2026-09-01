@@ -35,6 +35,14 @@ VALIS_ONLY = ("memory_mode", "reg_micro_reg")
 # add_param blank-guard never emits `--reg_tiled_mode ""`, which schema validation rejects.
 TILED_ONLY = ("reg_tiled_mode",)
 
+# The external-baseline (ashlar) columns. These are arguments to
+# benchmarks/run_ashlar_arm.sh, NOT pipeline params -- the ext_ prefix is what
+# guarantees that: run_pass() forwards a fixed list of param columns as --flags, and no
+# name in this tuple can ever collide with one. Blank on every pipeline arm so all rows
+# share a header (run_arms.sh's col_val indexes by header position).
+EXTERNAL_ONLY = ("ext_tool", "ext_from_arm", "ext_tile_size", "ext_overlap",
+                 "ext_max_shift_um", "ext_seg_method")
+
 # ASHLAR_ONLY = ("reg_ashlar_tile", "reg_ashlar_overlap", "reg_ashlar_max_shift_um") is GONE
 # with the arm. Those three are not pipeline params any more -- nextflow.config declares none
 # of them -- so emitting the columns at all, even blank, would put three names in arms.csv
@@ -69,21 +77,17 @@ def _registration_arms(cfg: dict) -> list[dict]:
                 "label": f"{mm} / micro {micro}",
             })
 
-    # ASHLAR IS NOT AN ARM HERE, AND CANNOT BE. This plan drives the real pipeline
-    # (run_arms.sh passes each row's columns as --flags), and ashlar is no longer a
-    # pipeline backend: :fire: 6a54479 removed it for v1.0.0, registration_method's
-    # schema enum is ['valis', 'tiled'], and tests/test_ashlar_backend_removed.py keeps
-    # it out. An arm here would emit --registration_method ashlar and be rejected at
+    # ASHLAR IS NOT A *PIPELINE* ARM, AND CANNOT BE. run_arms.sh passes each
+    # registration row's columns as --flags, and ashlar is no longer a pipeline backend:
+    # :fire: 6a54479 removed it for v1.0.0, registration_method's schema enum is
+    # ['valis', 'tiled'], and tests/test_ashlar_backend_removed.py keeps it out. A
+    # registration arm here would emit --registration_method ashlar and be rejected at
     # launch, plus three reg_ashlar_* flags that name nothing in nextflow.config.
     #
-    # ASHLAR REMAINS THE BENCHMARK'S EXTERNAL BASELINE -- it just isn't reached through
-    # the pipeline any more. benchmarks/ashlar/ drives it directly and rewrites its
-    # per-tile placements into the same M0 + mesh manifest STARE emits, so the
-    # method-agnostic scorer (stare_bench/cli.py, method="ashlar") ranks it against
-    # VALIS and STARE unchanged. The tile_size fairness argument that used to justify
-    # the fan-out here still holds; it now applies to that driver's own --tile-size.
-    #
-    # Guarded by test_no_ashlar_arms_reach_the_pipeline_plan below.
+    # It IS an arm of this plan, under arm_kind='external' -- see _external_arms below,
+    # which run_arms.sh dispatches to benchmarks/run_ashlar_arm.sh instead of Nextflow.
+    # Guarded by test_no_ashlar_arms_reach_the_pipeline_plan below, which now asserts
+    # the narrower (and true) property: no ashlar row carries a pipeline param.
 
     tiled = ra.get("tiled") or {}
     if tiled.get("enabled"):
@@ -110,6 +114,74 @@ def _registration_arms(cfg: dict) -> list[dict]:
                 "reg_micro_reg": "",
                 "reg_tiled_mode": mode,
                 "label": f"tiled (STARE, {mode})",
+            })
+    return arms
+
+
+def ashlar_arm_name(tile: int, shift) -> str:
+    # Both varied values are IN the name. registration_arms.R falls back to parsing the
+    # directory name when arms.csv is missing, and four ashlar arms differing only by a
+    # column it failed to read would render as one quadruplicated box -- the same failure
+    # tiled_arm_name() exists to avoid. Keeps the `ashlar` substring the consumer's
+    # backend fallback keys on.
+    return f"ashlar_t{int(tile)}_s{int(shift)}"
+
+
+def _external_arms(cfg: dict) -> list[dict]:
+    """The external-tool baseline arms (ashlar), as rows of THIS plan.
+
+    WHY THEY LIVE IN THE SAME PLAN. benchmarks/ashlar/solve.py rewrites ashlar's
+    per-tile placements into the same M0 + mesh manifest STARE emits, and
+    bin/warp_seg_qc.py --method tiled reads that manifest JVM-free. So ashlar can be
+    scored by the pipeline's OWN reg_qc=2 seg-overlap scorer, on the same nuclei, into
+    the same `<root>/<arm>/<patient>/qc/registration/*_seg_qc.json` tree the twelve
+    registration arms write. Same metric family, same columns, one layout, and
+    ihc_method's readers pick it up with no path added.
+
+    That is strictly stronger than scoring it in its own harness against synthetic
+    ground truth, which is what the deleted stare_bench rung did: those numbers shared
+    no column with this table and could not be ranked against it.
+
+    THE ROWS CARRY NO PIPELINE PARAMS. registration_method/memory_mode/reg_micro_reg/
+    reg_tiled_mode are all blank, because nothing here reaches validateParameters() --
+    run_arms.sh dispatches arm_kind='external' to run_ashlar_arm.sh, not to Nextflow.
+    The ext_* columns are that script's arguments, deliberately prefixed so they can
+    never collide with a param name run_pass() would forward as a --flag.
+    """
+    arms: list[dict] = []
+    eb = cfg.get("external_baseline") or {}
+    ash = eb.get("ashlar") or {}
+    if not ash.get("enabled"):
+        return arms
+
+    from_arm = ash.get("from_arm")
+    if not from_arm:
+        raise ValueError(
+            "external_baseline.ashlar.from_arm is required: the ashlar arm reuses that "
+            "registration arm's published QC nuclei "
+            "(<root>/<from_arm>/<patient>/qc/registration/geojson/) rather than "
+            "re-segmenting. Scoring against DIFFERENT nuclei than the arms it is ranked "
+            "against would make the comparison meaningless.")
+
+    for tile in ash.get("tile_size", []):
+        for shift in ash.get("maximum_shift_um", []):
+            name = ashlar_arm_name(tile, shift)
+            arms.append({
+                "arm": name,
+                "backend": "ashlar",
+                # Blank for the same reason a tiled arm blanks memory_mode: the consumer
+                # must be able to tell "not applicable" from "at default".
+                "memory_mode": "",
+                "reg_micro_reg": "",
+                "reg_tiled_mode": "",
+                "ext_tool": "ashlar",
+                "ext_from_arm": from_arm,
+                "ext_tile_size": tile,
+                "ext_overlap": ash.get("overlap_fraction", 0.1),
+                "ext_max_shift_um": shift,
+                # Filled in by build_arm_plan from ext_from_arm's own seg_method.
+                "ext_seg_method": "",
+                "label": f"ashlar (tile {int(tile)}, shift {int(shift)}um)",
             })
     return arms
 
@@ -210,6 +282,7 @@ def build_arm_plan(cfg: dict) -> list[dict]:
         "reg_micro_reg": "", "seg_method": baseline.get("seg_method", ""),
         "registration_method": "", "reg_qc": "",
         **{k: "" for k in TILED_ONLY},
+        **{k: "" for k in EXTERNAL_ONLY},
     })
     n += 1
 
@@ -226,7 +299,52 @@ def build_arm_plan(cfg: dict) -> list[dict]:
             # Blank on every non-tiled arm, exactly as memory_mode/reg_micro_reg are
             # blank on non-VALIS arms.
             **{k: a.get(k, "") for k in TILED_ONLY},
+            **{k: "" for k in EXTERNAL_ONLY},
             "reg_qc": 2,
+        })
+        n += 1
+
+    # EXTERNAL BASELINE (ashlar). Emitted AFTER the registration arms and run in its own
+    # pass, because it reuses `ext_from_arm`'s published QC nuclei -- the same resume
+    # discipline the segmentation arms use, for the same reason: re-segmenting would
+    # score ashlar against different nuclei than the arms it is ranked against.
+    ext = _external_arms(cfg)
+    if ext:
+        known = {a["arm"] for a in arms}
+        for e in ext:
+            if e["ext_from_arm"] not in known:
+                raise ValueError(
+                    f"external_baseline.ashlar.from_arm={e['ext_from_arm']!r} names no "
+                    f"registration arm this plan runs. Available: {sorted(known)}")
+    for e in ext:
+        _LABELS[e["arm"]] = e["label"]
+        rows.append({
+            "run_id": e["arm"], "arm_kind": "external",
+            # No --start/--stop: nothing in this row reaches Nextflow.
+            "start": "", "stop": "",
+            # TWO sources, and they are different arms. The IMAGES come from the shared
+            # preprocessing run, so ashlar registers exactly what VALIS and STARE
+            # registered (comparing it against native slides would hand it a different
+            # input and make the ranking meaningless). The NUCLEI come from
+            # `ext_from_arm`'s published qc/registration/geojson/. `from_arm`/`from_csv`
+            # name the first because that is what run_arms.sh's resume check reads --
+            # which also gets the external arm the "SKIP if upstream did not complete"
+            # guard for free.
+            "from_arm": PREPROCESS_ARM, "from_csv": "preprocessed", "rep": 0,
+            "arm": e["arm"], "backend": e["backend"],
+            "memory_mode": "", "reg_micro_reg": "",
+            # seg_method is BLANK, and ext_seg_method carries the value instead. Not
+            # pedantry: `seg_method` is one of the columns run_pass() forwards as a
+            # --flag, and this row must stay incapable of contributing one even if the
+            # external dispatch branch is ever moved. The value is still recorded, because
+            # WHICH segmenter found the nuclei is a property of the score -- it is just
+            # inherited from ext_from_arm's geojsons rather than chosen here.
+            "seg_method": "",
+            "registration_method": "", "reg_qc": "",
+            **{k: "" for k in TILED_ONLY},
+            **{k: e[k] for k in EXTERNAL_ONLY},
+            "ext_seg_method": next(a["seg_method"] for a in arms
+                                   if a["arm"] == e["ext_from_arm"]),
         })
         n += 1
 
@@ -248,6 +366,8 @@ def build_arm_plan(cfg: dict) -> list[dict]:
                 "reg_micro_reg": "", "seg_method": m,
                 "registration_method": "",
                 "reg_qc": "",
+                **{k: "" for k in TILED_ONLY},
+                **{k: "" for k in EXTERNAL_ONLY},
             })
             n += 1
 
@@ -268,17 +388,26 @@ def build_arm_plan(cfg: dict) -> list[dict]:
                     "registration_method": baseline.get("registration_method", "valis"),
                     "reg_qc": baseline.get("reg_qc", 2),
                     "only_patient": p,
+                    **{k: "" for k in TILED_ONLY},
+                    **{k: "" for k in EXTERNAL_ONLY},
                 })
                 n += 1
     return rows
 
 
 def arms_manifest_rows(plan: list[dict]) -> list[dict]:
-    """The consumer's arms.csv: registration arms only, one row per arm dir.
+    """The consumer's arms.csv: the RANKED arms, one row per arm dir.
 
     Segmentation and compute arms are deliberately absent — registration_arms.R
     ranks REGISTRATION configurations, and a segmentation arm listed there would
     appear as an unlabelled box in every panel.
+
+    The external (ashlar) arms ARE included, because they are ranked: they write the
+    same *_seg_qc.json into the same tree and are read by the same panel. Omitting them
+    would not hide them — registration_arms.R discovers arms by walking `<root>`, so an
+    absent row falls through to its directory-name parser, which reads `ashlar_t1024_s30`
+    as neither VALIS nor tiled and labels the box from the raw string. Listing them is
+    what makes the external baseline appear as a baseline rather than as a mystery arm.
     """
     return [{
         "arm_dir": r["arm"],
@@ -286,7 +415,7 @@ def arms_manifest_rows(plan: list[dict]) -> list[dict]:
         "memory_mode": r["memory_mode"],
         "micro_reg": r["reg_micro_reg"],
         "label": _LABELS[r["arm"]],
-    } for r in plan if r["arm_kind"] == "registration"]
+    } for r in plan if r["arm_kind"] in ("registration", "external")]
 
 
 def schema_enums(schema_path: Path) -> dict:
