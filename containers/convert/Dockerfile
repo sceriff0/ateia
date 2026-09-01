@@ -85,3 +85,14 @@ RUN pip3 install --no-cache-dir \
         dask[array]==2026.7.1
 
 
+
+# Fail the BUILD rather than a cluster run. containers/<dir>/smoke.sh imports exactly
+# the third-party modules this image's bin/ scripts import at run time, so a stack that
+# resolved in pip and then explodes on first import stops here. The SAME script is run
+# again by .github/workflows/containers.yml against the built image, so there is one
+# definition exercised in two places rather than two copies that drift.
+#
+# LAST, and after every pip install, on purpose: a COPY invalidates the layer cache for
+# everything below it, so putting this at the end costs no rebuilds.
+COPY containers/convert/smoke.sh /usr/local/bin/mirage-smoke.sh
+RUN bash /usr/local/bin/mirage-smoke.sh

@@ -39,11 +39,18 @@ ALLOW_FILES = {
     # once. This guard covers stray TEXT, that one covers live ATTRIBUTES; the exemption
     # is what keeps them from cancelling each other out.
     "tests/test_coarse_frontend.py",
-    # These quote the literal runtime error string "RuntimeError: ORB found no
-    # features." that a real CI pin exists for. Rewording them would break the pin.
-    ".github/workflows/ci.yml",
-    ".github/workflows/release.yml",
-    "tests/test_ci_stack_pinned.py",
+    # THREE ENTRIES WERE DELETED FROM HERE ON 2026-09-01 (CI redesign, Phase 7):
+    # `.github/workflows/ci.yml`, `.github/workflows/release.yml` and
+    # `tests/test_ci_stack_pinned.py`. Their stated reason was that they quote the
+    # literal runtime error string "RuntimeError: ORB found no features." for a CI
+    # pin. Running PATTERN (this file's own compiled regex, not a reading of the
+    # prose) against each of the three returned ZERO matches: the string had been
+    # gone for some time and the exemptions were exempting nothing while reading as
+    # though a real constraint lived there.
+    #
+    # test_the_allowlist_has_no_dead_entries below is the fix for the class, not just
+    # the instance -- an entry that stops matching now fails, so this cannot happen
+    # again without someone deleting a test to allow it.
     # Design/research records. NOT merely "historical" -- both are PUBLISHED (mkdocs.yml
     # :18-19) and bin/tiled_coarse.py cites the design doc for the thumbnail rationale, so
     # an uncorrected memory model in it is a live, operator-facing claim rather than an
@@ -115,4 +122,40 @@ def test_no_legacy_frontend_references():
                 hits.append(f"{rel}:{i}: {line.strip()[:120]}")
     assert not hits, (
         "reference(s) to a deleted COARSE front-end remain:\n" + "\n".join(hits)
+    )
+
+
+def test_the_allowlist_has_no_dead_entries():
+    """An exemption that exempts nothing is worse than no exemption.
+
+    It reads as a constraint someone weighed, so the next reader routes around it --
+    and it hides the fact that the thing it was written for is gone. Three of the
+    entries above were in exactly that state when this check was added (2026-09-01):
+    the ORB error string they claimed to protect had left `.github/` entirely, and
+    the guard's own pattern returned zero matches for all three.
+
+    A file that stops existing is the same defect, so both are reported.
+    """
+    tracked = set(
+        subprocess.run(
+            ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
+        ).stdout.split()
+    )
+    dead = []
+    for rel in sorted(ALLOW_FILES):
+        path = REPO / rel
+        if rel not in tracked or not path.is_file():
+            dead.append(f"{rel}: not a tracked file any more")
+            continue
+        if not any(
+            PATTERN.search(line) for line in path.read_text(errors="ignore").splitlines()
+        ):
+            dead.append(
+                f"{rel}: contains no match for this guard's own pattern, so exempting "
+                "it exempts nothing"
+            )
+    assert not dead, (
+        "ALLOW_FILES entr(y/ies) exempt nothing. Delete them -- a stale exemption "
+        "reads as a decision somebody made and quietly widens the guard's blind "
+        "spot:\n  " + "\n  ".join(dead)
     )

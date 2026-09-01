@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         procps \
     && rm -rf /var/lib/apt/lists/*
 
-# The build context is the REPOSITORY ROOT (build-images.yml passes `context: .`).
+# The build context is the REPOSITORY ROOT (containers.yml passes `context: .`).
 # NO constraints.txt here, deliberately: this is the documented python:3.12 / zarr>=3
 # island, and requirements/spatialdata.txt carries no `-c` line for the same reason.
 COPY requirements/spatialdata.txt /tmp/requirements/spatialdata.txt
@@ -36,16 +36,12 @@ RUN pip install --no-cache-dir --upgrade pip \
 # Fail the BUILD rather than a cluster run: the import graph here (spatialdata ->
 # zarr 3 -> ome_zarr -> dask, plus the GEOS shared library) is exactly the kind that
 # resolves in pip and then explodes on first import.
-RUN python -c "\
-import spatialdata, anndata, geopandas, shapely, zarr, dask, tifffile, scipy, pandas, numpy; \
-from spatialdata.models import Image2DModel, Labels2DModel, ShapesModel, TableModel; \
-from spatialdata.transformations import Identity, Scale; \
-print('spatialdata image OK:', \
-      'spatialdata', spatialdata.__version__, \
-      '| anndata', anndata.__version__, \
-      '| geopandas', geopandas.__version__, \
-      '| zarr', zarr.__version__, \
-      '| dask', dask.__version__)"
+#
+# THE CHECK ITSELF MOVED, VERBATIM, into containers/spatialdata/smoke.sh (CI redesign
+# Phase 6, 2026-09-01), so the same definition runs here at build time AND from
+# .github/workflows/containers.yml with `docker run` against the built image.
+COPY containers/spatialdata/smoke.sh /usr/local/bin/mirage-smoke.sh
+RUN bash /usr/local/bin/mirage-smoke.sh
 
 # Read-only $HOME safety: several of these libraries default their caches to ~/.cache.
 ENV XDG_CACHE_HOME=/tmp/.cache \

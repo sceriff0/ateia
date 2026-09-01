@@ -21,7 +21,7 @@
 #
 # THE THREE CACHING RULES. This file holds both of the repository's own
 # `actions/cache` steps, so the rules live here and the other two cache sites
-# (.github/actions/setup-python-env, .github/workflows/build-images.yml) point
+# (.github/actions/setup-python-env, .github/workflows/containers.yml) point
 # at them.
 #
 #   1. `hashFiles()` targets MANIFESTS -- requirements/*, nextflow.config, a

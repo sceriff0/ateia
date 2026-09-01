@@ -8,11 +8,21 @@
 #   pytest tests/ --ignore=tests/testdata --ignore=tests/modules \
 #                 --ignore=tests/subworkflows --ignore=tests/integration
 #
-# and equal to passed + skipped. Measured 2026-09-01 on dev@1ed35df:
-# 1151 passed, 10 skipped, 0 failed.
+# and equal to passed + skipped. Measured 2026-09-01 on ci/phase-6-7 (CI redesign
+# Phases 6-7, fix round 1, base c17b7f4): 1250 passed, 12 skipped, 0 failed.
+#
+# The previous entry was 1161, measured 2026-09-01 on dev@1ed35df (1151 passed,
+# 10 skipped). +99 since: Phases 1-5 of the CI redesign; then Phase 6's
+# tests/test_container_smoke_tests.py, which is 45 cases on its own (four
+# parametrisations over the eleven images in containers/images.json, plus one
+# whole-workflow case); then Phase 7's +10 (test_no_swallowed_failures.py's four,
+# test_no_legacy_frontends.py's new dead-exemption case, and
+# test_every_gate_aggregator_reads_every_job_it_needs over five workflows); then fix
+# round 1's +2, which is test_no_swallowed_failures.py's build-file scope probe over
+# containers/merge/Dockerfile and the Makefile.
 #
 # The check is `>=`, so adding tests never fails it. But a floor that is allowed
 # to fall arbitrarily far behind stops being a floor, so conftest.py also fails
 # once the suite has grown FLOOR_DRIFT (50) tests past this number, with the
 # replacement value in the message. Re-ratcheting is then one line, here.
-1214
+1262

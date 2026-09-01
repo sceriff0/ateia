@@ -366,7 +366,7 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   already-updated references.)
 - **Slim container (done):** `containers/tiled/` (`python:3.11-slim` + numpy/scipy/scikit-image/
   tifffile, no JVM/libvips/GPU). **Built and verified locally** — the CLIs import and run
-  in-container; **~438 MB** vs the multi-GB VALIS image. Added to the `build-images.yml` matrix.
+  in-container; **~438 MB** vs the multi-GB VALIS image. Added to the `containers.yml` matrix.
 - **Intrinsic TRE (done — VALIS-analogous, emitted by both paths):** `_tre.json` carries
   `coarse_tre_px` (rigid feature-fit residual, like VALIS's rigid error), a per-tile `rigid_tre_px`
   **spatial heatmap** VALIS doesn't have, and — in the default monolithic path — `residual_after_px`,

@@ -427,7 +427,7 @@
           <div class="mod"><div class="n">SEG_QUALITY_EVAL → MERGE_SEG_EVAL <span class="tag">opt-in</span></div>
             <div class="x">Reference-free segmentation scoring (CSE) — grades the mask with no ground truth.
               <b>Off by default</b>, and the reason is supply chain, not science: it is the one QC stage needing
-              the <code>segeval</code> image, and <code>build-images.yml</code> pushes only on a release or a
+              the <code>segeval</code> image, and <code>containers.yml</code> pushes only on a release or a
               manual dispatch, never on a push to main — so a default-on stage would fail every run of a fresh
               clone against a container that does not exist yet. Enable with the <code>seg_quality</code>
               profile. One of only two processes keeping a <i>retry-then-drop</i> policy: losing the score

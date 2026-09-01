@@ -142,7 +142,7 @@ def test_buildx_job_must_actually_use_buildx():
       purpose IS the image build.
 
     The second clause is a refinement forced by widening this guard past
-    `ci.yml`: `build-images.yml`'s matrix job is the legitimate buildx user in
+    `ci.yml`: `containers.yml`'s matrix job is the legitimate buildx user in
     this repo — it never runs a pipeline at all, so a "must reference a docker
     profile" rule would have flagged it for doing exactly the thing buildx
     exists to do. Exempting the *file* would have re-opened the hole this

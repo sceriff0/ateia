@@ -68,10 +68,10 @@ ci_actions = importlib.import_module("ci_actions")
 WORKFLOWS = ROOT / ".github" / "workflows"
 RELEASE = WORKFLOWS / "release.yml"
 CI = WORKFLOWS / "ci.yml"
-BUILD_IMAGES = WORKFLOWS / "build-images.yml"
+CONTAINERS = WORKFLOWS / "containers.yml"
 
 # The reusable image-build workflow, exactly as release.yml must name it.
-BUILD_IMAGES_USES = "./.github/workflows/build-images.yml"
+CONTAINERS_USES = "./.github/workflows/containers.yml"
 
 # The shared blocking test suite is DISCOVERED, never named. It is defined as
 # "the local reusable workflow that BOTH gates transitively require", which is
@@ -183,7 +183,7 @@ def artifact_producing_jobs() -> dict:
     """Jobs whose OUTPUT is a release artifact — DISCOVERED, never named.
 
     Two kinds, and they are the two things a release ships:
-      * the job that calls the reusable image build (`uses:` build-images.yml); and
+      * the job that calls the reusable image build (`uses:` containers.yml); and
       * any job that tars up `mirage-<version>.tar.gz`.
 
     Naming them instead would let a third artifact job be added tomorrow with a
@@ -195,7 +195,7 @@ def artifact_producing_jobs() -> dict:
     for job_id, job in release_jobs().items():
         if not isinstance(job, dict):
             continue
-        if BUILD_IMAGES_USES in str(job.get("uses", "")):
+        if CONTAINERS_USES in str(job.get("uses", "")):
             found[job_id] = job
             continue
         text = run_text(job)
@@ -223,9 +223,9 @@ def _gate_ancestors(jobs: dict, roots: list[str]) -> set[str]:
 
     Distinct from `_needs_dag_connected` below, which walks both directions on
     purpose. Here the question is "what does the gate REQUIRE", and release.yml's
-    downstream publish chain (`publish-images`, which calls build-images.yml) is
+    downstream publish chain (`publish-images`, which calls containers.yml) is
     emphatically not part of that. Walking both directions would have made
-    `build-images.yml` come back as a workflow the release gate requires.
+    `containers.yml` come back as a workflow the release gate requires.
     """
     reached = set(roots)
     changed = True
@@ -373,7 +373,7 @@ def test_every_gate_job_checks_out_the_one_pinned_commit():
     must name the pinned SHA -- or it CALLS a reusable workflow, in which case it
     has no steps at all and the SHA has to be handed over as an input, because a
     called workflow does its own checkout against the CALLER's `github.ref`. That
-    is the same defect build-images.yml's `workflow_call` block documents, one
+    is the same defect containers.yml's `workflow_call` block documents, one
     step to the left: here it would make the gate TEST a commit other than the one
     `bump-and-tag` tags.
 
@@ -453,13 +453,13 @@ def test_artifact_jobs_depend_on_bump_and_tag():
     `bump-and-tag` in it, the tarball and the images are built in parallel with the
     version bump, from the un-bumped tree."""
     producers = artifact_producing_jobs()
-    # Non-vacuity: the discovery is by shape (a `uses:` of build-images.yml, or a
+    # Non-vacuity: the discovery is by shape (a `uses:` of containers.yml, or a
     # `tar` of mirage-*.tar.gz). If it finds nothing, every assertion below is over
     # an empty set.
     assert len(producers) >= 2, (
         f"discovered only {sorted(producers)} as release-artifact producers. Expected at "
         "least the image build and the archive job — the discovery predicates "
-        "(a `uses:` of build-images.yml, or a `tar` of a mirage-* archive) no longer "
+        "(a `uses:` of containers.yml, or a `tar` of a mirage-* archive) no longer "
         "match what release.yml does."
     )
     missing = [
@@ -483,13 +483,13 @@ def test_artifact_jobs_build_from_the_created_tag():
 
     wrong = []
     for job_id, job in producers.items():
-        if BUILD_IMAGES_USES in str(job.get("uses", "")):
+        if CONTAINERS_USES in str(job.get("uses", "")):
             # A reusable workflow does its own checkout and sees the CALLER's
             # github.ref, so the tag has to be handed to it as an input.
             passed = str((job.get("with") or {}).get("ref", ""))
             if RELEASE_TAG not in passed:
                 wrong.append(
-                    f"{job_id}: calls {BUILD_IMAGES_USES} with ref={passed!r}; a reusable "
+                    f"{job_id}: calls {CONTAINERS_USES} with ref={passed!r}; a reusable "
                     f"workflow checks out the CALLER's github.ref unless given "
                     f"`ref: ${{{{ {RELEASE_TAG} }}}}`"
                 )
@@ -505,21 +505,21 @@ def test_artifact_jobs_build_from_the_created_tag():
     )
 
 
-def test_build_images_honours_the_ref_it_is_given():
+def test_containers_workflow_honours_the_ref_it_is_given():
     """The other half of the same invariant, in the called workflow. release.yml can
-    pass `ref:` all it likes; if build-images.yml's own `actions/checkout` steps ignore
+    pass `ref:` all it likes; if containers.yml's own `actions/checkout` steps ignore
     it, the images are still built from the caller's ref."""
-    data = load(BUILD_IMAGES)
+    data = load(CONTAINERS)
     triggers = data.get("on") or data.get(True) or {}
     call_inputs = ((triggers.get("workflow_call") or {}).get("inputs")) or {}
     assert "ref" in call_inputs, (
-        "build-images.yml's `workflow_call` declares no `ref` input, so release.yml "
+        "containers.yml's `workflow_call` declares no `ref` input, so release.yml "
         "cannot tell it which commit to build the images from."
     )
 
     seen = 0
     ignoring = []
-    for job_id, job in jobs_of(BUILD_IMAGES).items():
+    for job_id, job in jobs_of(CONTAINERS).items():
         if not isinstance(job, dict):
             continue
         for step in checkout_steps(job):
@@ -527,11 +527,11 @@ def test_build_images_honours_the_ref_it_is_given():
             if "inputs.ref" not in str((step.get("with") or {}).get("ref", "")):
                 ignoring.append(f"{job_id}: `{step.get('name', '<unnamed>')}`")
     assert seen >= 2, (
-        f"found {seen} checkout step(s) in build-images.yml; both the matrix-resolving "
+        f"found {seen} checkout step(s) in containers.yml; both the matrix-resolving "
         "`setup` job and the `build` job check out the repo, so this scan missed one."
     )
     assert not ignoring, (
-        "build-images.yml checkout step(s) ignore the `ref` input, so a release builds "
+        "containers.yml checkout step(s) ignore the `ref` input, so a release builds "
         "images from the caller's ref rather than the tag:\n" + "\n".join(ignoring)
     )
 
@@ -692,9 +692,17 @@ BLOCKING_CHECKS = [
     ("token-guard collection assertion", "--dry-run"),
     ("Nextflow plugin provisioning", "nextflow plugin install"),
     # Added 2026-09-01 with the composite actions. actionlint is BLOCKING and it
-    # lives in ci.yml's `ruff` job (which IS in the `all-tests` gate's `needs:`),
-    # not in the advisory `lint` job that runs `|| true`. Both needles resolve
-    # through .github/actions/** like the rest of this table.
+    # lives in the shared suite's `ruff` job, which every gate requires. It was
+    # deliberately NOT put in ci.yml's old advisory `lint` job -- that job ran
+    # `nf-core lint ... || true` and could never fail, and Phase 7 deleted it
+    # outright. Both needles resolve through .github/actions/** like the rest of
+    # this table.
+    #
+    # The needle is the COMMAND, not `rhysd/actionlint`: Phase 2's fix round
+    # replaced the anonymous Docker Hub pull with a pinned, checksum-verified
+    # release tarball inside `.github/actions/actionlint`, so the image name no
+    # longer appears in any `run:` body and matching it would assert the old
+    # implementation rather than the check.
     ("actionlint (workflow + composite-action syntax)", "actionlint"),
 ]
 
@@ -749,7 +757,7 @@ def test_the_two_gates_require_the_same_reusable_test_suite():
     same YAML, once.
 
     It is asserted UPSTREAM-ONLY. release.yml's publish chain also calls a
-    reusable workflow (build-images.yml), downstream of the gate; counting that
+    reusable workflow (containers.yml), downstream of the gate; counting that
     would make the release gate look like it requires the image build.
     """
     suite = shared_gate_suite()  # asserts there is exactly one, with the reason
@@ -861,7 +869,7 @@ def test_the_shared_test_suite_honours_the_ref_it_is_given():
     A caller can pass `ref:` all it likes; if the called workflow's own
     `actions/checkout` steps ignore it, every job there checks out the CALLER's
     `github.ref` instead. On the release path that means the gate tests a
-    different commit from the one `bump-and-tag` tags — build-images.yml's
+    different commit from the one `bump-and-tag` tags — containers.yml's
     `workflow_call` block records the same defect one step to the right, where it
     built ten container images from an un-bumped tree.
     """
@@ -974,6 +982,82 @@ def test_no_gate_aggregator_treats_skipped_as_a_pass(path):
         )
 
 
+# `needs.<dep>.result` followed by a comparison. The gate writes
+#     if [ "${{ needs.ruff.result }}" != "success" ]; then
+# so between the `}}` and the operator there is a closing quote and whitespace; an
+# occurrence with nothing comparable after it (an `echo` reporting the value) yields
+# no match, which is exactly the distinction this is for.
+_RESULT_COMPARISON_TEMPLATE = (
+    r"needs\.{dep}\.result\s*\}}\}}\s*[\"\']?\s*(!=|==)\s*[\"\']?([A-Za-z_]+)"
+)
+
+
+def _result_comparisons(text: str, dep: str) -> set:
+    """`{(operator, literal)}` for every comparison applied to `needs.<dep>.result`.
+
+    A dependency can be MENTIONED without being CHECKED -- every branch in these
+    aggregators echoes the value it just rejected -- so "the substring appears" is
+    not the question. The operator is not either: `== "failure"` reads like a check
+    and passes `cancelled`, `skipped` and every future conclusion GitHub adds.
+    """
+    pattern = _RESULT_COMPARISON_TEMPLATE.format(dep=re.escape(dep))
+    return set(re.findall(pattern, text))
+
+
+@pytest.mark.parametrize("path", workflow_files(), ids=lambda p: p.name)
+def test_every_gate_aggregator_reads_every_job_it_needs(path):
+    """A job in the gate's `needs:` that the gate never CHECKS is not gated.
+
+    `needs:` alone gives you two of the three things you want -- ordering, and a
+    skip when the dependency fails outright -- and not the third: with
+    `if: always()`, which every aggregator here carries so that it can report
+    rather than vanish, a FAILED dependency no longer stops the job. The result
+    check in the script is the whole gate at that point, so a job added to `needs:`
+    without a matching `!= "success"` branch is required in appearance and
+    advisory in fact.
+
+    THIS IS THE `alls-green` PROPERTY, and adopting `alls-green` was considered and
+    declined to get it. That action derives the check from `toJSON(needs)`, which
+    would make the mistake unmakeable -- but it also removes the `run:` step that
+    reads `needs.<job>.result`, and THAT is how `result_aggregator_jobs` discovers
+    a gate at all. Every gate assertion in this file is built on that discovery
+    (the `skipped` scan, the connectivity scan, `shared_gate_suite`), so swapping
+    the shell check for a third-party action would blind them while looking like an
+    improvement. Asserting the property directly costs one test and no dependency.
+    """
+    for job_id, job in result_aggregator_jobs(path).items():
+        text = run_text(job)
+        problems = []
+        for dep in needs_of(job):
+            comparisons = _result_comparisons(text, dep)
+            if not comparisons:
+                problems.append(
+                    f"`{dep}`: never compared at all"
+                    + (
+                        " (the name appears, but only in a message)"
+                        if f"needs.{dep}.result" in text
+                        else ""
+                    )
+                )
+            elif ("!=", "success") not in comparisons:
+                problems.append(
+                    f"`{dep}`: compared as {sorted(comparisons)}, never as "
+                    '`!= "success"`'
+                )
+        assert not problems, (
+            f"{path.name}: job `{job_id}`'s `needs:` and its result checks disagree:\n  "
+            + "\n  ".join(problems)
+            + "\n\nWith `if: always()` on the aggregator -- which every one here carries "
+            "so that it reports rather than vanishes -- a FAILED dependency no longer "
+            "stops the job, so the comparison in the script IS the gate. A dependency "
+            "with no comparison is required in appearance and advisory in fact; one "
+            "compared as `== \"failure\"` instead of `!= \"success\"` lets `cancelled` "
+            "and `skipped` straight through, which is the same hole one operator to "
+            "the left. Add a `!= \"success\"` branch for each, or take it out of "
+            "`needs:` and put the job in a workflow nothing is gated on."
+        )
+
+
 def test_no_workflow_job_sets_continue_on_error():
     """`continue-on-error: true` makes a job or step report a green tick whatever
     it did, so the run summary stops saying whether the suite got better or worse.
@@ -986,6 +1070,17 @@ def test_no_workflow_job_sets_continue_on_error():
     nightly suite that is expected to be red is exactly where someone reaches for
     `continue-on-error` to quieten it, and quietening it is the one thing that
     would make the move pointless.
+
+    STEP LEVEL IS FORBIDDEN TOO, AND THAT WAS RE-DECIDED IN PHASE 7 rather than
+    inherited. The CI redesign's `|| true` register argued for narrowing this to
+    JOB level, on the ground that job-level `continue-on-error` makes
+    `needs.<job>.result` read `success` (it lies to the gate) while step-level does
+    not (it is "a different thing and is safe"). Half of that is right: step-level
+    is strictly narrower. It is still a green tick over a step that failed, which is
+    the same defect one size down -- and there is no step in this repository that
+    wants one. Narrowing a guard for a use nobody has is how a guard becomes
+    decorative; the `allowed` dict below is the escape hatch, and it costs a written
+    reason rather than a silent licence.
 
     If a legitimate use ever appears, allow-list it BY JOB ID here with the reason
     written down, rather than deleting the scan.
@@ -1031,10 +1126,10 @@ def test_no_workflow_branches_on_the_workflow_call_event_name():
     Inside a REUSABLE workflow the event payload is the CALLER's — GitHub's own
     words: "the event payload in the called workflow is the same event payload
     from the calling workflow". So `github.event_name` is never `workflow_call`;
-    on a published release reaching build-images.yml through release.yml's
+    on a published release reaching containers.yml through release.yml's
     `publish-images`, it is `release`.
 
-    build-images.yml's version resolver branched on exactly that, could not match,
+    containers.yml's version resolver branched on exactly that, could not match,
     fell through to its `push`-trigger default of `PUSH="false"`, and gave the
     operator a fully green "Publish Images" job with ZERO images on Docker Hub —
     while `modules/local/*.nf` pull `bolt3x/mirage-<component>:<manifest.version>`
@@ -1090,17 +1185,17 @@ def test_no_workflow_branches_on_the_workflow_call_event_name():
 
 # Jobs deliberately outside their workflow's gate DAG. BY (file, job id), with the
 # reason, because an unexplained one is exactly the defect.
-GATE_DISCONNECTED_JOBS = {
-    ("ci.yml", "lint"): (
-        "nf-core structural lint. Its one substantive step ends in `|| true`, so "
-        "the lint itself can never fail the run -- keeping it out of `all-tests` "
-        "is what stops it being a fake gate. NOTE THE RESIDUAL, honestly: its "
-        "setup steps (checkout, setup-nextflow, setup-python-env) are NOT behind "
-        "`|| true`, so an infrastructure failure there still reddens the run. "
-        "Phase 7 of the redesign owns the `|| true`; this entry is not a claim "
-        "that the hole is closed."
-    ),
-}
+# EMPTY AS OF 2026-09-01 (CI redesign, Phase 7), and that is the point rather than
+# an oversight. The single entry was ("ci.yml", "lint") -- the nf-core structural
+# lint, whose one substantive step ended in `|| true` and therefore could never fail.
+# Phase 7 deleted the JOB: no released nf-core/tools version can lint this repository
+# (2.14.1 through 4.1.0 all die on `manifest.name` having no `/`; see .nf-core.yml's
+# header for the measurement), so there was nothing to un-swallow.
+#
+# Every job in every gated workflow is now wired to its gate. Leave this dict empty
+# if you can: an entry here is a job that cannot fail the MERGE and can still fail
+# the RUN, which is how a green gate comes to report a red commit.
+GATE_DISCONNECTED_JOBS: dict[tuple[str, str], str] = {}
 
 # The advisory nf-test suites, keyed on the COMMAND, never on a job or file name.
 # Naming the job would let a rename hide a deletion, and naming the file would go
@@ -1142,7 +1237,7 @@ def test_every_job_is_connected_to_its_workflows_gate():
     A job with no `needs:` and nothing needing it is invisible to the gate and
     fully visible in the run status -- the worst of both. That was `nf-test-real`.
 
-    Workflows with no gate aggregator (build-images.yml, nightly.yml) are out of
+    Workflows with no gate aggregator (containers.yml, nightly.yml) are out of
     scope BY CONSTRUCTION, not by exemption: there is no gate for a job to be
     disconnected from, and nightly.yml being one of them is the entire point of
     it existing. They are counted, not skipped -- a skip is not a pass in this
@@ -1318,7 +1413,12 @@ GATE_MEMBERSHIP = {
     # enumeration lives where the legs live. Dropping a leg is still a diff
     # someone has to read HERE, which is the whole property; it is now written
     # once instead of twice, which is the reason the copies were merged.
-    "ci.yml": {"test-suite"},
+    # `containers` is ci.yml's only blocking leg that is NOT in the shared suite:
+    # Phase 6 put the PR image build in the gate deliberately (the caller job has
+    # no `if:` and never skips, so an empty matrix one level down cannot wave the
+    # gate through). release.yml builds images on the publish path instead, which
+    # is downstream of its gate, so it has no counterpart here.
+    "ci.yml": {"test-suite", "containers"},
     "release.yml": {"test-suite"},
     "_test-suite.yml": {
         "python-tests",

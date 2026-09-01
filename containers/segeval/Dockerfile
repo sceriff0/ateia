@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         procps \
     && rm -rf /var/lib/apt/lists/*
 
-# The build context is the REPOSITORY ROOT (build-images.yml passes `context: .`).
+# The build context is the REPOSITORY ROOT (containers.yml passes `context: .`).
 # segeval.txt opens with `-c constraints.txt`, which pip resolves next to it, so both files
 # must land in the same directory.
 COPY requirements/constraints.txt requirements/segeval.txt /tmp/requirements/
@@ -45,21 +45,14 @@ RUN pip install --no-cache-dir --upgrade pip \
 # is a pairing pip will happily accept and then break on. The previous version of this file
 # had no smoke test and a stray `pip install "numpy<2.0"` AFTER the pinned requirements,
 # which could silently re-resolve numpy behind the pin.
-RUN python -c "\
-import numpy, scipy, skimage, sklearn, pandas, tifffile, xmltodict; \
-from sklearn.cluster import KMeans; \
-from skimage.segmentation import find_boundaries; \
-print('segeval image OK:', \
-      'numpy', numpy.__version__, \
-      '| scipy', scipy.__version__, \
-      '| skimage', skimage.__version__, \
-      '| sklearn', sklearn.__version__, \
-      '| tifffile', tifffile.__version__)" \
-    && python -c "\
-import matplotlib; matplotlib.use('Agg'); \
-import matplotlib.pyplot; \
-print('matplotlib OK -- functions.py foreground_separation() can import pyplot')" \
-    && ps -e -o pid= -o ppid= > /dev/null && echo "procps OK: nextflow task-metrics wrapper can run"
+#
+# THE CHECK ITSELF MOVED, VERBATIM, into containers/segeval/smoke.sh (CI redesign
+# Phase 6, 2026-09-01). It used to be written here and nowhere else, so it ran at
+# build time only -- and a build only happens when someone changes this directory.
+# The script is now run twice from ONE definition: here, and by
+# .github/workflows/containers.yml with `docker run` against the built image.
+COPY containers/segeval/smoke.sh /usr/local/bin/mirage-smoke.sh
+RUN bash /usr/local/bin/mirage-smoke.sh
 
 # Read-only $HOME safety. Several of these libraries default their caches to
 # ~/.cache; on the cluster $HOME is read-only inside the container and a cache

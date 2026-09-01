@@ -358,6 +358,37 @@ def strip_line_comment(line: str) -> str:
     return line
 
 
+def strip_shell_comments(script: str) -> str:
+    """`script` with whole-line AND trailing `#` comments removed, quote-aware.
+
+    `_strip_shell_comments` above drops whole-LINE comments, which is the right
+    scope for `run_scripts`'s "does CI run this command" question and NOT enough
+    for "has this command been commented out": `true  # bash tests/cleanup_work.sh`
+    leaves the needle on a line that is otherwise a real command, and a guard
+    matching the text reports that CI still runs something it has stopped running.
+    Measured on this repository on 2026-09-01, twice.
+
+    Quote-aware, so a `#` inside a string literal (a colour, a URL fragment, a
+    `sed 's/#.*//'`) is kept. It is a heuristic and not a shell parser -- it knows
+    nothing about here-documents or backslash-escaped quotes -- so use it for
+    "is this command still invoked" questions and not to execute anything.
+    """
+    out = []
+    for line in script.splitlines():
+        kept: list[str] = []
+        in_single = in_double = False
+        for char in line:
+            if char == "'" and not in_double:
+                in_single = not in_single
+            elif char == '"' and not in_single:
+                in_double = not in_double
+            elif char == "#" and not in_single and not in_double:
+                break
+            kept.append(char)
+        out.append("".join(kept))
+    return "\n".join(out)
+
+
 def run_scripts(path: Path) -> str:
     """Every `run:` body in `path` and in every local action it uses, comment-free.
 
