@@ -107,14 +107,34 @@ def needs_of(job: dict) -> list[str]:
 
 
 def run_text(job: dict) -> str:
-    """A job's `run:` bodies PLUS the local composite actions it uses.
+    """WHAT A JOB RUNS: its `run:` bodies plus those of the composite actions it
+    uses, with comments stripped.
 
-    RESOLVED, not raw. A gate job that calls `./.github/actions/setup-nextflow`
-    really does run `nextflow plugin install`; a scan that reads only the job's
-    own `run:` blocks would report that the release gate stopped provisioning
-    plugins the day the step was de-duplicated.
+    RESOLVED. A gate job that calls `./.github/actions/setup-nextflow` really does
+    run `nextflow plugin install`; a scan that reads only the job's own `run:`
+    blocks would report that the release gate stopped provisioning plugins the day
+    the step was de-duplicated.
+
+    AND COMMENT-BLIND. Every caller of this helper asks a "does this job run X"
+    question -- discovery of a gate aggregator, of an artifact producer, of an
+    advisory suite; the `rev-parse HEAD` check; the inline version check; the
+    `!= "success"` comparison. On the raw view a COMMENT naming X answers all of
+    them, and a commented-out command is the likelier way any of these actually
+    gets disabled: it is what someone does to a flaky check under time pressure,
+    and it leaves the literal string behind for a raw-text scan to find.
+
+    Measured: with `job_resolved_run_text` here, commenting out the four-line
+    `needs.ruff.result` block in the shared suite's aggregator -- leaving the
+    string `needs.ruff.result` sitting in a comment --
+    `test_every_gate_aggregator_reads_every_result_it_needs` PASSED, over a gate
+    that no longer checks that leg at runtime. That is the same bug that guard was
+    written to close, one level in.
+
+    If a future check here genuinely asks about the files' literal bytes (a
+    `uses:` line, a cache key), call `ci_actions.job_resolved_run_text` at that
+    site and say why -- do not widen this helper back.
     """
-    return ci_actions.job_resolved_run_text(job)
+    return ci_actions.job_run_scripts(job)
 
 
 def checkout_steps(job: dict) -> list[dict]:
@@ -1028,7 +1048,10 @@ def test_no_workflow_branches_on_the_workflow_call_event_name():
     saw_event_name = 0
     for path in workflow_files():
         for lineno, line in enumerate(path.read_text().splitlines(), start=1):
-            code = line.split("#", 1)[0]
+            # Quote-aware, shared with every other comment-blind scan in this
+            # file. `line.split("#", 1)[0]` was the previous form and truncates
+            # `VERSION="${VERSION#v}"` mid-expansion.
+            code = ci_actions.strip_line_comment(line)
             if "github.event_name" not in code:
                 continue
             saw_event_name += 1

@@ -120,11 +120,17 @@ def jobs_running_the_pytest_suite():
     Discovered by looking for a `pytest ... tests/` invocation in the job's own
     `run:` bodies and in any local composite action it uses — never by filename
     and never by job name.
+
+    COMMENT-BLIND (`ci_actions.job_run_scripts`, not `job_resolved_run_text`).
+    Both questions this file asks — "does this job run the suite" and "does it
+    carry the non-skip proof" — are command-runs claims, and on the raw view a
+    comment quoting the command answers them. A commented-out proof step is the
+    likelier way this coverage is lost than a deleted one.
     """
     hits = []
     for wf in workflow_files():
         for name, job in ci_actions.load_jobs(wf).items():
-            if _RUNS_THE_SUITE_RE.search(ci_actions.job_resolved_run_text(job)):
+            if _RUNS_THE_SUITE_RE.search(ci_actions.job_run_scripts(job)):
                 hits.append((wf, name, job))
     # Non-vacuity: an empty list would make every check below pass having
     # examined nothing, which is the failure mode this whole file is about.
@@ -242,7 +248,7 @@ def test_every_pytest_workflow_proves_the_disk_case_is_not_skipped():
         # the workflow today, but reading only `wf.read_text()` is what made this
         # file's install checks go blind when the installs moved, and there is no
         # reason to leave the same trap set for the next move.
-        text = ci_actions.job_resolved_run_text(job)
+        text = ci_actions.job_run_scripts(job)
         where = f"{wf.relative_to(REPO)}: job `{name}`"
         if not _IMPORT_PROOF_RE.search(text):
             missing.append(

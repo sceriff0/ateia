@@ -136,16 +136,27 @@ def cache_steps():
 
 
 def _uncommented(text: str) -> str:
-    """`text` with whole-line YAML comments removed.
+    """`text` with its `#` comments removed -- whole-line AND trailing.
 
     The owner check below is a substring search, and this file's own header
     DISCUSSES `nf-core/setup-nf-test` at length -- so a search over the raw text
     would find the owner of `~/.nf-test` in the very file that must not cache it,
     and the check would go green over the defect it exists to catch. Verified by
     doing it: with the raw text the "declared but in the wrong file" case passed.
+
+    WIDENED 2026-09-01 (CI redesign, Phase 5 fix round 2) FROM WHOLE-LINE ONLY.
+    The old form left the same hole one keystroke away: a TRAILING comment naming
+    the owner (`path: ~/.nf-test  # nf-core/setup-nf-test installs this`) also
+    satisfied the substring search, and that is a false NEGATIVE -- the unsafe
+    direction. `ci_actions.strip_line_comment` is the one quote-aware definition
+    of where a comment starts in this repository's CI guards, so this shares it
+    rather than carrying a fifth private one. Quote-awareness matters here too:
+    a naive cut truncates `VERSION="${VERSION#v}"`.
     """
     return "\n".join(
-        line for line in text.splitlines() if not line.strip().startswith("#")
+        stripped
+        for stripped in (ci_actions.strip_line_comment(line) for line in text.splitlines())
+        if stripped.strip()
     )
 
 

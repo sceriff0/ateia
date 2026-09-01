@@ -55,9 +55,18 @@ file boundary — so it gets its own, explicitly-named view:
 
   * `called_local_workflows(path)` — `{job_id: Path}` for each job in `path`
     whose body calls a local reusable workflow.
-  * `workflow_resolved_text(path)` — `resolved_text(path)` plus the resolved text
-    of every local workflow its jobs call, transitively. For scans that ask "does
-    everything this workflow sets in motion include X".
+  * `workflow_run_scripts(path)` — `run_scripts(path)` plus that of every local
+    workflow its jobs call, transitively. For scans that ask "does everything
+    this workflow sets in motion RUN X".
+
+RAW VIEW vs COMMAND VIEW — pick by the question, not by convenience.
+`resolved_text` / `job_resolved_run_text` return the files' literal bytes,
+comments included. They are correct only when the thing under assertion IS the
+literal text (a `uses:` line, a cache key, an action reference). Every claim of
+the form "CI runs this command" must go through the comment-stripped views —
+`run_scripts`, `workflow_run_scripts`, `job_run_scripts` — because a comment
+naming a command satisfies the raw view while the command does not execute. That
+error has been made four times on this repository, on four unrelated guards.
 
 NOT A GENERAL YAML MODEL. It answers exactly the questions this repo's CI guards
 ask. Anything more would be a second parser with its own blind spots.
@@ -227,21 +236,6 @@ def called_workflow_closure(path: Path) -> list[Path]:
     return out
 
 
-def workflow_resolved_text(path: Path) -> str:
-    """`resolved_text(path)` plus that of every local workflow its jobs call.
-
-    The view for "does everything this workflow sets in motion include X". It is
-    deliberately NOT what `job_resolved_run_text` returns: that one is per JOB and
-    must not gain a whole other workflow's contents. See this module's docstring.
-
-    RAW text, comments included — use `workflow_run_scripts` for any scan that
-    asks whether a COMMAND is run.
-    """
-    parts = [resolved_text(path)]
-    parts += [resolved_text(p) for p in called_workflow_closure(path)]
-    return "\n".join(parts)
-
-
 # ---------------------------------------------------------------------------
 # Comment-blind command view
 # ---------------------------------------------------------------------------
@@ -288,21 +282,31 @@ def _strip_shell_comments(script: str) -> str:
     """
     out = []
     for line in script.splitlines():
-        in_single = in_double = False
-        cut = None
-        for i, ch in enumerate(line):
-            if ch == "'" and not in_double:
-                in_single = not in_single
-            elif ch == '"' and not in_single:
-                in_double = not in_double
-            elif ch == "#" and not in_single and not in_double:
-                if i == 0 or line[i - 1].isspace():
-                    cut = i
-                    break
-        kept = line if cut is None else line[:cut]
+        kept = strip_line_comment(line)
         if kept.strip():
             out.append(kept.rstrip())
     return "\n".join(out)
+
+
+def strip_line_comment(line: str) -> str:
+    """One line with its `#` comment removed, quote-aware. `""` if it was all comment.
+
+    The single definition of "where does the comment start" in this module. Exposed
+    because guards that must report a LINE NUMBER cannot use
+    `_strip_shell_comments` (it drops lines, so the numbering shifts) and would
+    otherwise re-derive the rule with `line.split("#", 1)[0]` — the naive cut that
+    truncates `VERSION="${VERSION#v}"`.
+    """
+    in_single = in_double = False
+    for i, ch in enumerate(line):
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif ch == "#" and not in_single and not in_double:
+            if i == 0 or line[i - 1].isspace():
+                return line[:i]
+    return line
 
 
 def run_scripts(path: Path) -> str:
@@ -355,16 +359,47 @@ def job_run_text(job: dict) -> str:
 
 
 def job_resolved_run_text(job: dict) -> str:
-    """The job's `run:` bodies PLUS the full text of the local actions it uses.
+    """The job's `run:` bodies PLUS the FULL TEXT of the local actions it uses.
 
-    The action text is included whole, not just its `run:` bodies: an action's
-    `uses:` steps (nf-core/setup-nextflow, actions/setup-python) are part of what
-    the job runs, and a guard asking "does this job install Nextflow" must be
-    able to see them.
+    RAW. Comments included, and the action files are included whole rather than
+    just their `run:` bodies — an action's `uses:` steps (nf-core/setup-nextflow,
+    actions/setup-python) are part of what the job runs, and a guard asking "does
+    this job install Nextflow" has to be able to see a `uses:` line.
+
+    THAT IS THE ONLY QUESTION THIS VIEW ANSWERS CORRECTLY. It is the wrong view
+    for "does this job RUN command X", because a comment naming X satisfies it.
+    That mistake has now been made four times on this repository, on four
+    unrelated guards; the fourth was inside the guard written to close the third.
+    Use `job_run_scripts` for any command-runs claim.
     """
     parts = [job_run_text(job)]
     parts += [p.read_text() for p in job_local_actions(job)]
     return "\n".join(parts)
+
+
+def job_run_scripts(job: dict) -> str:
+    """The job's `run:` bodies plus those of the local actions it uses, COMMENT-FREE.
+
+    The per-job counterpart of `run_scripts`, and the view every "does this job
+    run X" guard must use. Comments — whole-line and trailing — are stripped by
+    `_strip_shell_comments`, so a command that has been COMMENTED OUT reads as
+    absent, which is what it is at runtime.
+
+    Commenting out is the likelier failure than deleting: it is what someone does
+    to a flaky check under time pressure, and it leaves the literal string in the
+    file for a raw-text guard to find.
+    """
+    scripts = [str(s["run"]) for s in steps_of(job) if "run" in s]
+    for path in job_local_actions(job):
+        scripts += [
+            str(s["run"])
+            for s in ((yaml.safe_load(path.read_text()) or {}).get("runs") or {}).get(
+                "steps"
+            )
+            or []
+            if isinstance(s, dict) and "run" in s
+        ]
+    return "\n".join(_strip_shell_comments(s) for s in scripts)
 
 
 # ---------------------------------------------------------------------------
