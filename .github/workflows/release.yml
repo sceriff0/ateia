@@ -149,7 +149,7 @@ jobs:
           echo "Version format OK: $VERSION"
 
       - name: Checkout the ref that will be tagged
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.get_version.outputs.gate_ref }}
 
@@ -171,7 +171,7 @@ jobs:
     timeout-minutes: 40
     steps:
       - name: Checkout the pinned release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate.outputs.sha }}
 
@@ -187,7 +187,7 @@ jobs:
       # touch containers/tiled/requirements.txt's comment in the same commit or the first
       # run after the bump restores a cache built for the old wheel.
       - name: Install Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.10'
           cache: 'pip'
@@ -356,12 +356,12 @@ jobs:
         nextflow-version: ['25.04.0', 'latest-everything']
     steps:
       - name: Checkout the pinned release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate.outputs.sha }}
 
       - name: Cache Nextflow
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nextflow
           key: ${{ runner.os }}-nextflow-release-${{ matrix.nextflow-version }}-${{ hashFiles('**/*.nf') }}
@@ -370,12 +370,12 @@ jobs:
             ${{ runner.os }}-nextflow-
 
       - name: Install Nextflow
-        uses: nf-core/setup-nextflow@v2
+        uses: nf-core/setup-nextflow@v3
         with:
           version: ${{ matrix.nextflow-version }}
 
       - name: Cache Nextflow plugins
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.nextflow-plugins
           key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
@@ -393,7 +393,7 @@ jobs:
           nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
 
       - name: Install Python for test data generation
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.10'
           cache: 'pip'
@@ -470,7 +470,7 @@ jobs:
 
       - name: Upload stub test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-stub-results-nf-${{ matrix.nextflow-version }}
           path: |
@@ -490,12 +490,12 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout the pinned release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate.outputs.sha }}
 
       - name: Cache Nextflow
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nextflow
           key: ${{ runner.os }}-nextflow-release-nftest-${{ hashFiles('**/*.nf') }}
@@ -507,12 +507,12 @@ jobs:
         # wrappers do not compile under edge Nextflow's strict parser.
         # latest-everything full-pipeline compatibility is covered by the
         # test-nextflow job's matrix above.
-        uses: nf-core/setup-nextflow@v2
+        uses: nf-core/setup-nextflow@v3
         with:
           version: '25.04.0'
 
       - name: Cache Nextflow plugins
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.nextflow-plugins
           key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
@@ -524,7 +524,7 @@ jobs:
           nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
 
       - name: Install Python for test data generation
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.10'
           cache: 'pip'
@@ -538,7 +538,7 @@ jobs:
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
-        uses: nf-core/setup-nf-test@v1
+        uses: nf-core/setup-nf-test@v2
         with:
           version: ${{ env.NFTEST_VERSION }}
 
@@ -551,7 +551,7 @@ jobs:
 
       - name: Upload nf-test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-nf-test-stub-results
           path: |
@@ -574,19 +574,19 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout the pinned release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate.outputs.sha }}
 
       - name: Install Nextflow
         # Same pin as test-nf-test: nf-test's generated wrappers do not compile
         # under edge Nextflow's strict parser.
-        uses: nf-core/setup-nextflow@v2
+        uses: nf-core/setup-nextflow@v3
         with:
           version: '25.04.0'
 
       - name: Cache Nextflow plugins
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.nextflow-plugins
           key: ${{ runner.os }}-nf-plugins-${{ hashFiles('nextflow.config') }}
@@ -598,7 +598,7 @@ jobs:
           nextflow plugin install "$(sed -n "s/.*id '\(nf-schema@[0-9.]*\)'.*/\1/p" nextflow.config)"
 
       - name: Install Python for test data generation
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.10'
           cache: 'pip'
@@ -610,7 +610,7 @@ jobs:
           python tests/testdata/generate_complete_testdata.py
 
       - name: Install nf-test
-        uses: nf-core/setup-nf-test@v1
+        uses: nf-core/setup-nf-test@v2
         with:
           version: ${{ env.NFTEST_VERSION }}
 
@@ -651,12 +651,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout the pinned release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate.outputs.sha }}
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.10'
           cache: 'pip'
@@ -724,7 +724,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository (main, full history)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
@@ -796,7 +796,7 @@ jobs:
     if: github.event_name == 'release'
     steps:
       - name: Checkout the released tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate.outputs.version }}
 
@@ -876,7 +876,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout the released tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate.outputs.version }}
 
@@ -921,7 +921,7 @@ jobs:
           ls -lh "$ARCHIVE_NAME"
 
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-archive
           path: mirage-*.tar.gz
@@ -942,24 +942,24 @@ jobs:
       contents: write
     steps:
       - name: Checkout the released tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate.outputs.version }}
 
       - name: Download release archive
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: release-archive
 
       - name: Upload archive to release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           files: mirage-*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update release body
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           body: |
             ## MIRAGE Pipeline Release ${{ needs.validate.outputs.version }}
