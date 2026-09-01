@@ -5,6 +5,11 @@
 # and pinning an exact patch here would strand the image on a format older than what
 # collaborators' napari-spatialdata / squidpy can read. The Dockerfile's import smoke
 # test is what catches a bad resolution.
+#
+# DELIBERATELY NOT CONSTRAINED. There is no `-c constraints.txt` line here and there must
+# not be one: this is the documented python:3.12 / zarr>=3 island. The harmonised set pins
+# zarr==2.18.3 for tifffile's aszarr region reads, which spatialdata>=0.8.0 cannot use.
+# tests/test_ci_stack_pinned.py lists this image as the standing exception.
 spatialdata>=0.8.0
 zarr>=3.0.0            # required by spatialdata >= 0.8.0 (NOT the 2.18 the tiled image pins)
 ome-zarr>=0.16.0

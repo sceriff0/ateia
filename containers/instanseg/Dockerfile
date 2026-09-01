@@ -10,6 +10,13 @@ ENV PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /workspace
 
+# The build context is the REPOSITORY ROOT (build-images.yml passes `context: .`), so the
+# harmonised pins come from requirements/constraints.txt -- the SAME file the workflows and
+# the other images read. The inline pins below must AGREE with it: a constraint does not
+# override a divergent direct requirement, it conflicts with it and fails the build, which
+# is exactly the behaviour wanted.
+COPY requirements/constraints.txt /tmp/requirements/constraints.txt
+
 # OpenCL ICD loader and headers (kept in case downstream tools need OpenCL;
 # unrelated to InstanSeg itself, which uses PyTorch/CUDA).
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -20,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir \
+RUN pip install --no-cache-dir -c /tmp/requirements/constraints.txt \
     instanseg-torch==0.1.1 \
     imagecodecs==2025.3.30 \
     numpy==1.26.4 \

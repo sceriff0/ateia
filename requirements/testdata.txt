@@ -1,0 +1,9 @@
+# The minimum needed to run tests/testdata/generate_complete_testdata.py.
+#
+# Installed by the CI jobs that only generate fixtures (the Nextflow stub, nf-test and
+# security jobs) and never run the Python suite. NOTHING IS PINNED HERE: both versions come
+# from requirements/constraints.txt, so these jobs and the production images cannot drift.
+-c constraints.txt
+
+numpy
+tifffile

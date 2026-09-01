@@ -43,10 +43,16 @@ RUN mkdir -p $CONDA_DIR && \
 RUN conda install -y -c bioconda bftools && conda clean -afy
 
 # ---- Python dependencies ----
+# The build context is the REPOSITORY ROOT (build-images.yml passes `context: .`).
+# regqc.txt opens with `-c constraints.txt`, which pip resolves next to it, so both files
+# land in the same directory; the inline pins below pass the same constraints file on the
+# command line. A pin that drifts from requirements/constraints.txt fails the BUILD.
+COPY requirements/constraints.txt requirements/regqc.txt /tmp/requirements/
+
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Core scientific + GPU packages
-RUN pip install --no-cache-dir \
+RUN pip install --no-cache-dir -c /tmp/requirements/constraints.txt \
     numpy==1.26.4 \
     pandas==2.3.3 \
     scikit-image==0.25.2 \
@@ -55,7 +61,7 @@ RUN pip install --no-cache-dir \
     edt
 
 # TensorFlow GPU + Stardist ecosystem
-RUN pip install --no-cache-dir \
+RUN pip install --no-cache-dir -c /tmp/requirements/constraints.txt \
     tensorflow==2.17.1 \
     stardist==0.9.1 \
     csbdeep==0.8.2
@@ -67,7 +73,5 @@ RUN pip install --no-cache-dir \
 # installed --no-deps, used by nothing, and its absence had gone unnoticed because
 # build-images.yml only runs on a push to main touching containers/**.
 
-# Copy requirements if needed (optional)
-COPY requirements.txt /app/requirements.txt
-RUN pip install -r /app/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements/regqc.txt
 

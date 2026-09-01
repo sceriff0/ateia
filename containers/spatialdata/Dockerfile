@@ -26,9 +26,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         procps \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /tmp/requirements.txt
+# The build context is the REPOSITORY ROOT (build-images.yml passes `context: .`).
+# NO constraints.txt here, deliberately: this is the documented python:3.12 / zarr>=3
+# island, and requirements/spatialdata.txt carries no `-c` line for the same reason.
+COPY requirements/spatialdata.txt /tmp/requirements/spatialdata.txt
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r /tmp/requirements.txt
+    && pip install --no-cache-dir -r /tmp/requirements/spatialdata.txt
 
 # Fail the BUILD rather than a cluster run: the import graph here (spatialdata ->
 # zarr 3 -> ome_zarr -> dask, plus the GEOS shared library) is exactly the kind that

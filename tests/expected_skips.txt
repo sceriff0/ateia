@@ -14,11 +14,13 @@
 # not a legitimate skip; it is a test that stopped running.
 
 # --- containers/ that pin inline in their Dockerfile rather than in a
-# --- requirements.txt. The parametrisation covers all 11 images; these 7 have
-# --- no requirements.txt for the harmonisation check to read, which is a
-# --- property of the repo, not of the environment. Deliberately listed one
-# --- image at a time: a 12th image arriving without a requirements.txt should
-# --- be a reviewed line in this file, not a silent inheritance.
+# --- requirements/<image>.txt file. The parametrisation covers all 11 images;
+# --- these 7 have no such file for the harmonisation check to read, which is a
+# --- property of the repo, not of the environment. (They are still constrained:
+# --- each COPYs requirements/constraints.txt and passes it to pip with `-c`,
+# --- which tests/test_ci_stack_pinned.py checks.) Deliberately listed one image
+# --- at a time: a 12th image arriving without a requirements file should be a
+# --- reviewed line in this file, not a silent inheritance.
 tests/test_container_harmonisation.py::test_every_requirements_file_is_actually_installed[cellsam]
 tests/test_container_harmonisation.py::test_every_requirements_file_is_actually_installed[convert]
 tests/test_container_harmonisation.py::test_every_requirements_file_is_actually_installed[instanseg]
@@ -29,8 +31,25 @@ tests/test_container_harmonisation.py::test_every_requirements_file_is_actually_
 
 # --- containers/spatialdata is the documented python:3.12 / zarr>=3 island;
 # --- harmonising it against the zarr==2.18.3 set would be wrong, not missing.
-# --- The exception is stated in the test itself and in ci.yml's anndata pin.
+# --- The exception is stated in the test itself and in requirements/ci.txt's
+# --- anndata pin.
 tests/test_container_harmonisation.py::test_shared_packages_match_the_harmonised_version[spatialdata]
+
+# --- The two images that cannot take requirements/constraints.txt, one line
+# --- each. Both are DERIVED, not asserted here: the skip fires only for a
+# --- container in test_container_harmonisation.PY312_ISLAND or in its
+# --- PINNED_EXCEPTIONS table, where each divergence names the upstream
+# --- constraint that forces it. Passing `-c` to either would not "let the
+# --- constraint win" -- pip reports ResolutionImpossible and the image stops
+# --- building. A companion check,
+# --- test_every_exempt_image_is_still_diverging, fails if either exemption
+# --- goes stale, so these entries cannot quietly outlive their reason.
+# ---   spatialdata: python:3.12 + zarr>=3.0.0 vs the harmonised zarr==2.18.3.
+# ---   convert:     bioio-ome-tiff 1.4.0 caps tifffile<2025.1.10 on py<3.11,
+# ---                and the bioio 3.5.0 plugin set will not resolve against
+# ---                numpy 1.26.4.
+tests/test_ci_stack_pinned.py::test_image_installing_a_constrained_package_reads_the_constraints_file[convert]
+tests/test_ci_stack_pinned.py::test_image_installing_a_constrained_package_reads_the_constraints_file[spatialdata]
 
 # --- bin/utils/tiled_pipeline.py has no production importer by design: it is a
 # --- test/benchmark oracle for the STARE registration path (CHANGELOG.md:487-488).

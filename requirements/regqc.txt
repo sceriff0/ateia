@@ -1,0 +1,19 @@
+# REGISTRATION_QC / illumination tooling — COPY'd into containers/regqc/Dockerfile.
+#
+# opencv-python (NOT -headless) because this image has the display libs; CI installs the
+# headless build of the SAME release and names this file as its authority. See
+# requirements/constraints.txt's "deliberately not constrained here" block.
+-c constraints.txt
+
+dipy==1.9.0
+h5py==3.11.0
+nd2==0.10.1
+nd2reader==3.3.0
+opencv-python==4.10.0.82
+pandas==2.3.3
+tifffile==2025.5.10
+imagecodecs==2025.3.30
+zarr==2.18.3
+numcodecs==0.13.1
+matplotlib==3.9.2
+BaSiCPy==1.2.0

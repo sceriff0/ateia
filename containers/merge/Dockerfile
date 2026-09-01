@@ -14,7 +14,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies directly
-RUN pip install --no-cache-dir \
+
+# The build context is the REPOSITORY ROOT (build-images.yml passes `context: .`), so the
+# harmonised pins come from requirements/constraints.txt -- the SAME file the workflows and
+# the other images read. The inline pins below must AGREE with it: a constraint does not
+# override a divergent direct requirement, it conflicts with it and fails the build, which
+# is exactly the behaviour wanted.
+COPY requirements/constraints.txt /tmp/requirements/constraints.txt
+RUN pip install --no-cache-dir -c /tmp/requirements/constraints.txt \
         numpy==1.26.4 \
         numba \
         tifffile==2025.5.10 \
