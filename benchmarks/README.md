@@ -101,21 +101,35 @@ Verify the whole harness with no data at all:
   grids own input scale, and double-listing would confound the regression.
 - **A knob that is only live under another setting must NOT be a flat OFAT axis.** Varying
   it off the baseline changes a value the pipeline never reads: the run costs full price and
-  measures nothing. `sweep.yaml` has three structures for these, and
+  measures nothing. `sweep.yaml` has two structures for these, and
   `test_project_sweep_has_no_dead_axes` enforces the rule:
   - `segmentation_grid:` — pins `seg_method` per backend and crosses that backend's own knobs
     (StarDist tile grid; InstanSeg tile size × batch size; CellSAM block size × bbox threshold).
     All three shipped backends are covered.
   - `registration_method_grid:` — pins `registration_method` and crosses that method's knobs.
-    The `tiled`/STARE entry crosses `reg_tiled_tile` × `reg_tiled_gate_tre` ×
-    `reg_tiled_coarse_max_dim`. The last of these is the resolution STARE solves its global `M0`
-    at — the counterpart to VALIS's `reg_max_image_dim`; sweeping one and not the other would
-    compare a *tuned* VALIS against an *untuned* STARE, so
-    `test_project_stare_resolution_axis_mirrors_the_valis_one` requires it to be swept and to
-    bracket its default in both directions. STARE has a single execution shape (the per-tile
-    fan-out `TILED_COARSE`/`TILED_REG_TILE`/`TILED_SOLVE`/`TILED_STITCH`); the
-    `reg_tiled_fanout` flag and the single-task `TILED_REGISTER` path it selected were removed
-    upstream, so there is no execution shape left to cross.
+    **One grid, both methods, at equal dimensionality** — 3 knobs × 3 levels = **27 cells each**:
+    `valis` crosses `memory_mode` × `reg_micro_reg` × `reg_max_image_dim`; `tiled`/STARE crosses
+    `reg_tiled_tile` × `reg_tiled_gate_tre` × `reg_tiled_coarse_max_dim`. The last knob of each
+    pair is the same thing for its method — the resolution the global transform is solved at —
+    and both bracket their shipped default in both directions.
+
+    **This used to be asymmetric, and the fix is the reason the grid holds both methods.** VALIS's
+    knobs were split across a VALIS-only `registration_param_grid` (2 of them) and a flat
+    `axes:` entry for `reg_max_image_dim` (the third, varied at *one* point of the other two),
+    which measured VALIS on **11 of its 27 cells** against STARE's full 27 — never more than two
+    knobs off-default at once, where STARE had eight cells with all three. That confounds "which
+    method wins" with "which method got more cells", and the direction flips with the estimator
+    (best-cell flatters the method with more draws; mean-over-cells flatters the method whose
+    cells cluster near its default). `test_project_sweep_backends_are_crossed_at_equal_dimensionality`
+    now enforces equal knob count, equal levels, and a hole-free product.
+    `test_project_stare_resolution_axis_mirrors_the_valis_one` still checks the per-axis
+    bracketing — it compares *marginals*, which is why it passed throughout the period the
+    *joint* coverage was broken.
+
+    STARE has a single execution shape (the per-tile fan-out
+    `TILED_COARSE`/`TILED_REG_TILE`/`TILED_SOLVE`/`TILED_STITCH`); the `reg_tiled_fanout` flag and
+    the single-task `TILED_REGISTER` path it selected were removed upstream, so there is no
+    execution shape left to cross.
 - **The `baseline:` map must equal the shipped `nextflow.config` defaults**, and must declare
   every param any grid or axis varies (so all configs share CSV columns).
   `test_project_sweep_baseline_matches_pipeline_defaults` reads `nextflow.config` directly and

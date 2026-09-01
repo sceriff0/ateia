@@ -71,7 +71,7 @@ baseline:
 #
 # `medium` was added alongside STARE's three tiers, so both backends now span three
 # cost/accuracy presets and neither is the tuned one. It is the third value sweep.yaml
-# has always carried (registration_param_grid.memory_mode), so this closes a gap between
+# has always carried (registration_method_grid.valis.memory_mode), so this closes a gap between
 # the two blocks rather than inventing an axis. Read it as a POINT ON THE CURVE, not a
 # third comparison: low and high differ in WHICH matcher runs, so medium interpolates
 # cost between them rather than introducing a new matcher.

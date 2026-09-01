@@ -161,26 +161,44 @@ def test_registration_grid_crosses_channels_when_list():
         (4096, 2, 4), (4096, 2, 8), (4096, 4, 4), (4096, 4, 8)}
 
 
-def test_registration_param_grid_crosses_params_classic():
+def test_registration_method_grid_crosses_each_method_own_knobs():
+    """ONE grid, BOTH methods, each pinned to its own registration_method and crossed in full.
+
+    Replaces test_registration_param_grid_crosses_params_classic. That grid crossed memory_mode x
+    reg_micro_reg only, VALIS-only, and lived beside a flat reg_max_image_dim axis -- the split that
+    left VALIS on 11 of 27 cells against STARE's 27. Both methods now go through the same generic
+    per-method loop, which is the mechanism this asserts.
+    """
     sweep = {
         "strategy": "ofat",
         "baseline": {"target_px": 4096, "n_channels": 2, "n_register_images": 2,
-                     "memory_mode": "medium", "reg_micro_reg": 0},
-        "registration_param_grid": {
-            "memory_mode": ["low", "medium", "high"],
-            "reg_micro_reg": [0, 1, 2],
+                     "registration_method": "valis", "memory_mode": "medium",
+                     "reg_micro_reg": 0, "reg_max_image_dim": 4000,
+                     "reg_tiled_mode": "high", "reg_tiled_tile": None},
+        "registration_method_grid": {
+            "valis": {"memory_mode": ["low", "medium", "high"],
+                      "reg_micro_reg": [0, 1, 2],
+                      "reg_max_image_dim": [2000, 4000, 8000]},
+            "tiled": {"reg_tiled_mode": ["custom"], "reg_tiled_tile": [1024, 2048]},
         },
         "axes": {},
     }
     plan = build_run_plan(sweep, repeats=1)
-    rp = [r for r in plan if r["varied_axis"] == "registration_param_grid"]
-    # 3 memory_mode x 3 reg_micro_reg depths (0/1/2), VALIS path only (reg_micro_reg replaced the old
-    # boolean skip_micro_registration when the STARE merge landed on main).
-    assert len(rp) == 9
-    combo = {(r["memory_mode"], r["reg_micro_reg"]) for r in rp}
-    assert combo == {(mm, rmr) for mm in ("low", "medium", "high") for rmr in (0, 1, 2)}
+    v = [r for r in plan if r["varied_axis"] == "registration_method_grid:valis"]
+    t = [r for r in plan if r["varied_axis"] == "registration_method_grid:tiled"]
+
+    assert len(v) == 27, "the valis entry must be a FULL 3x3x3 cross, not a plane plus a spur"
+    assert len(t) == 2
+    assert all(r["registration_method"] == "valis" for r in v)
+    assert all(r["registration_method"] == "tiled" for r in t)
+    assert {(r["memory_mode"], r["reg_micro_reg"], r["reg_max_image_dim"]) for r in v} == {
+        (mm, rmr, d)
+        for mm in ("low", "medium", "high")
+        for rmr in (0, 1, 2)
+        for d in (2000, 4000, 8000)}
     # the distributed knobs must not appear anywhere
-    assert all("reg_distributed_tiling" not in r and "reg_dist_force_tiling" not in r for r in rp)
+    assert all("reg_distributed_tiling" not in r and "reg_dist_force_tiling" not in r
+               for r in v + t)
 
 
 def test_project_sweep_exercises_the_tiled_fanout_path():
@@ -274,14 +292,24 @@ def test_project_stare_resolution_axis_mirrors_the_valis_one():
     import yaml
     sweep = yaml.safe_load(
         (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
-    valis_swept = "reg_max_image_dim" in sweep.get("axes", {})
-    stare_values = set(
-        sweep["registration_method_grid"]["tiled"].get("reg_tiled_coarse_max_dim", []))
-    assert valis_swept, "reg_max_image_dim is no longer swept — re-check this test's premise"
+    rmg = sweep["registration_method_grid"]
+    # BOTH now live in the same grid. reg_max_image_dim used to be read out of flat `axes:`; that
+    # is exactly the split this asymmetry hid behind, so read them the same way or the comparison
+    # is being made between two different kinds of coverage again.
+    valis_values = set(rmg["valis"].get("reg_max_image_dim", []))
+    stare_values = set(rmg["tiled"].get("reg_tiled_coarse_max_dim", []))
+    assert "reg_max_image_dim" not in sweep.get("axes", {}), (
+        "reg_max_image_dim is back in flat `axes:` — as an OFAT axis it varies at ONE "
+        "(memory_mode, reg_micro_reg) point, which is the 11-of-27 coverage this grid fixed")
+    assert len(valis_values) >= 3, f"the VALIS resolution axis lost points: {sorted(valis_values)}"
     assert len(stare_values) >= 3, (
         "reg_max_image_dim is swept but reg_tiled_coarse_max_dim is not (or has <3 points): "
         f"{sorted(stare_values)}"
     )
+    valis_base = sweep["baseline"]["reg_max_image_dim"]
+    assert min(valis_values) < valis_base < max(valis_values), (
+        f"the VALIS resolution axis must bracket its default {valis_base} in both directions "
+        f"— the same bar the STARE one is held to below: {sorted(valis_values)}")
     # The baseline leaves this null: reg_tiled_mode='high' supplies it. Compare the axis against
     # the value a default run ACTUALLY uses -- the 'high' row -- not against the literal null.
     assert sweep["baseline"]["reg_tiled_coarse_max_dim"] is None, (
@@ -293,6 +321,65 @@ def test_project_stare_resolution_axis_mirrors_the_valis_one():
         f"the STARE resolution axis must bracket its default {base} in both directions, "
         f"as reg_max_image_dim does: {sorted(stare_values)}"
     )
+
+
+def test_project_sweep_backends_are_crossed_at_equal_dimensionality():
+    """Every backend in registration_method_grid must be crossed as richly as every other.
+
+    THE PROPERTY THE MARGINAL GUARD ABOVE CANNOT SEE. That one asks "is each method's resolution
+    axis swept, and does it bracket its default?" -- true of both backends, and it passed for the
+    entire period this was broken. It compares MARGINALS. The asymmetry lived in the JOINT
+    coverage:
+
+        STARE  27/27 cells   full cube, up to 3 knobs off-default at once (8 such cells)
+        VALIS  11/27 cells   a 3x3 plane + a 1-D spur, NEVER more than 2 off-default at once
+
+    because VALIS's three knobs were split across registration_param_grid (2 of them) and a flat
+    `axes:` entry (the third, varied at ONE point of the other two).
+
+    Why it is not cosmetic: "which method wins" becomes entangled with "which method got more
+    cells", and the direction flips with the estimator -- a BEST-CELL comparison flatters the
+    method with more draws, a MEAN-OVER-CELLS comparison flatters the method whose cells cluster
+    near its default. Neither is safe, so neither can be fixed by choosing the statistic.
+
+    Asserts the two things that make the cross a cross: same knob count, same level count per
+    knob, and a cell count equal to the full product (no holes).
+    """
+    import math
+
+    import yaml
+    sweep = yaml.safe_load(
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+    grid = sweep["registration_method_grid"]
+    assert len(grid) >= 2, "a head-to-head needs at least two backends in the grid"
+
+    shape = {}
+    for method, knobs in grid.items():
+        # A pin (one value) is not an axis -- reg_tiled_mode: [custom] exists to make the other
+        # knobs legal, not to be crossed. Counting it as an axis would let a backend claim a
+        # dimension it does not actually vary.
+        levels = sorted((len(v) for v in knobs.values() if len(v) > 1), reverse=True)
+        cells = math.prod(levels) if levels else 0
+        shape[method] = (len(levels), levels, cells)
+
+    n_axes = {m: v[0] for m, v in shape.items()}
+    assert len(set(n_axes.values())) == 1, (
+        "backends are crossed over different NUMBERS of knobs, so one has interaction terms the "
+        f"other cannot have: {n_axes}")
+
+    levels = {m: tuple(v[1]) for m, v in shape.items()}
+    assert len(set(levels.values())) == 1, (
+        f"backends are crossed at different numbers of LEVELS per knob: {levels}")
+
+    # And the plan must actually contain the full product for each -- a grid can be declared
+    # symmetric and still be expanded into holes.
+    plan = build_run_plan(sweep, repeats=1)
+    for method, (_, _, cells) in shape.items():
+        got = len({tuple(sorted(
+            (k, v) for k, v in r.items() if k in grid[method]))
+            for r in plan if r["varied_axis"] == f"registration_method_grid:{method}"})
+        assert got == cells, (
+            f"{method} declares a {cells}-cell cross but the plan expands {got} distinct cells")
 
 
 def test_project_sweep_has_no_dead_axes():
@@ -593,7 +680,7 @@ NOT_SWEPT = {
 def _sweep_covered_params(sweep) -> set:
     """Every pipeline param the sweep touches, in the baseline or any axis/grid."""
     covered = set(sweep["baseline"]) | set(sweep.get("axes", {}))
-    for grid in ("scaling_grid", "registration_grid", "registration_param_grid"):
+    for grid in ("scaling_grid", "registration_grid"):
         covered |= set(sweep.get(grid, {}))
     for grid in ("segmentation_grid", "registration_method_grid"):
         for per_method in sweep.get(grid, {}).values():
