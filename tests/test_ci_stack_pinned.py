@@ -425,13 +425,18 @@ def _parses(token: str) -> bool:
 # can say which `run:` belongs to which job -- and never a repo-wide grep, which is exactly
 # the hole that fix closed.
 #
-# PHASE 2 (composite actions) IS ACCOUNTED FOR. `_job_run_text` follows any
-# `uses: ./.github/actions/<name>` a job references and inlines that action's own `run:`
-# steps, recursively. Moving `pip install -r requirements/ci.txt` into a composite action
-# therefore keeps these checks live rather than silently emptying them -- which, without
-# this, is precisely what would have happened: the DISK guard covers only torch/kornia and
-# only per-FILE, and the blocking gate would have run with no cv2 (29 tests deselected in
-# silence) and no pyyaml (which deletes both of tests/test_ci_job_hygiene.py's guards).
+# PHASE 2 (composite actions) IS ACCOUNTED FOR, AND BY ONE RESOLVER. Which steps a job
+# actually runs -- including the ones it reaches through a `uses: ./.github/actions/<name>`
+# composite action, and which `requirements/*.txt` those install -- is answered by
+# `tests/ci_actions.py` and nothing else. This file used to carry a private walker of its
+# own (`_job_run_text`) written before that module existed; two resolvers that can disagree
+# is exactly the duplication this redesign deletes, and the private one was already wrong:
+# it read `run:` bodies only, so it could not see the `with: requirements:` input that is
+# now the required form, and reported the blocking gate as installing nothing at all.
+# Keeping these checks live across that move is the whole point -- the DISK guard covers
+# only torch/kornia and only per-FILE, so without them the blocking gate could have run
+# with no cv2 (29 tests deselected in silence) and no pyyaml (which deletes both of
+# tests/test_ci_job_hygiene.py's guards).
 # --------------------------------------------------------------------------------------
 
 # `pytest ... tests/` -- the DIRECTORY form, i.e. a job that runs the whole suite. The
@@ -439,56 +444,19 @@ def _parses(token: str) -> bool:
 # step) from counting, which would let a job satisfy the scope with the proof step alone.
 _RUNS_THE_PYTEST_SUITE_RE = re.compile(r"pytest\b[^\n]*\btests/(?=\s|$)")
 
-ACTIONS_DIR = ROOT / ".github" / "actions"
+def jobs_running_the_pytest_suite() -> list[tuple[Path, str, dict]]:
+    """(workflow, job id, the job) for every JOB that runs the whole suite.
 
-
-def _local_action_steps(uses: str, yaml, seen: set[str]) -> list[dict]:
-    """Steps of a local composite action referenced as `uses: ./path/to/action`.
-
-    Returns [] for a third-party or remote action, which has no `run:` this repo owns.
+    The step walk is `tests/ci_actions.py`'s -- see the ONE RESOLVER note above.
     """
-    if not uses.startswith("./") or uses in seen:
-        return []
-    seen.add(uses)
-    base = ROOT / uses[2:]
-    for name in ("action.yml", "action.yaml"):
-        path = base / name if base.is_dir() else base
-        if path.is_file():
-            doc = yaml.safe_load(path.read_text()) or {}
-            return (doc.get("runs") or {}).get("steps") or []
-    return []
-
-
-def _job_run_text(job: dict, yaml, seen: set[str] | None = None) -> str:
-    """Every `run:` script a job executes, INCLUDING local composite actions it uses."""
-    seen = set() if seen is None else seen
-    parts = []
-    for step in job.get("steps") or []:
-        if not isinstance(step, dict):
-            continue
-        if "run" in step:
-            parts.append(str(step["run"]))
-        uses = step.get("uses")
-        if isinstance(uses, str):
-            nested = _local_action_steps(uses, yaml, seen)
-            if nested:
-                parts.append(_job_run_text({"steps": nested}, yaml, seen))
-    return "\n".join(parts)
-
-
-def jobs_running_the_pytest_suite() -> list[tuple[Path, str, str]]:
-    """(workflow, job id, that job's effective `run:` text) for every JOB running the suite."""
-    yaml = pytest.importorskip("yaml")
-    hits: list[tuple[Path, str, str]] = []
+    hits: list[tuple[Path, str, dict]] = []
     files_with_a_hit: set[Path] = set()
     for wf in workflow_files():
-        jobs = (yaml.safe_load(wf.read_text()) or {}).get("jobs") or {}
-        for job_id, job in jobs.items():
+        for job_id, job in ci_actions.load_jobs(wf).items():
             if not isinstance(job, dict):
                 continue
-            run_text = _job_run_text(job, yaml)
-            if _RUNS_THE_PYTEST_SUITE_RE.search(run_text):
-                hits.append((wf, job_id, run_text))
+            if _RUNS_THE_PYTEST_SUITE_RE.search(ci_actions.job_resolved_run_text(job)):
+                hits.append((wf, job_id, job))
                 files_with_a_hit.add(wf)
     assert hits, (
         f"no JOB under {WORKFLOWS_DIR.relative_to(ROOT)} runs `pytest ... tests/`; the "
@@ -500,9 +468,11 @@ def jobs_running_the_pytest_suite() -> list[tuple[Path, str, str]]:
     # agree on WHICH FILES run the suite. A file whose text says `pytest ... tests/` but
     # none of whose jobs do means the YAML walk lost a step (a `run:` somewhere this
     # helper does not look, e.g. a composite action it could not resolve), and every
-    # per-job assertion below silently stops covering that file.
+    # per-job assertion below silently stops covering that file. The text side reads the
+    # comment-stripped view, so a comment quoting the command cannot manufacture a hit.
     text_hits = {wf for wf in workflow_files()
-                 if _RUNS_THE_PYTEST_SUITE_RE.search(wf.read_text())}
+                 if _RUNS_THE_PYTEST_SUITE_RE.search(
+                     ci_actions.strip_comment_lines(wf.read_text()))}
     lost = sorted(str(wf.relative_to(ROOT)) for wf in text_hits - files_with_a_hit)
     assert not lost, (
         f"these workflows contain a `pytest ... tests/` invocation in their raw text but "
@@ -512,14 +482,19 @@ def jobs_running_the_pytest_suite() -> list[tuple[Path, str, str]]:
     return hits
 
 
-def _requirements_installed_by(run_text: str) -> list[Path]:
-    """Every `requirements/<file>` a shell body pip-installs with -r."""
-    found = []
-    for args in pip_invocations(run_text):
-        for target in option_targets(args, ("-r", "--requirement")):
-            path = REQUIREMENTS_DIR / Path(target).name
-            if path.is_file() and path not in found:
-                found.append(path)
+def _requirements_installed_by(job: dict) -> list[Path]:
+    """Every `requirements/<file>.txt` a JOB installs, as resolved by ci_actions.
+
+    `ci_actions.requirement_files_installed` follows a `run: pip install -r ...`, the
+    `with: requirements:` input of `setup-python-env`, and a file named literally inside
+    another composite action -- and it RAISES `UnresolvableCondition` on an action-step
+    `if:` it cannot evaluate rather than guessing an answer.
+    """
+    found: list[Path] = []
+    for name in ci_actions.requirement_files_installed(job):
+        path = REQUIREMENTS_DIR / Path(name).name
+        if path.is_file() and path not in found:
+            found.append(path)
     return found
 
 
@@ -559,8 +534,8 @@ def test_every_job_running_the_suite_installs_the_ci_requirements_file():
     """
     missing = [
         f"{wf.relative_to(ROOT).as_posix()}: job `{job_id}`"
-        for wf, job_id, run_text in jobs_running_the_pytest_suite()
-        if REQUIREMENTS_DIR / "ci.txt" not in _requirements_installed_by(run_text)
+        for wf, job_id, job in jobs_running_the_pytest_suite()
+        if REQUIREMENTS_DIR / "ci.txt" not in _requirements_installed_by(job)
     ]
     assert not missing, (
         "job(s) run `pytest ... tests/` without `pip install -r requirements/ci.txt`. Each "
@@ -644,9 +619,9 @@ def test_every_job_running_the_suite_installs_what_the_suite_importorskips():
     """
     required = module_scope_importorskips()
     missing = []
-    for wf, job_id, run_text in jobs_running_the_pytest_suite():
+    for wf, job_id, job in jobs_running_the_pytest_suite():
         declared: set[str] = set()
-        for req in _requirements_installed_by(run_text):
+        for req in _requirements_installed_by(job):
             declared |= _declared_packages(req)
         for dist, files in sorted(required.items()):
             if dist not in declared:
