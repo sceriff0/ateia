@@ -2,9 +2,18 @@
 # Grouped, weekly PRs keep noise low while closing the "deps silently rot" gap.
 version: 2
 updates:
-  # GitHub Actions used across .github/workflows/*.yml
+  # GitHub Actions used across .github/workflows/*.yml AND .github/actions/*/action.yml.
+  #
+  # BOTH ENTRIES ARE NEEDED. `directory: "/"` means `.github/workflows/` to this
+  # ecosystem and NOTHING ELSE -- a local composite action is a separate manifest that
+  # Dependabot only reads when its directory is listed. Since 2026-09-01 the pins for
+  # actions/cache, actions/setup-python, nf-core/setup-nextflow and nf-core/setup-nf-test
+  # live in `.github/actions/**`, so without the glob below those four would have quietly
+  # stopped being updated at the moment they stopped being duplicated.
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "weekly"
     groups:

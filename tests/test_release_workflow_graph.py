@@ -43,7 +43,9 @@ directory (test_ci_stack_pinned.py, test_ci_job_hygiene.py).
 
 from __future__ import annotations
 
+import importlib
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -51,6 +53,18 @@ import pytest
 yaml = pytest.importorskip("yaml")
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# The shared workflow/composite-action resolver. Since the CI redesign's Phase 2
+# (2026-09-01) a job's steps are its own steps PLUS the steps of every
+# `uses: ./.github/actions/<name>` it references, and Invariant 5 below reads
+# COMMANDS out of those steps -- `nextflow plugin install` lives in
+# .github/actions/setup-nextflow now, not in either workflow. Reading only
+# `CI.read_text()` and the gate jobs' own `run:` bodies would have made that
+# parametrised case fail on a correct tree, and worse, would have made the whole
+# invariant unable to see any check that moves into an action later.
+if str(Path(__file__).parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent))
+ci_actions = importlib.import_module("ci_actions")
 WORKFLOWS = ROOT / ".github" / "workflows"
 RELEASE = WORKFLOWS / "release.yml"
 CI = WORKFLOWS / "ci.yml"
@@ -86,9 +100,14 @@ def needs_of(job: dict) -> list[str]:
 
 
 def run_text(job: dict) -> str:
-    return "\n".join(
-        str(step.get("run", "")) for step in (job.get("steps") or []) if "run" in step
-    )
+    """A job's `run:` bodies PLUS the local composite actions it uses.
+
+    RESOLVED, not raw. A gate job that calls `./.github/actions/setup-nextflow`
+    really does run `nextflow plugin install`; a scan that reads only the job's
+    own `run:` blocks would report that the release gate stopped provisioning
+    plugins the day the step was de-duplicated.
+    """
+    return ci_actions.job_resolved_run_text(job)
 
 
 def checkout_steps(job: dict) -> list[dict]:
@@ -535,6 +554,11 @@ BLOCKING_CHECKS = [
     ("DEEPCELL token-leak guard", "tests/modules/segment_deepcell_token.nf.test"),
     ("token-guard collection assertion", "--dry-run"),
     ("Nextflow plugin provisioning", "nextflow plugin install"),
+    # Added 2026-09-01 with the composite actions. actionlint is BLOCKING and it
+    # lives in ci.yml's `ruff` job (which IS in the `all-tests` gate's `needs:`),
+    # not in the advisory `lint` job that runs `|| true`. Both needles resolve
+    # through .github/actions/** like the rest of this table.
+    ("actionlint (workflow + composite-action syntax)", "actionlint"),
 ]
 
 
@@ -550,7 +574,7 @@ def test_the_release_gate_runs_every_check_ci_blocks_on(label, needle):
     """
     # Non-vacuity, and a typo detector: the needle must be a command ci.yml really
     # runs. A misspelled needle fails HERE rather than passing vacuously on both sides.
-    assert needle in CI.read_text(), (
+    assert needle in ci_actions.resolved_run_text(CI), (
         f"{needle!r} ({label}) does not appear in ci.yml, so it is not a check CI runs "
         "and this parametrised case is asserting against a string that matches nothing."
     )
