@@ -113,7 +113,7 @@ class RegPresets {
      * value means validation was bypassed, and a resource closure is the worst possible place to
      * raise (conf/modules.config's errorStrategy has an 'ignore' branch that would swallow it).
      */
-    static Map<String, Integer> stareRow(String mode) {
+    private static Map<String, Integer> stareRow(String mode) {
         return STARE[(mode == 'custom' || !mode) ? DEFAULT_MODE : mode] ?: STARE[DEFAULT_MODE]
     }
 

@@ -210,15 +210,6 @@ class Layout {
      */
     static final List<String> CLEANUP_LEVELS = ['none', 'final'].asImmutable()
 
-    /** Whether `kind` is published at `level`. */
-    static boolean publishesAtLevel(String kind, String level) {
-        if (!CLEANUP_LEVELS.contains(level))
-            throw new IllegalArgumentException(
-                "Unknown cleanup level: '${level}'. Valid: ${CLEANUP_LEVELS}")
-        requireKind(kind)
-        return level == 'none' ? true : FINAL_KINDS.contains(kind)
-    }
-
     /** Reject an unknown publish kind at the call site rather than at path-resolution time. */
     static String requireKind(String kind) {
         if (!PUBLISHED_KINDS.contains(kind))
