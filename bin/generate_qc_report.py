@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import shutil
+import statistics
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -576,8 +577,11 @@ def postprocess_qc_section(postprocess_dir):
 # Canonical stage order for the warp-seg QC plots. WARP_SEG_QC writes `stage_order`
 # into its JSON, but a directory holding several slides can hold several orders and
 # a report is diffed across runs — so the order is fixed here and anything
-# unrecognised is appended, sorted, rather than dropped.
-SEG_QC_STAGE_ORDER = ("native", "rigid", "non_rigid", "micro")
+# unrecognised is appended, sorted, rather than dropped. `refined` is the tiled
+# (STARE) backend's terminal stage (bin/utils/tiled_stage_warp.py's STAGES =
+# native, rigid, refined -- it never emits non_rigid/micro), placed last as the
+# tiled analogue of VALIS's `micro`: the final measured stage.
+SEG_QC_STAGE_ORDER = ("native", "rigid", "non_rigid", "micro", "refined")
 
 
 def _seg_qc_stage_plots(seg_qc_dir):
@@ -591,6 +595,17 @@ def _seg_qc_stage_plots(seg_qc_dir):
     disagree about a number. On a one-slide run this is a single bar whose ``n=1``
     says so; the per-slide records are copied verbatim into the report's
     ``seg_qc/`` data folder, which is where a single slide's numbers belong.
+
+    Units are never mixed within one distribution. STARE (tiled) runs are the
+    COMMON case for px, not an edge case (see ``_read_seg_cell_disp``), so a
+    directory holding both a calibrated (µm) and an uncalibrated (px) slide for
+    the same stage is split into up to two plots, one per unit actually present,
+    each titled with its own unit rather than a hardcoded one.
+
+    The caption also reports the matched-cell count (``matching.n_pairs``, via
+    ``_read_seg_qc_match_counts``) across slides, min and median: a p50 measured
+    over 12 matched cells is a different claim from one measured over 40 000, and
+    the histogram alone cannot tell the two apart.
     """
     per_slide = _read_seg_cell_disp(seg_qc_dir)
     if not per_slide:
@@ -600,19 +615,46 @@ def _seg_qc_stage_plots(seg_qc_dir):
         seen |= set(metrics)
     stages = [s for s in SEG_QC_STAGE_ORDER if s in seen]
     stages += sorted(seen - set(SEG_QC_STAGE_ORDER))
+    unit_labels = {"um": "µm", "px": "px"}
     parts = ['<div style="display:flex;flex-wrap:wrap;gap:12px;">']
     for stage in stages:
-        parts.append(
-            _error_distribution_svg(
-                [m.get(stage) for m in per_slide.values()],
-                title=f"{stage} — cell displacement p50 (µm), one point per slide",
+        by_unit = {}
+        for metrics in per_slide.values():
+            entry = metrics.get(stage)
+            if entry is None:
+                continue
+            val, unit = entry
+            if val is not None:
+                by_unit.setdefault(unit, []).append(val)
+        # Fixed unit order (um before px) so a mixed directory renders deterministically.
+        for unit in ("um", "px"):
+            vals = by_unit.get(unit)
+            if not vals:
+                continue
+            parts.append(
+                _error_distribution_svg(
+                    vals,
+                    title=(
+                        f"{stage} — cell displacement p50 ({unit_labels[unit]}), "
+                        "one point per slide"
+                    ),
+                )
             )
-        )
     parts.append("</div>")
+    caption = f"{len(per_slide)} slide(s)."
+    match_counts = _read_seg_qc_match_counts(seg_qc_dir)
+    if match_counts:
+        counts = sorted(match_counts.values())
+        caption += (
+            f" Matched cells per slide: min {counts[0]}, "
+            f"median {statistics.median(counts):g}."
+        )
+    caption += (
+        " Per-slide records are published unchanged under <code>seg_qc/</code> "
+        "in this report's data folder."
+    )
     parts.append(
-        "<p style='font-size:0.8rem;color:#888;margin-top:6px;'>"
-        f"{len(per_slide)} slide(s). Per-slide records are published unchanged "
-        "under <code>seg_qc/</code> in this report's data folder.</p>"
+        f"<p style='font-size:0.8rem;color:#888;margin-top:6px;'>{caption}</p>"
     )
     return "\n".join(parts)
 
@@ -849,7 +891,17 @@ def _read_intrinsic_tre(tre_dir):
 
 
 def _read_seg_cell_disp(seg_qc_dir):
-    """slide -> {stage: displacement_µm_p50} from the WARP_SEG_QC JSONs (px if no µm present)."""
+    """slide -> {stage: (displacement_p50, unit)} from the WARP_SEG_QC JSONs.
+
+    ``unit`` is ``"um"`` when the JSON's own micron column (``displacement_um_p50``)
+    is present, else ``"px"`` when it falls back to ``displacement_px_p50``. STARE
+    (tiled) runs are the COMMON case for px, not an edge case:
+    ``modules/local/warp_seg_qc.nf`` passes no pixel size on that path,
+    ``bin/warp_seg_qc.py`` forwards ``None``, and ``bin/utils/cell_pairs.py`` only
+    emits ``displacement_um_*`` when a pixel size was given. Callers must never
+    average a px value into a µm distribution (or vice versa) — carrying the unit
+    alongside the value is what lets them group by it instead of assuming one.
+    """
     out = {}
     for jp in list_files(seg_qc_dir, "*.json"):
         try:
@@ -866,12 +918,41 @@ def _read_seg_cell_disp(seg_qc_dir):
             if not isinstance(metrics, dict):
                 continue
             val = metrics.get("displacement_um_p50")
+            unit = "um"
             if val is None:
                 val = metrics.get(
                     "displacement_px_p50"
                 )  # fall back to px if no pixel size
-            per_stage[stage] = _to_float(val)
+                unit = "px"
+            per_stage[stage] = (_to_float(val), unit)
         out[str(slide)] = per_stage
+    return out
+
+
+def _read_seg_qc_match_counts(seg_qc_dir):
+    """slide -> matching.n_pairs from each WARP_SEG_QC JSON, when the block is present.
+
+    ``n_pairs`` is how many cells the fixed cell-pairing actually matched (see
+    docs/registration_qc.md's ``matching`` block). A displacement p50 computed
+    over 12 matched cells is a different claim from one computed over 40 000 --
+    read separately from ``_read_seg_cell_disp`` so a caption can say which one a
+    run was, without folding a non-stage key into the per-stage metrics dict that
+    drives stage discovery.
+    """
+    out = {}
+    for jp in list_files(seg_qc_dir, "*.json"):
+        try:
+            with open(jp, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        slide = data.get("moving")
+        matching = data.get("matching")
+        if not slide or not isinstance(matching, dict):
+            continue
+        n = _to_float(matching.get("n_pairs"))
+        if n is not None:
+            out[str(slide)] = int(n)
     return out
 
 
@@ -900,7 +981,11 @@ def reconcile_rows(tre_dir, seg_qc_dir):
             # reconciliation for the configuration that actually runs.
             if feature is None and stage == "non_rigid" and which == "premicro":
                 feature = slide_tre.get("final", {}).get(col)
-            disp = cell.get(slide, {}).get(stage)
+            # _read_seg_cell_disp now carries the unit alongside the value (fix round 1,
+            # Important 1); this reconciliation only ever compared the numbers, so unpack
+            # and keep going -- the unit itself is not reconcile_rows' concern.
+            disp_entry = cell.get(slide, {}).get(stage)
+            disp = disp_entry[0] if disp_entry is not None else None
             divergent = None
             if feature is not None and disp is not None:
                 lo, hi = sorted((abs(feature), abs(disp)))
@@ -1070,11 +1155,14 @@ def _read_residual_column(csv_path):
 
     bin/warp_seg_qc.py's write_per_cell_csv writes one row per matched cell pair,
     uncapped — a real slide is 10^4-10^6 rows — with columns
-    ``moving,ref_x,ref_y,residual_px,stage``. One pass, one column: nothing but
-    the numeric residual is materialised, so the report's cost is a list of floats
-    rather than a dict per row. ``n_rows`` counts EVERY data row, including one
-    whose residual could not be parsed, so the plot's n and the file's length can
-    be compared.
+    ``moving,ref_x,ref_y,residual_px,stage``. ``csv.DictReader`` still builds one
+    dict per row internally, but nothing from it survives past that iteration
+    except the numeric residual, so what this function RETAINS is a list of
+    floats, not a list of per-row dicts. ``n_rows`` counts EVERY data row,
+    including one whose residual could not be parsed OR was non-finite (``inf``/
+    ``nan`` — ``_to_float`` only drops NaN, not infinity), so the plot's n and
+    the "(N unparseable)" count in ``seg_residuals_section`` stay consistent with
+    each other: a value this function keeps is a value ``_finite`` will plot.
     """
     values, stages, n_rows = [], [], 0
     with open(csv_path, newline="") as fh:
@@ -1087,7 +1175,7 @@ def _read_residual_column(csv_path):
         for row in csv.DictReader(fh):
             n_rows += 1
             v = _to_float(row.get("residual_px"))
-            if v is not None:
+            if v is not None and math.isfinite(v):
                 values.append(v)
             stage = row.get("stage")
             if stage and stage not in stages:
@@ -1115,7 +1203,7 @@ def seg_residuals_section(seg_residuals_dir):
         name = Path(csv_path).name
         try:
             values, stage, n_rows = _read_residual_column(csv_path)
-        except (OSError, csv.Error) as exc:
+        except Exception as exc:  # noqa: BLE001 - report, never crash
             parts.append(
                 '<p class="empty-notice">Could not parse '
                 f"{html.escape(name)}: {html.escape(str(exc))}</p>"

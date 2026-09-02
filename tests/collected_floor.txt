@@ -387,4 +387,25 @@
 # test_seg_residuals_section_is_a_histogram_not_a_row_dump,
 # test_seg_residuals_section_with_no_csvs_is_a_notice), net 0. No other test
 # count moved.
-1417
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p09-qc-report, fix round 1 for tasks 7-10
+# (review findings: _seg_qc_stage_plots mislabelled/mixed px and um in one
+# histogram, dropped the matched-cell count, and SEG_QC_STAGE_ORDER omitted the
+# tiled backend's `refined` stage; seg_residuals_section narrowed its except to
+# miss a non-UTF-8 CSV's UnicodeDecodeError; _read_residual_column counted inf
+# as a plotted value while _finite silently dropped it, desyncing the
+# "(N unparseable)" caption from the plot's own n): 1354 passed, 13 skipped, 0
+# failed -- 1367 collected, up from the prior entry's 1359. Eight new cases in
+# tests/test_generate_qc_report.py
+# (test_seg_qc_stage_plots_never_mix_units_and_label_each_correctly,
+# test_seg_qc_stage_plots_caption_reports_matched_cell_counts,
+# test_seg_qc_stage_plots_caption_omits_matched_cells_when_matching_block_absent,
+# test_seg_qc_stage_order_includes_the_tiled_refined_stage,
+# test_seg_qc_stage_plots_order_the_tiled_refined_stage_canonically,
+# test_seg_residuals_section_reports_a_non_csv_error_read_failure_instead_of_raising,
+# test_read_residual_column_counts_non_finite_values_as_unparseable,
+# test_seg_residuals_section_unparseable_count_matches_the_plotted_n); no
+# deletions, no other test count moved.
+1425

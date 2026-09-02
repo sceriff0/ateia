@@ -136,6 +136,96 @@ def test_seg_qc_stage_plots_on_an_empty_directory_is_a_notice(tmp_path):
     assert 'class="empty-notice"' in out
 
 
+# ── fix round 1: unit-mislabelled / unit-mixed plots (Important 1) ──────────────
+def test_seg_qc_stage_plots_never_mix_units_and_label_each_correctly(tmp_path):
+    """A directory can hold a calibrated (VALIS, um) slide and an uncalibrated
+
+    (STARE, no pixel size -> px) slide for the same stage. The tiled WARP_SEG_QC
+    Nextflow process passes no pixel size on that path, bin/warp_seg_qc.py
+    forwards None, and bin/utils/cell_pairs.py only emits displacement_um_* when
+    a pixel size was given -- so px is the norm there, not an edge case. The two
+    must never share one histogram, and each plot's own title must say which
+    unit it is.
+    """
+    gqr = _load()
+    d = tmp_path / "seg_qc"
+    d.mkdir()
+    (d / "movA_seg_qc.json").write_text(
+        json.dumps(
+            {"moving": "movA", "stages": {"rigid": {"displacement_um_p50": 2.0}}}
+        )
+    )
+    (d / "movB_seg_qc.json").write_text(
+        json.dumps(
+            {"moving": "movB", "stages": {"rigid": {"displacement_px_p50": 5.0}}}
+        )
+    )
+    out = gqr._seg_qc_stage_plots(str(d))
+    svgs = re.findall(r"<svg.*?</svg>", out, re.S)
+    assert len(svgs) == 2
+    um_svg = next(s for s in svgs if "µm" in s)
+    px_svg = next(s for s in svgs if s is not um_svg)
+    assert "rigid — cell displacement p50 (µm)" in um_svg
+    assert "rigid — cell displacement p50 (px)" in px_svg
+    assert "µm" not in px_svg  # the px-only slide must never be captioned as microns
+
+
+# ── fix round 1: matched-cell count dropped from the caption (Important 2) ──────
+def test_seg_qc_stage_plots_caption_reports_matched_cell_counts(tmp_path):
+    """A p50 over 12 matched cells must not read the same as one over 40000."""
+    gqr = _load()
+    d = tmp_path / "seg_qc"
+    d.mkdir()
+    for slide, n_pairs in (("movA", 40000), ("movB", 12), ("movC", 100)):
+        (d / f"{slide}_seg_qc.json").write_text(
+            json.dumps(
+                {
+                    "moving": slide,
+                    "matching": {"n_pairs": n_pairs},
+                    "stages": {"rigid": {"displacement_um_p50": 2.0}},
+                }
+            )
+        )
+    out = gqr._seg_qc_stage_plots(str(d))
+    assert "min 12" in out
+    assert "median 100" in out
+
+
+def test_seg_qc_stage_plots_caption_omits_matched_cells_when_matching_block_absent(
+    tmp_path,
+):
+    """No `matching` block anywhere must not crash, and must not print a bogus count."""
+    gqr = _load()
+    out = gqr._seg_qc_stage_plots(str(_two_slide_seg_qc(tmp_path)))
+    assert "Matched cells" not in out
+
+
+# ── fix round 1: fix SEG_QC_STAGE_ORDER for the tiled backend (Minor 3) ─────────
+def test_seg_qc_stage_order_includes_the_tiled_refined_stage():
+    gqr = _load()
+    assert "refined" in gqr.SEG_QC_STAGE_ORDER
+
+
+def test_seg_qc_stage_plots_order_the_tiled_refined_stage_canonically(tmp_path):
+    gqr = _load()
+    d = tmp_path / "seg_qc"
+    d.mkdir()
+    (d / "m_seg_qc.json").write_text(
+        json.dumps(
+            {
+                "moving": "m",
+                "stages": {
+                    "refined": {"displacement_px_p50": 1.1},
+                    "native": {"displacement_px_p50": 9.0},
+                    "rigid": {"displacement_px_p50": 6.0},
+                },
+            }
+        )
+    )
+    out = gqr._seg_qc_stage_plots(str(d))
+    assert out.index("native —") < out.index("rigid —") < out.index("refined —")
+
+
 def test_seg_overlay_section_only_overlays(tmp_path):
     gqr = _load()
     d = tmp_path / "postprocess_qc"
@@ -864,3 +954,55 @@ def test_seg_residuals_section_with_no_csvs_is_a_notice(tmp_path):
     assert "Per-Cell Registration Residuals" in out
     assert "<svg" not in out
     assert "No per-cell registration residuals found" in out
+
+
+# ── fix round 1: seg_residuals_section must not abort on a non-csv.Error read
+# failure, e.g. a non-UTF-8 CSV's UnicodeDecodeError (Minor 4) ──────────────────
+def test_seg_residuals_section_reports_a_non_csv_error_read_failure_instead_of_raising(
+    tmp_path,
+):
+    gqr = _load()
+    d = tmp_path / "seg_residuals"
+    d.mkdir()
+    p = d / "bad_reg_residuals.csv"
+    # Not valid UTF-8 -- csv.DictReader's iteration raises UnicodeDecodeError, not
+    # OSError or csv.Error, so a narrow except must not have let this propagate.
+    p.write_bytes(b"moving,ref_x,ref_y,residual_px,stage\nm,1,1,\xff\xfe,micro\n")
+    out = gqr.seg_residuals_section(str(d))  # must not raise
+    assert "Per-Cell Registration Residuals" in out
+    assert "Could not parse" in out
+
+
+# ── fix round 1: non-finite residuals must count as unparseable, not silently
+# vanish between the caption's count and the plot's n (Minor 5) ─────────────────
+def test_read_residual_column_counts_non_finite_values_as_unparseable(tmp_path):
+    gqr = _load()
+    d = tmp_path / "seg_residuals"
+    d.mkdir()
+    p = d / "x_reg_residuals.csv"
+    p.write_text(
+        "moving,ref_x,ref_y,residual_px,stage\n"
+        "m,1,1,inf,micro\n"
+        "m,2,2,nan,micro\n"
+        "m,3,3,0.5,micro\n"
+    )
+    values, stage, n_rows = gqr._read_residual_column(p)
+    assert n_rows == 3
+    assert values == [0.5]
+    assert stage == "micro"
+
+
+def test_seg_residuals_section_unparseable_count_matches_the_plotted_n(tmp_path):
+    gqr = _load()
+    d = tmp_path / "seg_residuals"
+    d.mkdir()
+    p = d / "x_reg_residuals.csv"
+    p.write_text(
+        "moving,ref_x,ref_y,residual_px,stage\n"
+        "m,1,1,inf,micro\n"
+        "m,2,2,nan,micro\n"
+        "m,3,3,0.5,micro\n"
+    )
+    out = gqr.seg_residuals_section(str(d))
+    assert "(2 unparseable)" in out
+    assert "(n=1)" in out
