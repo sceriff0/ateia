@@ -167,4 +167,22 @@
 # test_size_vs_runtime_ignores_unjoined_rows,
 # test_size_vs_runtime_escapes_a_hostile_process_name); no other test count
 # moved.
-1357
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p10-resource-report, phase 10 fix round 1
+# (generate_resource_report.py: +-inf/nan crash fix across all four Panel
+# 5-8 functions plus fmt_secs/fmt_bytes): 1365 passed, 13 skipped, 0 failed
+# -- 1378 collected, up from the prior entry's 1355. The increase is exactly
+# the 23 new cases in tests/test_generate_resource_report.py
+# (test_fmt_secs_returns_a_sentinel_for_non_finite_input,
+# test_fmt_bytes_returns_a_sentinel_for_non_finite_input, and seven
+# parametrized [inf, -inf, nan] cases -- test_walltime_bars_drops_a_non_finite_realtime_total,
+# test_memory_headroom_drops_a_non_finite_request,
+# test_memory_headroom_drops_a_non_finite_observed_peak,
+# test_failure_cost_drops_a_non_finite_failed_gb_h,
+# test_failure_cost_drops_a_non_finite_failed_realtime,
+# test_size_vs_runtime_drops_and_counts_a_non_finite_input_bytes,
+# test_size_vs_runtime_drops_and_counts_a_non_finite_realtime); no other
+# test count moved.
+1380

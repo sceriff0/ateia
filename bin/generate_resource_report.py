@@ -262,12 +262,17 @@ def fmt_bytes(b):
     Returns
     -------
     str
-        ``'N/A'`` when ``b`` is ``None``; otherwise one decimal place and the
-        largest unit at or below 1024 of the next one, capped at TB.
+        ``'N/A'`` when ``b`` is ``None``; ``'n/a'`` when ``b`` is a number but
+        not a finite one (``+-inf``/``nan`` -- a corrupted trace field or a
+        zero-denominator ratio upstream can produce one, and left unguarded it
+        would print as the literal ``'inf TB'``); otherwise one decimal place
+        and the largest unit at or below 1024 of the next one, capped at TB.
     """
     if b is None:
         return "N/A"
     b = float(b)
+    if not math.isfinite(b):
+        return "n/a"
     for unit in ["B", "KB", "MB", "GB", "TB"]:
         if b < 1024 or unit == "TB":
             return f"{b:.1f} {unit}"
@@ -285,10 +290,15 @@ def fmt_secs(s):
     Returns
     -------
     str
-        ``'N/A'`` when ``s`` is ``None``.
+        ``'N/A'`` when ``s`` is ``None``; ``'n/a'`` when ``s`` is a number but
+        not a finite one (``int(inf)`` raises ``OverflowError`` and
+        ``int(nan)`` raises ``ValueError`` -- both real inputs here, not
+        hypothetical ones; see `_finite_or_none`).
     """
     if s is None:
         return "N/A"
+    if not math.isfinite(s):
+        return "n/a"
     s = int(s)
     h, rem = divmod(s, 3600)
     m, sec = divmod(rem, 60)
@@ -342,13 +352,58 @@ def _svg(width, height, body, title):
     )
 
 
+def _finite_or_none(v):
+    """A finite float, or ``None`` -- collapses ``+-inf``/``nan`` into "missing".
+
+    In the shape of generate_qc_report.py's `_finite()` (plan 09), one value at
+    a time instead of a list. ``None`` already means "missing" everywhere a
+    panel below reads a rollup or joined-row field, and every one of those
+    reads already tolerates it (`... or 0.0`, `is not None`); the case this
+    adds is a reading that IS a number but not a finite one. A corrupted trace
+    field or a zero-denominator ratio upstream can produce one, and left
+    unguarded it slips past every `is not None` check: `int(inf)` raises
+    ``OverflowError`` in `fmt_secs`, and an unguarded division or f-string
+    renders the literal text ``'nan'``/``'inf'`` into an SVG coordinate or axis
+    label. Folding it into ``None`` here lets every existing missing-value path
+    handle it for free -- callers filter with the same `is not None` / `or 0.0`
+    idiom they already use, just applied to this function's return value
+    instead of the raw field.
+    """
+    if v is None:
+        return None
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _positive_finite(v):
+    """True iff `v` is a finite number strictly greater than zero.
+
+    The one shape `size_vs_runtime_svg`'s log-log axes can plot: `math.log10`
+    is undefined at and below zero, and `+-inf`/`nan` cannot be placed on a log
+    axis either (see `_finite_or_none`).
+    """
+    fv = _finite_or_none(v)
+    return fv is not None and fv > 0
+
+
 def walltime_bars_svg(roll, top=15):
     """Per-process wall-time contribution, ranked, longest first.
 
     Answers "where did the run's time actually go?" in one glance, which the
     per-process table it replaces could not: sorted alphabetically, with ten
     columns, the one number that matters was never adjacent to itself.
+
+    A process whose `realtime_total_s` is present but non-finite (`+-inf`/
+    `nan`) is dropped rather than drawn: `int(inf)` inside `fmt_secs` would
+    otherwise crash the whole report over one corrupted rollup row.
     """
+    roll = [
+        r
+        for r in roll
+        if r.get("realtime_total_s") is None
+        or _finite_or_none(r.get("realtime_total_s")) is not None
+    ]
     rows = sorted(roll, key=lambda r: -(r.get("realtime_total_s") or 0.0))[:top]
     if not rows:
         return ""
@@ -390,11 +445,17 @@ def memory_headroom_svg(roll, top=15):
     could not give to anything else. A dark bar that overruns its track (drawn in
     red) is the OOM-retry precursor, and must not be clipped to look like a
     perfectly-sized task.
+
+    A process whose request or observed peak is present but non-finite
+    (`+-inf`/`nan`) is skipped like a missing value, not drawn: dividing by an
+    infinite request or subtracting an infinite peak would otherwise render as
+    the literal text 'nan% of nan TB' / 'requested inf TB'.
     """
     rows = [
         r
         for r in roll
-        if r.get("mem_req_max_b") and r.get("peak_rss_max_b") is not None
+        if _finite_or_none(r.get("mem_req_max_b"))
+        and _finite_or_none(r.get("peak_rss_max_b")) is not None
     ]
     rows.sort(key=lambda r: -(r["mem_req_max_b"] - r["peak_rss_max_b"]))
     rows = rows[:top]
@@ -441,8 +502,26 @@ def failure_cost_svg(roll, top=15):
     reservation for its whole wall-time and delivers nothing, which is invisible
     in a green build. Measured across one real run, 19.6% of all reserved GB.h
     went this way.
+
+    A process whose `failed_gb_h` or `failed_realtime_s` is present but
+    non-finite (`+-inf`/`nan`) is skipped like a missing value: ranking and
+    bar width both divide by the maximum `failed_gb_h`, and the tooltip
+    formats `failed_realtime_s` through `fmt_secs`, either of which would
+    otherwise render as the literal text 'nan'/'inf' rather than a real cost.
     """
-    rows = [r for r in roll if r.get("n_failed")]
+    rows = [
+        r
+        for r in roll
+        if r.get("n_failed")
+        and (
+            r.get("failed_gb_h") is None
+            or _finite_or_none(r.get("failed_gb_h")) is not None
+        )
+        and (
+            r.get("failed_realtime_s") is None
+            or _finite_or_none(r.get("failed_realtime_s")) is not None
+        )
+    ]
     rows.sort(key=lambda r: -(r.get("failed_gb_h") or 0.0))
     rows = rows[:top]
     if not rows:
@@ -497,20 +576,30 @@ def size_vs_runtime_svg(joined, top_processes=8):
 
     LOG-LOG, deliberately. One run spans megabytes to hundreds of gigabytes of
     input and seconds to hours of runtime; on linear axes every point but the
-    largest collapses into the origin. The cost is that a log axis cannot place a
-    zero, so tasks with a zero input size or a zero runtime are dropped -- the
-    panel states how many rather than parking them at an arbitrary coordinate.
+    largest collapses into the origin. The cost is that a log axis cannot place
+    a zero (or a negative, or `+-inf`/`nan` -- see `_positive_finite`), so such
+    tasks are dropped -- the panel states how many rather than parking them at
+    an arbitrary coordinate. A present-but-non-finite `input_bytes` or
+    `realtime_s` matters here specifically because it is NOT caught by a
+    ``<= 0`` check the way a zero or a negative is (``nan <= 0`` is ``False``,
+    and ``inf > 0`` is ``True``), so it would otherwise slip through as a
+    plottable point and either vanish from the drop count uncounted (`nan`) or
+    render as `cx='nan'` and an 'inf TB' axis label (`inf`).
     """
     usable = [
         j
         for j in joined
-        if (j.get("input_bytes") or 0) > 0 and (j.get("realtime_s") or 0) > 0
+        if _positive_finite(j.get("input_bytes"))
+        and _positive_finite(j.get("realtime_s"))
     ]
     dropped = sum(
         1
         for j in joined
         if j.get("input_bytes") is not None
-        and ((j.get("input_bytes") or 0) <= 0 or (j.get("realtime_s") or 0) <= 0)
+        and not (
+            _positive_finite(j.get("input_bytes"))
+            and _positive_finite(j.get("realtime_s"))
+        )
     )
     if not usable:
         return ""

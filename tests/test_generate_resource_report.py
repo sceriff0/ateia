@@ -1,6 +1,7 @@
 import importlib.util
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -692,3 +693,115 @@ def test_size_vs_runtime_escapes_a_hostile_process_name():
     svg = grr.size_vs_runtime_svg([_joined("<b>A</b>", "P1", 2 * GB, 10.0)])
     assert "<b>A</b>" not in svg
     assert "&lt;b&gt;A&lt;/b&gt;" in svg
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1: +-inf/nan must not crash a panel and must not render as the
+# literal string "nan"/"inf" -- they must be treated like a missing value
+# (skipped, and counted in a caption where the panel already has one).
+# ---------------------------------------------------------------------------
+
+_NONFINITE = [float("inf"), float("-inf"), float("nan")]
+
+
+def test_fmt_secs_returns_a_sentinel_for_non_finite_input():
+    grr = _load()
+    for bad in _NONFINITE:
+        assert grr.fmt_secs(bad) == "n/a"
+    assert grr.fmt_secs(None) == "N/A"  # unchanged: still the missing-value case
+
+
+def test_fmt_bytes_returns_a_sentinel_for_non_finite_input():
+    grr = _load()
+    for bad in _NONFINITE:
+        assert grr.fmt_bytes(bad) == "n/a"
+    assert grr.fmt_bytes(None) == "N/A"  # unchanged: still the missing-value case
+
+
+@pytest.mark.parametrize("bad", _NONFINITE)
+def test_walltime_bars_drops_a_non_finite_realtime_total(bad):
+    grr = _load()
+    roll = [_roll_row("GOOD", 10.0), _roll_row("BAD", bad)]
+    svg = grr.walltime_bars_svg(roll)
+    ET.fromstring(svg)  # well-formed
+    assert "BAD" not in svg
+    assert svg.count("<rect class='bar'") == 1
+    assert "nan" not in svg and "inf" not in svg
+
+
+@pytest.mark.parametrize("bad", _NONFINITE)
+def test_memory_headroom_drops_a_non_finite_request(bad):
+    grr = _load()
+    roll = [
+        _roll_row("GOOD", 1.0, mem_req_max_b=100.0 * GB, peak_rss_max_b=50.0 * GB),
+        _roll_row("BAD", 1.0, mem_req_max_b=bad, peak_rss_max_b=50.0 * GB),
+    ]
+    svg = grr.memory_headroom_svg(roll)
+    ET.fromstring(svg)
+    assert "BAD" not in svg
+    assert svg.count("<rect class='req'") == 1
+    assert "nan" not in svg and "inf" not in svg
+
+
+@pytest.mark.parametrize("bad", _NONFINITE)
+def test_memory_headroom_drops_a_non_finite_observed_peak(bad):
+    grr = _load()
+    roll = [
+        _roll_row("GOOD", 1.0, mem_req_max_b=100.0 * GB, peak_rss_max_b=50.0 * GB),
+        _roll_row("BAD", 1.0, mem_req_max_b=100.0 * GB, peak_rss_max_b=bad),
+    ]
+    svg = grr.memory_headroom_svg(roll)
+    ET.fromstring(svg)
+    assert "BAD" not in svg
+    assert svg.count("<rect class='req'") == 1
+    assert "nan" not in svg and "inf" not in svg
+
+
+@pytest.mark.parametrize("bad", _NONFINITE)
+def test_failure_cost_drops_a_non_finite_failed_gb_h(bad):
+    grr = _load()
+    roll = [
+        _roll_row("GOOD", 1.0, n_failed=1, failed_gb_h=100.0, failed_realtime_s=60.0),
+        _roll_row("BAD", 1.0, n_failed=1, failed_gb_h=bad, failed_realtime_s=60.0),
+    ]
+    svg = grr.failure_cost_svg(roll)
+    ET.fromstring(svg)
+    assert "BAD" not in svg
+    assert svg.count("<rect class='fail'") == 1
+    assert "nan" not in svg and "inf" not in svg
+
+
+@pytest.mark.parametrize("bad", _NONFINITE)
+def test_failure_cost_drops_a_non_finite_failed_realtime(bad):
+    grr = _load()
+    roll = [
+        _roll_row("GOOD", 1.0, n_failed=1, failed_gb_h=100.0, failed_realtime_s=60.0),
+        _roll_row("BAD", 1.0, n_failed=1, failed_gb_h=100.0, failed_realtime_s=bad),
+    ]
+    svg = grr.failure_cost_svg(roll)
+    ET.fromstring(svg)
+    assert "BAD" not in svg
+    assert svg.count("<rect class='fail'") == 1
+    assert "nan" not in svg and "inf" not in svg
+
+
+@pytest.mark.parametrize("bad", _NONFINITE)
+def test_size_vs_runtime_drops_and_counts_a_non_finite_input_bytes(bad):
+    grr = _load()
+    joined = [_joined("A", "P1", bad, 10.0), _joined("A", "P2", 2 * GB, 10.0)]
+    svg = grr.size_vs_runtime_svg(joined)
+    ET.fromstring(svg)
+    assert svg.count("<circle") == 1
+    assert "1 task not shown" in svg
+    assert "nan" not in svg and "inf" not in svg
+
+
+@pytest.mark.parametrize("bad", _NONFINITE)
+def test_size_vs_runtime_drops_and_counts_a_non_finite_realtime(bad):
+    grr = _load()
+    joined = [_joined("A", "P1", 2 * GB, bad), _joined("A", "P2", 2 * GB, 10.0)]
+    svg = grr.size_vs_runtime_svg(joined)
+    ET.fromstring(svg)
+    assert svg.count("<circle") == 1
+    assert "1 task not shown" in svg
+    assert "nan" not in svg and "inf" not in svg
