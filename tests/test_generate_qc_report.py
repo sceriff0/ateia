@@ -397,6 +397,71 @@ def test_reconciliation_section_renders_and_marks_divergence(tmp_path):
     assert "mov" in html
 
 
+def test_reconciliation_scatter_draws_one_circle_per_plottable_point():
+    gqr = _load()
+    svg = gqr._reconciliation_scatter_svg(
+        [(2.0, 2.1, "mov · rigid"), (1.0, 1.1, "mov · non_rigid")], 3.0
+    )
+    assert svg.count("<circle") == 2
+    assert "mov · rigid" in svg
+
+
+def test_reconciliation_scatter_draws_two_band_edges_and_the_identity():
+    gqr = _load()
+    svg = gqr._reconciliation_scatter_svg([(1.0, 1.0, "a"), (10.0, 10.0, "b")], 3.0)
+    assert svg.count('class="band"') == 2
+    assert svg.count('class="identity"') == 1
+    assert "3×" in svg
+
+
+def test_reconciliation_scatter_colours_a_divergent_point_differently():
+    gqr = _load()
+    svg = gqr._reconciliation_scatter_svg(
+        [(0.5, 6.0, "mov · micro"), (2.0, 2.1, "mov · rigid")], 3.0
+    )
+    # 6.0 > 3 * 0.5 -> divergent; 2.1 <= 3 * 2.0 -> agrees. The band's shaded
+    # polygon ALSO fills "#27ae60" (fill-opacity 0.08, vs a point's 0.75), so a
+    # bare `fill="#27ae60"` count is off by one whenever the band is drawn --
+    # narrow to the point's own fill-opacity to count circles, not the band.
+    assert svg.count('fill="#c0392b"') == 1
+    assert svg.count('fill="#27ae60" fill-opacity="0.75"') == 1
+
+
+def test_reconciliation_scatter_counts_out_points_a_log_axis_cannot_place():
+    gqr = _load()
+    svg = gqr._reconciliation_scatter_svg(
+        [(1.0, 1.0, "a"), (0.0, 2.0, "b"), (3.0, None, "c")], 3.0
+    )
+    assert svg.count("<circle") == 1
+    assert "2 point(s) not plottable" in svg
+
+
+def test_reconciliation_scatter_labels_both_axes():
+    gqr = _load()
+    svg = gqr._reconciliation_scatter_svg([(1.0, 1.0, "a")], 3.0)
+    assert "feature-TRE" in svg
+    assert "cell displacement" in svg
+
+
+def test_reconciliation_scatter_on_no_plottable_points_is_a_notice():
+    gqr = _load()
+    out = gqr._reconciliation_scatter_svg([], 3.0)
+    assert "<svg" not in out
+    assert 'class="empty-notice"' in out
+
+
+def test_reconciliation_section_renders_a_scatter_not_a_table(tmp_path):
+    gqr = _load()
+    html_out = gqr.reconciliation_section(
+        str(_valis_csvs(tmp_path)), str(_seg_qc_json(tmp_path))
+    )
+    assert "Reconciliation" in html_out
+    assert "<svg" in html_out
+    assert "<table" not in html_out
+    assert "mov · micro" in html_out  # the divergent stage is labelled
+    assert "1 of 3 comparable point(s)" in html_out
+
+
 def _write_tre(dir_, name, coarse, rigid_p50, final_p50=None, tiles=None):
     d = {
         "moving": name,

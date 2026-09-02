@@ -354,4 +354,19 @@
 # test_seg_qc_stage_plots_fall_back_to_px_when_no_pixel_size,
 # test_seg_qc_stage_plots_on_an_empty_directory_is_a_notice), net +2. No other
 # test count moved.
-1410
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p09-qc-report, task 9 (reconciliation
+# becomes a log-log scatter with the divergence band drawn): 1346 passed, 13
+# skipped, 0 failed -- 1359 collected, up from the prior entry's 1352. Seven new
+# cases in tests/test_generate_qc_report.py
+# (test_reconciliation_scatter_draws_one_circle_per_plottable_point,
+# test_reconciliation_scatter_draws_two_band_edges_and_the_identity,
+# test_reconciliation_scatter_colours_a_divergent_point_differently,
+# test_reconciliation_scatter_counts_out_points_a_log_axis_cannot_place,
+# test_reconciliation_scatter_labels_both_axes,
+# test_reconciliation_scatter_on_no_plottable_points_is_a_notice,
+# test_reconciliation_section_renders_a_scatter_not_a_table); the two retained
+# reconciliation tests are unchanged. No other test count moved.
+1417

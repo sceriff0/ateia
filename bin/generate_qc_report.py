@@ -940,8 +940,116 @@ def reconcile_rows(tre_dir, seg_qc_dir):
     return rows
 
 
+SCATTER_W = 460
+SCATTER_H = 360
+
+
+def _reconciliation_scatter_svg(points, ratio_band):
+    """Feature-TRE (x) against cell displacement (y), log-log, with the divergence band.
+
+    ``points`` is ``[(feature_tre, cell_disp, label), ...]``, one entry per
+    slide-stage. ``reconcile_rows`` calls a row divergent when the larger of the
+    two numbers exceeds ``ratio_band`` times the smaller — a symmetric rule, so
+    the region it accepts is exactly the strip between ``y = x·r`` and
+    ``y = x/r``. On log axes those are two straight lines parallel to the
+    identity, which is why the band can be DRAWN instead of recomputed per point:
+    a reader sees which slide-stage is out and by how far, rather than a column
+    of ticks and crosses.
+
+    Log axes because the quantity being judged is a ratio, and because the stages
+    span two orders of magnitude (rigid ≈ 6 µm, micro ≈ 0.8 µm) on one plot. The
+    cost is that a non-positive or missing coordinate cannot be placed at all;
+    those are counted in the caption rather than disappearing.
+    """
+    usable = []
+    dropped = 0
+    for x, y, label in points:
+        vx, vy = _finite([x]), _finite([y])
+        if vx and vy and vx[0] > 0 and vy[0] > 0:
+            usable.append((math.log10(vx[0]), math.log10(vy[0]), vx[0], vy[0], label))
+        else:
+            dropped += 1
+    if not usable:
+        return (
+            '<p class="empty-notice">No slide-stage has both a feature-TRE and a '
+            "cell displacement that can be placed on a log axis.</p>"
+        )
+    lo = min(min(p[0], p[1]) for p in usable) - 0.3
+    hi = max(max(p[0], p[1]) for p in usable) + 0.3
+    if hi - lo < 0.6:
+        hi = lo + 0.6
+    pad_l, pad_b, pad_t, pad_r = 58, 44, 26, 14
+    pw = SCATTER_W - pad_l - pad_r
+    ph = SCATTER_H - pad_t - pad_b
+
+    def sx(v):
+        return pad_l + pw * (v - lo) / (hi - lo)
+
+    def sy(v):
+        return pad_t + ph - ph * (v - lo) / (hi - lo)
+
+    d = math.log10(ratio_band)
+    parts = [
+        f'<svg width="{SCATTER_W}" height="{SCATTER_H}" role="img" '
+        f'aria-label="feature-TRE versus cell displacement" '
+        f'style="border:1px solid #eee;">',
+        '<clipPath id="reconcile-clip">'
+        f'<rect x="{pad_l}" y="{pad_t}" width="{pw}" height="{ph}"/></clipPath>',
+        # NOT an f-string: ruff's F541 (pyflakes, in this repo's `select`) rejects
+        # an f-prefix with no placeholder, and this line has none.
+        '<g clip-path="url(#reconcile-clip)">',
+        # the shaded agreement strip, then its two edges
+        f'<polygon points="{sx(lo):.1f},{sy(lo + d):.1f} {sx(hi):.1f},{sy(hi + d):.1f} '
+        f'{sx(hi):.1f},{sy(hi - d):.1f} {sx(lo):.1f},{sy(lo - d):.1f}" '
+        'fill="#27ae60" fill-opacity="0.08"/>',
+        f'<line class="identity" x1="{sx(lo):.1f}" y1="{sy(lo):.1f}" '
+        f'x2="{sx(hi):.1f}" y2="{sy(hi):.1f}" stroke="#999" stroke-dasharray="2,3"/>',
+        f'<line class="band" x1="{sx(lo):.1f}" y1="{sy(lo + d):.1f}" '
+        f'x2="{sx(hi):.1f}" y2="{sy(hi + d):.1f}" stroke="#27ae60" '
+        'stroke-dasharray="5,3"/>',
+        f'<line class="band" x1="{sx(lo):.1f}" y1="{sy(lo - d):.1f}" '
+        f'x2="{sx(hi):.1f}" y2="{sy(hi - d):.1f}" stroke="#27ae60" '
+        'stroke-dasharray="5,3"/>',
+    ]
+    for lx, ly, vx, vy, label in usable:
+        small, large = sorted((vx, vy))
+        divergent = large > ratio_band * small
+        parts.append(
+            f'<circle cx="{sx(lx):.1f}" cy="{sy(ly):.1f}" r="4.5" '
+            f'fill="{"#c0392b" if divergent else "#27ae60"}" fill-opacity="0.75">'
+            f"<title>{html.escape(str(label))}: feature-TRE {vx:.3g}, "
+            f"cell disp {vy:.3g}{' — DIVERGENT' if divergent else ''}</title>"
+            "</circle>"
+        )
+    parts.append("</g>")
+    parts.append(
+        f'<line x1="{pad_l}" y1="{pad_t + ph}" x2="{pad_l + pw}" y2="{pad_t + ph}" '
+        'stroke="#999"/>'
+    )
+    parts.append(
+        f'<line x1="{pad_l}" y1="{pad_t}" x2="{pad_l}" y2="{pad_t + ph}" stroke="#999"/>'
+    )
+    parts.append(
+        f'<text x="{pad_l + pw / 2:.0f}" y="{SCATTER_H - 6}" font-size="10" '
+        'fill="#444" text-anchor="middle">feature-TRE (µm, log scale)</text>'
+    )
+    parts.append(
+        f'<text x="12" y="{pad_t + ph / 2:.0f}" font-size="10" fill="#444" '
+        f'transform="rotate(-90 12 {pad_t + ph / 2:.0f})" text-anchor="middle">'
+        "cell displacement p50 (µm, log scale)</text>"
+    )
+    parts.append(
+        f'<text x="{pad_l}" y="{pad_t - 10}" font-size="10" fill="#666">'
+        f"shaded: the two measures agree within {ratio_band:g}×"
+        + (f"; {dropped} point(s) not plottable" if dropped else "")
+        + "</text>"
+    )
+    parts.append("</svg>")
+    return "".join(parts)
+
+
 def reconciliation_section(tre_dir, seg_qc_dir):
-    """Render the feature-TRE vs cell-displacement reconciliation table."""
+    """Render the feature-TRE vs cell-displacement reconciliation as a log-log scatter."""
     title = "Feature-TRE vs Cell-Displacement Reconciliation"
     rows = reconcile_rows(tre_dir, seg_qc_dir)
     if not rows:
@@ -951,31 +1059,33 @@ def reconciliation_section(tre_dir, seg_qc_dir):
             "found to reconcile.</p>",
         )
 
-    def fmt(v):
-        return f"{v:.3f}" if isinstance(v, float) else "—"
-
-    body = [
-        "<p style='font-size:0.85rem;color:#666;margin:0 0 8px;'>"
-        "VALIS feature-TRE is measured on its own SuperPoint/SuperGlue keypoints (optimistic); "
-        "cell displacement is measured on independently segmented nuclei. A flagged row means "
-        f"the two disagree by more than {RECONCILE_DIVERGENCE_RATIO:g}× — worth a look.</p>",
-        "<table><thead><tr><th>Slide</th><th>Stage</th><th>Feature-TRE (µm)</th>"
-        "<th>Cell disp. p50 (µm)</th><th>Agreement</th></tr></thead><tbody>",
+    points = [
+        (r["feature_tre_um"], r["cell_disp_um"], f"{r['slide']} · {r['stage']}")
+        for r in rows
+        if r["divergent"] is not None
     ]
-    for r in rows:
-        if r["divergent"] is None:
-            flag = "<span style='color:#999;'>n/a</span>"
-        elif r["divergent"]:
-            flag = "<span style='color:#c0392b;font-weight:600;'>⚠ divergent</span>"
-        else:
-            flag = "<span style='color:#27ae60;'>✓ agree</span>"
-        body.append(
-            f"<tr><td>{r['slide']}</td><td>{r['stage']}</td>"
-            f"<td>{fmt(r['feature_tre_um'])}</td><td>{fmt(r['cell_disp_um'])}</td>"
-            f"<td>{flag}</td></tr>"
+    n_divergent = sum(1 for r in rows if r["divergent"])
+    n_no_verdict = sum(1 for r in rows if r["divergent"] is None)
+    caption = (
+        "<p style='font-size:0.85rem;color:#666;margin:0 0 8px;'>"
+        "The registration method's feature-TRE is measured on its own keypoints "
+        "(optimistic); cell displacement is measured on independently segmented "
+        "nuclei. Each point is one slide-stage. A point outside the shaded band "
+        f"disagrees by more than {RECONCILE_DIVERGENCE_RATIO:g}× — worth a look. "
+        f"{n_divergent} of {len(points)} comparable point(s) diverge"
+        + (
+            f"; {n_no_verdict} slide-stage row(s) had no comparable pair."
+            if n_no_verdict
+            else "."
         )
-    body.append("</tbody></table>")
-    return section(title, "\n".join(body))
+        + "</p>"
+    )
+    return section(
+        title,
+        caption
+        + "\n"
+        + _reconciliation_scatter_svg(points, RECONCILE_DIVERGENCE_RATIO),
+    )
 
 
 # bin/warp_seg_qc.py's write_per_cell_csv writes one row per matched cell pair,
