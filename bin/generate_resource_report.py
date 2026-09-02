@@ -431,6 +431,47 @@ def memory_headroom_svg(roll, top=15):
     )
 
 
+def failure_cost_svg(roll, top=15):
+    """What the run's failures and retries actually cost, per process.
+
+    Ranked by RESERVED MEMORY-HOURS, not by failure count. A count alone cannot
+    distinguish three cheap failures from one that held 450 GB for six hours, and
+    the second is the reason this panel exists: a retried task holds its whole
+    reservation for its whole wall-time and delivers nothing, which is invisible
+    in a green build. Measured across one real run, 19.6% of all reserved GB.h
+    went this way.
+    """
+    rows = [r for r in roll if r.get("n_failed")]
+    rows.sort(key=lambda r: -(r.get("failed_gb_h") or 0.0))
+    rows = rows[:top]
+    if not rows:
+        return ""
+    vmax = max((r.get("failed_gb_h") or 0.0) for r in rows) or 1.0
+    bar_w = _PANEL_W - _LABEL_W - _VALUE_W
+    parts = []
+    for i, r in enumerate(rows):
+        y = i * _ROW_H
+        cost = r.get("failed_gb_h") or 0.0
+        parts.append(
+            f"<text x='0' y='{y + 15}' font-size='12' fill='#333'>"
+            f"{_esc(short_process(r['process']))}</text>"
+            f"<rect class='fail' x='{_LABEL_W}' y='{y + 4}' "
+            f"width='{max(1.0, bar_w * cost / vmax):.1f}' height='{_ROW_H - 8}' "
+            f"fill='#c0392b'>"
+            f"<title>{_esc(r['process'])}: {r['n_failed']} failed task(s), "
+            f"{fmt_secs(r.get('failed_realtime_s'))} of wall-time holding "
+            f"{cost:.0f} reserved GB-hours</title></rect>"
+            f"<text x='{_LABEL_W + bar_w + 8}' y='{y + 15}' font-size='12' "
+            f"fill='#c0392b'>{r['n_failed']} failed, {cost:.0f} GB&#183;h</text>"
+        )
+    return _svg(
+        _PANEL_W,
+        len(rows) * _ROW_H + 4,
+        "".join(parts),
+        "Reserved memory-hours lost to failed and retried tasks",
+    )
+
+
 _CSS = """
 body{font-family:'Segoe UI',Arial,sans-serif;background:#f4f6f9;color:#333;margin:0}
 header{background:#1a2332;color:#fff;padding:24px 40px}

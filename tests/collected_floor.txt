@@ -143,4 +143,15 @@
 # test_memory_headroom_marks_a_process_that_exceeded_its_request,
 # test_memory_headroom_is_empty_when_nothing_is_plottable); no other test
 # count moved.
-1350
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p10-resource-report, phase 10 task 7
+# (generate_resource_report.py: Panel 3, failure_cost_svg): 1338 passed,
+# 13 skipped, 0 failed -- 1351 collected, up from the prior entry's 1348.
+# The increase is exactly the 3 new cases in
+# tests/test_generate_resource_report.py
+# (test_failure_cost_draws_one_bar_per_failing_process,
+# test_failure_cost_reports_the_reserved_memory_hours_not_just_the_count,
+# test_failure_cost_is_empty_when_nothing_failed); no other test count moved.
+1353

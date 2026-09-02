@@ -577,3 +577,51 @@ def test_memory_headroom_is_empty_when_nothing_is_plottable():
     grr = _load()
     assert grr.memory_headroom_svg([]) == ""
     assert grr.memory_headroom_svg([_roll_row("A", 1.0)]) == ""
+
+
+def test_failure_cost_draws_one_bar_per_failing_process():
+    grr = _load()
+    roll = [
+        _roll_row("MIRAGE:A:CLEAN", 100.0),
+        _roll_row(
+            "MIRAGE:A:FLAKY",
+            100.0,
+            n_failed=3,
+            failed_gb_h=450.0,
+            failed_realtime_s=5400.0,
+        ),
+        _roll_row(
+            "MIRAGE:A:WORST",
+            100.0,
+            n_failed=1,
+            failed_gb_h=900.0,
+            failed_realtime_s=3600.0,
+        ),
+    ]
+
+    svg = grr.failure_cost_svg(roll)
+
+    assert svg.count("<rect class='fail'") == 2  # CLEAN is not drawn
+    assert "CLEAN" not in svg
+    # Ranked by cost, not by count: one 900 GB.h failure outranks three 450s.
+    assert svg.index("WORST") < svg.index("FLAKY")
+    assert "3 failed" in svg
+    assert "1 failed" in svg
+
+
+def test_failure_cost_reports_the_reserved_memory_hours_not_just_the_count():
+    """A count alone cannot distinguish three cheap failures from one that held
+    450 GB for six hours -- and the second is the whole reason this panel is
+    here."""
+    grr = _load()
+    svg = grr.failure_cost_svg(
+        [_roll_row("A", 1.0, n_failed=1, failed_gb_h=2700.0, failed_realtime_s=21600.0)]
+    )
+    assert "2700" in svg
+    assert "GB" in svg and "h" in svg
+
+
+def test_failure_cost_is_empty_when_nothing_failed():
+    grr = _load()
+    assert grr.failure_cost_svg([_roll_row("A", 1.0)]) == ""
+    assert grr.failure_cost_svg([]) == ""
