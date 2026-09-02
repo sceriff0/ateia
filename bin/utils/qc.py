@@ -48,6 +48,7 @@ from tiled_io import decimation_factor, open_lazy, read_decimated
 __all__ = [
     "create_registration_qc",
     "create_nuclear_overlay",
+    "compose_on_reference_canvas",
     "autoscale_for_display",
 ]
 
@@ -93,6 +94,52 @@ def autoscale_for_display(img: NDArray, method: str = "minmax") -> NDArray[np.ui
         return autoscale(img, low_p=1.0, high_p=99.0)
     else:
         raise ValueError(f"Unknown method: {method}. Use 'minmax' or 'percentile'.")
+
+
+def compose_on_reference_canvas(ref: NDArray, mov: NDArray) -> NDArray:
+    """Place ``mov`` on ``ref``'s canvas at the origin by pad-or-crop.
+
+    Parameters
+    ----------
+    ref : NDArray
+        Reference plane (2-D). Only its ``shape`` is used.
+    mov : NDArray
+        Moving plane (2-D), of any shape.
+
+    Returns
+    -------
+    NDArray
+        An array of exactly ``ref.shape`` and ``mov.dtype`` holding ``mov``
+        anchored at ``(0, 0)``: zero-filled where ``mov`` is smaller, truncated
+        where it is larger.
+
+    Notes
+    -----
+    **Pad-or-crop, never rescale — this is the whole point of the function.**
+    The "before" panel of the registration QC figure overlays the NATIVE moving
+    slide on the reference. Rescaling a differently-sized native image onto the
+    reference's shape would absorb the scale component of the misalignment into
+    the resampling, so the panel would understate the pre-registration error and
+    make registration look better than it was. Padding and cropping preserve
+    every pixel's original position in the reference frame, which is what a
+    reader of the figure is entitled to assume they are seeing.
+
+    Origin-aligned rather than centre-aligned because that is the convention
+    both registration backends use: VALIS resolves slides into a shared space
+    whose origin is the reference's, and the tiled/STARE backend warps each
+    moving slide into the reference's shape from the same corner.
+    """
+    if ref.ndim != 2 or mov.ndim != 2:
+        raise ValueError(
+            f"compose_on_reference_canvas expects 2-D planes, got "
+            f"ref.ndim={ref.ndim}, mov.ndim={mov.ndim}"
+        )
+    h, w = ref.shape
+    out = np.zeros((h, w), dtype=mov.dtype)
+    hh = min(h, mov.shape[0])
+    ww = min(w, mov.shape[1])
+    out[:hh, :ww] = mov[:hh, :ww]
+    return out
 
 
 def create_nuclear_overlay(
