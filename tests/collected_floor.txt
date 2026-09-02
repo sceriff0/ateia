@@ -225,4 +225,29 @@
 # reworded instead to contain no `.nf`/`.groovy`/`modules.config` substring at
 # all -- test_nfmodel.py itself is therefore byte-identical to the prior
 # entry's tree and contributes no new case; no other test count moved.
-1385
+#
+# RE-MEASURED 2026-09-02 on release/p10-resource-report, final-review fix wave
+# (I1/M2/M3/M4/M5/M6/M7 against bin/generate_resource_report.py, main.nf and
+# tests/main.nf.test): `pytest --collect-only -q tests/ --ignore=tests/testdata
+# --ignore=tests/modules --ignore=tests/subworkflows --ignore=tests/integration`
+# reports "1394 tests collected", up from the prior entry's 1385. The increase
+# is exactly the 9 new cases in tests/test_generate_resource_report.py
+# (test_size_vs_runtime_legend_ranked_by_point_count_not_first_appearance,
+# test_size_vs_runtime_caps_points_per_series,
+# test_size_vs_runtime_reports_drop_count_when_nothing_is_plottable,
+# test_build_html_size_panel_is_not_falsely_empty_when_everything_dropped,
+# test_parse_percent_rejects_non_finite_strings,
+# test_run_totals_peak_cpu_guards_against_non_finite,
+# test_walltime_bars_percentage_is_share_of_total_not_longest,
+# test_cli_exits_nonzero_on_a_header_only_trace,
+# test_no_trace_message_does_not_show_the_broken_cli_boolean_form); no other
+# test count moved. A full run with MIRAGE_STRICT_SKIPS=1 gives 1381 passed,
+# 13 skipped, 0 failed -- 1381 + 13 = 1394, matching the collect count exactly.
+# One of the new docstrings (test_cli_exits_nonzero_on_a_header_only_trace)
+# first named the entry script by its literal filename, which -- combined with
+# this file's pre-existing `.read_text()` calls -- tripped
+# test_nfmodel.py's `_discover_nf_source_readers()` substring heuristic even
+# though the test parses no Nextflow source at all; reworded to name it only
+# as "the entry script", the same fix shape as the prior entry's three prose
+# mentions, and test_nfmodel.py itself is unchanged.
+1394
