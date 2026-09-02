@@ -250,4 +250,10 @@
 # though the test parses no Nextflow source at all; reworded to name it only
 # as "the entry script", the same fix shape as the prior entry's three prose
 # mentions, and test_nfmodel.py itself is unchanged.
-1394
+#
+# RE-MEASURED 2026-09-02 on release/p09-qc-report, task 1 (QC report section-list
+# characterisation test): 1324 passed, 13 skipped, 0 failed -- 1337 collected, up
+# from the prior entry's 1336. The increase is exactly one test,
+# test_report_section_headings_are_exactly_these, added to
+# tests/test_generate_qc_report.py; no other test count moved.
+1395

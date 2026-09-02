@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -228,6 +229,77 @@ def test_end_to_end_cli_smoke(tmp_path):
         "Software Versions",
     ]:
         assert header in html, f"missing section: {header}"
+
+
+# ── characterisation: the report's section list ────────────────────────────────
+# Removing a section must be a DELIBERATE edit to the list below, not a silent
+# consequence of deleting a function. Before this test existed the only check on
+# the section set was `test_end_to_end_cli_smoke`'s `in html` loop, which is
+# satisfied by a section that is present and says nothing about one that is gone
+# for the wrong reason, about their ORDER, or about a section appearing twice.
+_SECTION_H2 = re.compile(r"<h2>(.*?)</h2>", re.S)
+
+
+def _section_titles(report_html):
+    """Every <h2> the report rendered, in document order."""
+    return [m.group(1).strip() for m in _SECTION_H2.finditer(report_html)]
+
+
+def test_report_section_headings_are_exactly_these(tmp_path):
+    for sub in (
+        "preprocess_qc",
+        "registration_qc",
+        "registration_tre",
+        "postprocess_qc",
+        "seg_qc",
+        "seg_residuals",
+    ):
+        (tmp_path / sub).mkdir()
+    rs = _summary(tmp_path)
+    v = tmp_path / "v.yml"
+    v.write_text('"A:B":\n    tool: 1.0\n')
+    out = tmp_path / "report.html"
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--preprocess-qc",
+            str(tmp_path / "preprocess_qc"),
+            "--registration-qc",
+            str(tmp_path / "registration_qc"),
+            "--registration-tre",
+            str(tmp_path / "registration_tre"),
+            "--postprocess-qc",
+            str(tmp_path / "postprocess_qc"),
+            "--seg-qc",
+            str(tmp_path / "seg_qc"),
+            "--seg-residuals",
+            str(tmp_path / "seg_residuals"),
+            "--run-summary",
+            str(rs),
+            "--versions",
+            str(v),
+            "--output",
+            str(out),
+            "--data-dir",
+            str(tmp_path / "data"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    assert _section_titles(out.read_text()) == [
+        "Run Summary",
+        "Pipeline Stages",
+        "Sample Manifest",
+        "Preprocessing QC",
+        "Registration QC",
+        "Feature-TRE vs Cell-Displacement Reconciliation",
+        "Per-Cell Registration Residuals",
+        "Segmentation Overlays",
+        "Postprocessing QC",
+        "Software Versions",
+    ]
 
 
 # ── (C) feature-TRE vs cell-displacement reconciliation ─────────────────────────
