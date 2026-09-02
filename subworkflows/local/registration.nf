@@ -146,9 +146,8 @@ workflow REGISTRATION {
     // ========================================================================
     // STEP 3: REGISTER EACH PATIENT GROUP
     // ========================================================================
-    // The single-slide passthrough branch, the method dispatch (VALIS / tiled) and
-    // the checkpoint manifest all live in REGISTER_PATIENT, which add_cycle.nf also
-    // calls — it used to reimplement them, and had lost two of the three.
+    // The single-slide passthrough branch, the method dispatch (VALIS / tiled) and the
+    // checkpoint manifest all live in REGISTER_PATIENT, which add_cycle.nf also calls.
     //
     // The GROUPING above stays here: the linear path's sized groupKey has no
     // counterpart on the add_cycle path, whose reference is the frozen prior one.

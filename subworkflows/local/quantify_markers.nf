@@ -7,10 +7,8 @@
 
         split-channel stacks -> per-marker fan-out -> QUANTIFY -> per-patient group
 
-    Both callers used to carry their own copy of this chain and the copies drifted:
-    add_cycle grouped the quantification CSVs with a bare `.groupTuple()` and so lost
-    the `groupKey(patient_id, channels_count)` streaming hint that the postprocessing
-    copy had. There is now exactly ONE grouping implementation and it carries the hint.
+    ONE grouping implementation, shared: it carries the `groupKey(patient_id, channels_count)`
+    streaming hint, which a per-caller copy is free to lose and which nothing else asserts.
 
     The two callers differ only in where the masks come from (SEGMENT vs the prior
     run's reused masks) and in what they do with the grouped CSVs afterwards
@@ -27,9 +25,7 @@
 
 include { QUANTIFY } from '../../modules/local/quantify'
 
-// The pipeline's only --debug_channels view helper. It used to be duplicated in
-// postprocess.nf; that copy went with the chain its `.view()` calls annotate, so there
-// is one implementation and one caller file. Off unless --debug_channels, log-only.
+// The pipeline's only --debug_channels view helper. Off unless --debug_channels, log-only.
 def viewIfDebug(channel, Closure formatter) {
     return params.debug_channels ? channel.view(formatter) : channel
 }
@@ -41,9 +37,8 @@ def viewIfDebug(channel, Closure formatter) {
 // this file's CSV grouping above uses, for the same reason: an under-count here is
 // the worse of the two grouping's failure modes (see the GROUP comment above) — it
 // trips MERGE_AND_PYRAMID's memory closure (conf/modules.config:330-337) and
-// ABORTS the run outright, rather than silently degrading. add_cycle's own copy of
-// this grouping used to be a bare `.groupTuple()` with no size hint at all — this
-// is the fix, and the reason it now lives in exactly one place.
+// ABORTS the run outright, rather than silently degrading — which is why the size hint
+// is not optional and why this grouping lives in exactly one place.
 //
 // ch_tagged: [patient_id, channels_count, tiff] — one entry per patient+marker,
 // ALREADY deduplicated by [patient_id, marker] by the caller (postprocess.nf keeps

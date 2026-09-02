@@ -15,9 +15,6 @@ Examples
 
 Notes
 -----
-This module consolidates QC generation code that was previously embedded
-in registration scripts (register_cpu.py, register_gpu.py).
-
 ``create_registration_qc`` reads its nuclear/fiducial channel through
 ``tiled_io.open_lazy`` + ``read_decimated`` rather than ``tifffile.imread``ing
 every marker channel of the whole slide. What that removes is the

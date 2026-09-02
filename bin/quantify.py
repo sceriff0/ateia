@@ -165,17 +165,16 @@ def compute_compartment_intensities(
     cell_sum = np.bincount(flat_cell, weights=flat_val, minlength=n)
     cell_count = np.bincount(flat_cell, minlength=n)
 
-    # The label set comes from the bincount that was needed anyway -- one linear pass whose
-    # non-zero bins ARE the labels present, ascending. This used to be `np.unique(cell_mask)`,
-    # a comparison sort over every pixel (1.6x10^9 on a 40k x 40k slide) computed immediately
-    # before this bincount. Identical output: np.unique returns ascending distinct values,
-    # np.nonzero(counts) returns ascending indices with at least one pixel. The dtype is kept
-    # as the mask's so the published `label` column is unchanged.
+    # The label set comes from the bincount that was needed anyway: its non-zero bins ARE the
+    # labels present, ascending. Output is identical to `np.unique(cell_mask)` -- np.unique
+    # returns ascending distinct values and np.nonzero(counts) returns ascending indices with at
+    # least one pixel -- at one linear pass instead of a comparison sort over every pixel
+    # (1.6e9 on a 40k x 40k slide). The dtype is kept as the mask's so the published `label`
+    # column is unchanged.
     #
-    # NOTE: since flat_cell/flat_val are now foreground-only, bin 0 of cell_count/cell_sum (and
-    # of the Nucleus/Cytoplasm bincounts below) no longer accumulates background pixels the way
-    # it did before this foreground restriction -- only bin 0 differs, and bin 0 is discarded by
-    # `valid_labels != 0` right below and never read by anything else.
+    # flat_cell/flat_val are foreground-only, so bin 0 of these bincounts (and of the
+    # Nucleus/Cytoplasm ones below) does not accumulate background. Only bin 0 differs, and it is
+    # discarded by `valid_labels != 0` immediately below and read by nothing else.
     # Guarded by tests/test_no_full_mask_unique.py.
     valid_labels = np.nonzero(cell_count)[0]
     valid_labels = valid_labels[valid_labels != 0].astype(cell_mask.dtype, copy=False)

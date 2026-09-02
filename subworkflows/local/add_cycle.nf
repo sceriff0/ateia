@@ -34,8 +34,7 @@
 
 include { PREPROCESSING            } from './preprocess'
 // The registration adapter dispatch, the single-slide passthrough branch and the
-// checkpoint manifest are REGISTER_PATIENT's, shared with registration.nf. This file
-// used to call VALIS_ADAPTER directly and rebuild the surrounding wiring by hand.
+// checkpoint manifest are REGISTER_PATIENT's, shared with registration.nf.
 include { REGISTER_PATIENT         } from './register_patient'
 include { EXTRACT_MASK_SERIES      } from '../../modules/local/extract_mask_series'
 include { EXTRACT_CELL_PROPERTIES  } from '../../modules/local/extract_cell_properties'
@@ -45,11 +44,8 @@ include { SPLIT_CHANNELS as SPLIT_PRIOR_PYRAMID } from '../../modules/local/spli
 include { MERGE_QUANT_CSVS         } from '../../modules/local/merge_quant_csvs'
 include { GENERATE_REGISTRATION_QC } from '../../modules/local/generate_registration_qc'
 include { SEG_QC                   } from './seg_qc'
-// Shared with subworkflows/local/postprocess.nf. These used to be copied inline here;
-// the copy had already drifted (bare .groupTuple() instead of the sized groupKey).
-// groupTiffsByPatient is a plain function, not a process/workflow, but Nextflow's
-// `include` pulls in either — it is the fix for this file's OWN pyramid-channel
-// grouping, which had drifted the same way (see its call site below).
+// Shared with subworkflows/local/postprocess.nf. groupTiffsByPatient is a plain
+// function, not a process/workflow, but Nextflow's `include` pulls in either.
 include { QUANTIFY_MARKERS; groupTiffsByPatient } from './quantify_markers'
 include { ASSEMBLE_EXPORT          } from './assemble_export'
 // The postprocessing checkpoint writer, shared with postprocess.nf. Writing it from

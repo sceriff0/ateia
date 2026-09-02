@@ -308,7 +308,15 @@ ALLOWED_LINES = {
         # Composition check: 1253 + 12 = 1265, and `wc -l conf/modules.config` rose
         # 1340 -> 1352, the same 12. Re-pinned directly from the file, not computed:
         #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1265
-        1265: (
+        # 1265 -> 1256 on 2026-09-02 (release/p02-cleanliness, Task 11): -9 lines
+        # compressing four refactor-diary comments above this line (in the
+        # TILED_REG_TILE, TILED_COARSE, TILED_STITCH and SPLIT_CHANNELS blocks) down to
+        # their trap-guarding content -- the measurements and mechanisms stayed, the
+        # "this used to be"/"previously said" framing did not. Composition check:
+        # 1265 - 9 = 1256, and `wc -l conf/modules.config` fell 1352 -> 1343, the same 9.
+        # Re-pinned directly from the file, not computed:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1256
+        1256: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."
