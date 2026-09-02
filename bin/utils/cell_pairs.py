@@ -79,6 +79,7 @@ class PolySet:
 
     @property
     def n_rings(self) -> int:
+        """The total number of rings across every feature in this set."""
         return int(self.ring_feat.size)
 
     def with_xy(self, xy) -> "PolySet":

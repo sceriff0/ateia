@@ -139,9 +139,27 @@ class StageCheckpoint:
 
     @property
     def slide_names(self):
+        """The slide names this snapshot recorded, in manifest order.
+
+        Returns
+        -------
+        list of str
+            Empty when the manifest carries no ``slides`` block.
+        """
         return list(self.manifest.get("slides", {}).keys())
 
     def has_slide(self, slide_name) -> bool:
+        """Whether this snapshot recorded ``slide_name``.
+
+        Parameters
+        ----------
+        slide_name : str
+            Compared after ``str()`` coercion, matching ``fwd_dxdy``'s lookup.
+
+        Returns
+        -------
+        bool
+        """
         return str(slide_name) in self.manifest.get("slides", {})
 
     def fwd_dxdy(self, slide_name):

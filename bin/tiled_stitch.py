@@ -115,6 +115,16 @@ def _ome_metadata(channel_names, n_channels, pixel_size):
 
 
 def main(argv=None) -> int:
+    """CLI entry point: warp the moving slide through the manifest, streaming by tile.
+
+    Writes the registered OME-TIFF one output tile at a time, so peak memory is
+    set by ``--out-tile`` and the source crop it draws from, never by the slide.
+
+    Returns
+    -------
+    int
+        0 on success.
+    """
     configure_logging()
     ap = argparse.ArgumentParser(description="STARE streaming stitch via the manifest.")
     ap.add_argument("--moving", required=True)

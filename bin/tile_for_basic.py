@@ -262,6 +262,19 @@ def tile_for_basic(
 
 
 def parse_args(argv=None):
+    """Parse the pseudo-FOV tiling CLI.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argument vector; ``None`` reads ``sys.argv[1:]``.
+
+    Returns
+    -------
+    argparse.Namespace
+        ``image``, ``output``, ``sidecar``, ``channels``, ``fov_size``,
+        ``skip_nuclear``, ``nuclear_markers``, ``log_level``.
+    """
     parser = argparse.ArgumentParser(
         description="Write a slide's pseudo-FOV tiles as a multi-site CZYX OME-TIFF."
     )
@@ -289,6 +302,13 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    """CLI entry point: write the slide's pseudo-FOV tiles and their position sidecar.
+
+    Returns
+    -------
+    int
+        0 on success.
+    """
     args = parse_args(argv)
     configure_logging(getattr(logging, args.log_level.upper(), logging.INFO))
     tile_for_basic(

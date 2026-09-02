@@ -412,6 +412,19 @@ def apply_basic_profiles(
 
 
 def parse_args(argv=None):
+    """Parse the BASICPY-apply CLI.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argument vector; ``None`` reads ``sys.argv[1:]``.
+
+    Returns
+    -------
+    argparse.Namespace
+        ``image``, ``sidecar``, ``flatfield``, ``darkfield`` (optional),
+        ``output``, ``pixel_size`` (may be the literal ``'auto'``), ``log_level``.
+    """
     parser = argparse.ArgumentParser(
         description="Apply BASICPY flatfield/darkfield profiles and reassemble the slide."
     )
@@ -432,6 +445,13 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    """CLI entry point: apply the flatfield/darkfield profiles and reassemble the slide.
+
+    Returns
+    -------
+    int
+        0 on success. Failures propagate as exceptions.
+    """
     args = parse_args(argv)
     configure_logging(getattr(logging, args.log_level.upper(), logging.INFO))
     apply_basic_profiles(

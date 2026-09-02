@@ -145,6 +145,19 @@ def _warn_on_heterogeneous_scales(report: dict, logger) -> None:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    """CLI entry point: resolve and validate every image's pixel size before the run starts.
+
+    Collects a verdict for EVERY image before deciding anything -- see the module
+    docstring; nothing here may break out of the loop early, because a
+    mixed-magnification cohort is legitimate and must be reported whole.
+
+    Returns
+    -------
+    int
+        0 when every image resolved (or was confirmed against the operator's
+        value); 1 when ``--pixel-size`` could not be parsed or an image's scale
+        is unresolvable.
+    """
     configure_logging()
     args = _parse_args(argv)
 

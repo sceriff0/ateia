@@ -94,6 +94,17 @@ def _timed_read(src, index, factor, which):
 
 
 def main(argv=None) -> int:
+    """CLI entry point: estimate STARE's global anchor M0 and emit the tile plan.
+
+    Reads the nuclear/fiducial channel of both slides at a thumbnail bounded by
+    ``--coarse-max-dim``, matches with DISK+LightGlue, and writes the M0 JSON
+    plus the tile-plan CSV that ``tiled_reg_tile.py`` fans out over.
+
+    Returns
+    -------
+    int
+        0 on success.
+    """
     configure_logging()
     ap = argparse.ArgumentParser(description="STARE coarse anchor + tile plan.")
     ap.add_argument("--reference", required=True)

@@ -585,6 +585,22 @@ def _attach_phenotypes(zarr_path: str, csv_path: str, gate_tree: Optional[str]) 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
 def parse_args(argv=None):
+    """Parse the SpatialData-export CLI, which has two modes.
+
+    Attach mode (``--attach-phenotypes`` + ``--zarr``) writes FlowPath phenotypes
+    into an existing store. Pipeline mode builds a new store and requires
+    ``--quant-csv``, ``--contours-json``, ``--cell-mask`` and ``--output``.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argument vector; ``None`` reads ``sys.argv[1:]``.
+
+    Returns
+    -------
+    argparse.Namespace
+        The parsed arguments for whichever mode was selected.
+    """
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--attach-phenotypes", help="FlowPath phenotype CSV (attach mode)")
     ap.add_argument("--gate-tree", help="FlowPath gate-tree JSON (attach mode)")
@@ -617,6 +633,13 @@ def parse_args(argv=None):
 
 
 def main(argv=None) -> int:
+    """CLI entry point: attach phenotypes to an existing .zarr, or build a new one.
+
+    Returns
+    -------
+    int
+        0 on success. A missing mode-required argument raises ``SystemExit``.
+    """
     configure_logging(level=logging.INFO)
     a = parse_args(argv)
 

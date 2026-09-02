@@ -200,6 +200,19 @@ def join_size(trace_rows, size_map):
 
 
 def fmt_bytes(b):
+    """Format a byte count for display, e.g. ``3.2 GB``.
+
+    Parameters
+    ----------
+    b : float or None
+        Bytes, or ``None`` for a missing reading.
+
+    Returns
+    -------
+    str
+        ``'N/A'`` when ``b`` is ``None``; otherwise one decimal place and the
+        largest unit at or below 1024 of the next one, capped at TB.
+    """
     if b is None:
         return "N/A"
     b = float(b)
@@ -210,6 +223,18 @@ def fmt_bytes(b):
 
 
 def fmt_secs(s):
+    """Format a duration in seconds as ``1h 2m 3s``, dropping empty leading units.
+
+    Parameters
+    ----------
+    s : float or None
+        Seconds, or ``None`` for a missing reading.
+
+    Returns
+    -------
+    str
+        ``'N/A'`` when ``s`` is ``None``.
+    """
     if s is None:
         return "N/A"
     s = int(s)
@@ -262,6 +287,24 @@ def _section(title, body):
 def build_html(
     trace_rows, size_map, timestamp, native_report=None, native_timeline=None
 ):
+    """Render the whole self-contained resource report as one HTML string.
+
+    Parameters
+    ----------
+    trace_rows : list of dict
+        Rows parsed from Nextflow's ``trace.txt``, already joined with input sizes.
+    size_map : dict
+        Process/sample key -> input bytes, from the aggregated size log.
+    timestamp : str
+        Generation time, rendered into the header.
+    native_report, native_timeline : str, optional
+        Paths to Nextflow's own ``report.html`` / ``timeline.html``, linked when given.
+
+    Returns
+    -------
+    str
+        A complete HTML document with the CSS inlined; no external assets.
+    """
     parts = [
         "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>",
         "<meta name='viewport' content='width=device-width, initial-scale=1.0'>",
@@ -414,6 +457,14 @@ def build_html(
 
 
 def parse_args():
+    """Parse the resource-report CLI.
+
+    Returns
+    -------
+    argparse.Namespace
+        ``trace`` (default ``.trace/trace.txt``), ``size_log``, ``output``,
+        ``native_report``, ``native_timeline``.
+    """
     p = argparse.ArgumentParser(
         description="Generate MIRAGE computational-resource report"
     )
@@ -426,6 +477,13 @@ def parse_args():
 
 
 def main():
+    """CLI entry point: join the trace with the size log and write the HTML report.
+
+    Returns
+    -------
+    int
+        0 on success.
+    """
     args = parse_args()
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     trace_rows = parse_trace(args.trace)

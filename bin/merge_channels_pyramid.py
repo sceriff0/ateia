@@ -51,6 +51,12 @@ __all__ = ["main"]
 
 
 def log(msg):
+    """Emit one INFO line through this module's logger.
+
+    A one-argument shim kept because the pyramid writer's progress reporting is
+    dense and threaded through deeply nested loops; it takes a preformatted
+    string rather than a %-format so call sites stay one line.
+    """
     logger.info(msg)
 
 

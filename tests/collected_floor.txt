@@ -83,3 +83,12 @@
 # the prior entry's 1290/12 split at the same 1303 total, i.e. pre-existing
 # environment drift within FLOOR_DRIFT, not something this task introduced.
 1335
+
+#
+# RE-MEASURED 2026-09-02 on release/p02-cleanliness, task 9 (docstring
+# coverage guard): 1323 passed, 13 skipped, 0 failed -- 1337 collected, up
+# from the prior entry's 1335. The increase is exactly
+# tests/test_docstring_coverage.py's 2 new cases
+# (test_the_walk_actually_visited_the_tree and
+# test_no_public_definition_lacks_a_docstring); no other test count moved.
+1337
