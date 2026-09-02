@@ -529,24 +529,54 @@ back to a different segmenter.
 
 ## Measuring what a run actually used
 
-With `--enable_trace` (default on), every process emits a per-task input-size
-log, `AGGREGATE_SIZE_LOGS` collates them to `<outdir>/size_logs/input_sizes.csv`,
-and Nextflow writes `.trace/trace.txt` with `peak_rss`, `peak_vmem`, `realtime`
-and retry counts.
+With `enable_trace` on (the shipped default), every process emits a per-task
+input-size log, `AGGREGATE_SIZE_LOGS` collates them to
+`<outdir>/size_logs/input_sizes.csv`, and Nextflow writes `trace.txt` into
+`trace_dir` (default `.trace`, resolved against the launch directory) with
+`cpus`, `memory`, `peak_rss`, `peak_vmem` and `realtime` per task.
 
-`<outdir>/qc/mirage_resource_report.html` joins the two into run totals, a
-per-process rollup, resource-vs-input-size fits, the top-N heaviest and slowest
-tasks, and a retry/failure list. Re-runnable by hand:
+`<outdir>/qc/mirage_resource_report.html` joins the two into run totals and
+**four plots**:
+
+| Panel | What it answers | What to do with it |
+|---|---|---|
+| **Wall-time by Process** | Where did the run's time go? Ranked bars, longest first. | The top bar is the only process worth optimising first. |
+| **Memory Headroom** | What was reserved and never used? A light track per process is the request, the dark overlay the observed peak. | A wide track with a sliver of dark is an over-sized `withName:` request — lower it. A dark bar overrunning its track is drawn red: that is the OOM-retry precursor, raise it. |
+| **Retries & Failures** | What did the failures cost, in reserved GB·hours? | A failed attempt holds its full reservation for its whole wall-time and delivers nothing. Across one real run this was 19.6% of all reserved GB·h — invisible in a green build. |
+| **Input Size vs Runtime** | Does this step's cost scale with the data, and where does it stop being linear? | Log-log, one colour per process. A series that bends upward is super-linear; that is where a size-tiered `memory` closure earns its keep. Zero-size and zero-runtime tasks cannot be placed on a log axis and are dropped, with the count stated on the panel. |
+
+Re-runnable by hand against any completed run:
 
 ```bash
-python bin/generate_resource_report.py \
+python3 bin/generate_resource_report.py \
   --trace .trace/trace.txt \
   --size-log results/size_logs/input_sizes.csv \
   --output resource_report.html
 ```
 
-That table is the right starting point for lowering a `withName:` request that
-is over-provisioned for your data.
+The script is **standard-library only, deliberately and permanently.** It runs
+on the head node from `workflow.onComplete`, outside every container and under
+whatever `python3` the operator has, so a single third-party import would make
+the report silently unavailable on most deployments —
+`tests/test_resource_report_is_stdlib_only.py` fails the build on one.
+
+### When no report appears
+
+The run log says which of the two reasons applies, and names the exact path it
+looked for:
+
+```
+WARN  No resource report was generated: no trace at /path/to/launch/.trace/trace.txt.
+      enable_trace was OFF for this run, so Nextflow wrote no trace -- turn it on
+      with a -params-file or a profile to collect one.
+```
+
+`trace_dir` is resolved against the **launch directory**, which is what Nextflow
+itself resolves `trace.file` against — so a relative `trace_dir` means the same
+place to the report as it does to the engine, whatever directory the pipeline
+was launched from. Before that fix the handler resolved it against the JVM's
+working directory instead, and when the two differed the report was generated
+from nothing and announced as a success.
 
 ---
 

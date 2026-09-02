@@ -344,11 +344,12 @@ Two things to know before reading the numbers:
 
 [cse]: https://doi.org/10.1091/mbc.E22-08-0364
 - **`qc/mirage_resource_report.html`** — computational-resource report built from
-  the per-task size logs and Nextflow `trace.txt`: run totals, per-process
-  rollup, resource-vs-input-size, top-N heaviest/slowest tasks, and
-  retries/failures. Generated at run completion when `enable_trace` is set;
-  re-runnable by hand via `bin/generate_resource_report.py`. Complements
-  Nextflow's native `report.html` / `timeline.html`.
+  the per-task size logs and Nextflow `trace.txt`: run totals plus four plots:
+  wall-time by process, memory headroom (requested vs observed), the reserved
+  GB·hours lost to failures and retries, and input size against runtime.
+  Generated at run completion when `enable_trace` is set; re-runnable by hand
+  via `bin/generate_resource_report.py`. Complements Nextflow's native
+  `report.html` / `timeline.html`.
 
 ## Cluster & resources
 

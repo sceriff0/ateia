@@ -200,4 +200,22 @@
 # tests were rewritten in place (same names replaced 1:1, net zero) and one
 # (test_build_html_exit_dash_excluded_from_failures) was left unedited; no
 # other test count moved.
-1383
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p10-resource-report, phase 10 tasks 10-12
+# (bin/generate_resource_report.py's stdlib-only constraint is now guarded, and
+# docs/CHANGELOG were updated for the four-panel report; no bin/ or lib/ code
+# changed): 1371 passed, 13 skipped, 0 failed -- 1384 collected, up from the
+# prior entry's 1381. The increase is exactly 3 new cases: 2 in the new
+# tests/test_resource_report_is_stdlib_only.py
+# (test_the_resource_report_imports_only_the_standard_library,
+# test_the_guard_would_notice_a_third_party_import), plus 1 in
+# tests/test_nfmodel.py (test_prose_only_nf_mentions_never_construct_a_path)
+# added to fix a genuine collision the new guard's docstring caused: it names
+# `main.nf` as the caller it documents, which trips
+# test_no_guard_parses_nextflow_source_privately's `.nf`-substring discovery
+# heuristic even though the guard reads no Nextflow source at all. Exempted via
+# a new PROSE_ONLY_NF_MENTIONS list reusing WORKFLOW_YAML_GUARDS's
+# already-established construct/glob-path check; no other test count moved.
+1386

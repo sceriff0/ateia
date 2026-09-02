@@ -172,6 +172,17 @@ after that doc and is detailed inline below:
   checkpoints to be present.
 
 ### Changed
+- **The resource report is plots, not tables.** The per-process rollup,
+  resource-vs-input-size, top-10-by-RSS, top-10-by-runtime and per-task
+  retry/failure tables are replaced by four hand-rolled SVG panels: wall-time by
+  process, memory headroom (requested `memory` vs observed `peak_rss` — the
+  trace column the report never read), the reserved GB·hours lost to failures
+  and retries, and input size against runtime on log-log axes. Run Totals
+  survives as the one remaining table and gains the peak single-task %CPU. Two
+  behaviour changes: a zero-byte matched input is dropped from the scatter (a
+  log axis cannot place a zero) and the panel states how many were dropped, and
+  a per-task status/exit string is no longer rendered. The script remains
+  standard-library only, now guarded.
 - **`pixel_size` default: `null` → `'auto'`.** It used to have no shipped default —
   `ParamUtils.validatePixelSize` forced an operator to assert a positive number of
   micrometres per pixel, or pass `'auto'` explicitly, before a run could start.
@@ -392,6 +403,15 @@ after that doc and is detailed inline below:
   its output in one commit (133 files). See `tests/README.md`'s CI Jobs section.
 
 ### Fixed
+- **The resource report is found where Nextflow wrote it.** `main.nf` resolved
+  `trace_dir` against the JVM's working directory while Nextflow resolves
+  `trace.file` against the launch directory; when a wrapper or an `sbatch` that
+  changes directory made those differ, the report was generated from an empty
+  trace and announced as a success. It is now resolved through
+  `lib/ResourceReport.groovy`, and when no trace is found the run logs a warning
+  **naming the path it looked for and whether tracing was on**, and writes no
+  page at all — an empty report that says "not available" is worse than no
+  report, because it looks like one.
 - **The release workflow built a release from three different commits.**
   `.github/workflows/release.yml` gated on a bare `actions/checkout` (`github.ref`),
   tagged `ref: main` regardless, and gave `artifacts`, `publish-images` and
