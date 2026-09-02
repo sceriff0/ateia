@@ -49,6 +49,8 @@ __all__ = [
     "create_registration_qc",
     "create_nuclear_overlay",
     "compose_on_reference_canvas",
+    "render_before_after",
+    "cyx_to_bgr",
     "autoscale_for_display",
 ]
 
@@ -236,6 +238,107 @@ def create_nuclear_overlay(
     )
 
     return rgb_bgr, rgb_cyx
+
+
+def cyx_to_bgr(cyx: NDArray) -> NDArray:
+    """Reorder a ``(3, H, W)`` RGB composite into OpenCV's ``(H, W, 3)`` BGR.
+
+    Parameters
+    ----------
+    cyx : NDArray
+        ``(3, H, W)`` uint8, channel order red, green, blue.
+
+    Returns
+    -------
+    NDArray
+        ``(H, W, 3)`` uint8, channel order blue, green, red — what
+        ``cv2.imwrite`` expects.
+    """
+    return np.ascontiguousarray(np.stack([cyx[2], cyx[1], cyx[0]], axis=-1))
+
+
+def _hstack_panels(panels, gap: int) -> NDArray:
+    """Concatenate ``(3, H, W)`` panels left-to-right with a blue separator.
+
+    The separator is blue 255 rather than black. Black is indistinguishable from
+    a dark region of either panel, so a reader cannot tell where one panel ends;
+    blue is the one channel a nuclear overlay never uses (red = moving, green =
+    reference, blue = 0), so the band is unmistakable and cannot be mistaken for
+    signal.
+    """
+    if len(panels) == 1:
+        return panels[0]
+    h = panels[0].shape[1]
+    sep = np.zeros((3, h, gap), dtype=np.uint8)
+    sep[2] = 255
+    out = []
+    for i, panel in enumerate(panels):
+        if i:
+            out.append(sep)
+        out.append(panel)
+    return np.concatenate(out, axis=2)
+
+
+def render_before_after(
+    reference: NDArray,
+    native: NDArray | None,
+    registered: NDArray,
+    *,
+    scale_factor: float = 1.0,
+    gap: int = 8,
+) -> NDArray:
+    """Render the two-panel registration QC composite.
+
+    Parameters
+    ----------
+    reference : NDArray
+        Reference nuclear/fiducial plane (2-D). Defines the canvas.
+    native : NDArray or None
+        The moving slide's nuclear/fiducial plane BEFORE registration, i.e.
+        exactly what entered the registration step. ``None`` renders the
+        "after" panel alone, which is what this process produced before the
+        before/after change and keeps the script usable by hand on a pair.
+    registered : NDArray
+        The moving slide's nuclear/fiducial plane AFTER registration (2-D).
+    scale_factor : float, default=1.0
+        Downsampling factor applied to each panel. The separator width is NOT
+        rescaled — it is a fixed number of output pixels.
+    gap : int, default=8
+        Width in output pixels of the blue separator between panels.
+
+    Returns
+    -------
+    NDArray
+        ``(3, H', 2*W' + gap)`` uint8 CYX, or ``(3, H', W')`` when ``native`` is
+        None. Left panel = *Before* (reference + native), right = *After*
+        (reference + registered). Red = moving slide, green = reference, blue =
+        0 except the separator.
+
+    Notes
+    -----
+    Both panels are built on the REFERENCE canvas via
+    ``compose_on_reference_canvas``, so they are the same size and the same
+    pixel coordinate means the same tissue location in both. That is what makes
+    the pair comparable at a glance: fringing that shrinks from left to right is
+    exactly the correction registration applied.
+    """
+    panels = []
+    if native is not None:
+        panels.append(
+            create_nuclear_overlay(
+                reference,
+                compose_on_reference_canvas(reference, native),
+                scale_factor=scale_factor,
+            )[1]
+        )
+    panels.append(
+        create_nuclear_overlay(
+            reference,
+            compose_on_reference_canvas(reference, registered),
+            scale_factor=scale_factor,
+        )[1]
+    )
+    return _hstack_panels(panels, gap)
 
 
 def create_registration_qc(
