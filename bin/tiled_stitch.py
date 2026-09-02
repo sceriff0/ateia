@@ -21,9 +21,9 @@ os.environ["NUMBA_DISABLE_CACHING"] = "1"
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import numpy as np  # noqa: E402
-import tifffile  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
 from mesh_field import MeshField  # noqa: E402
+from ome_io import ome_metadata, ome_tiff_writer
 from pixel_size import resolve_pixel_size
 from tiled_io import open_lazy  # noqa: E402
 from tiled_warp import source_region, warp_image  # noqa: E402
@@ -93,25 +93,21 @@ def _ome_metadata(channel_names, n_channels, pixel_size):
     tifffile writes an OME header for any ``.ome.tiff`` whether or not one is requested, so the
     choice is not "header or no header" -- it is "populated or anonymous". Returns the axes plus
     whatever is known; a caller that passes no names still gets the physical size.
+
+    The dict itself is ``ome_io.ome_metadata``'s; what stays here is the one decision that
+    is this file's own -- what to do when the caller's name list and the slide disagree
+    about how many channels there are.
     """
-    md = {
-        "axes": "CYX",
-        "PhysicalSizeX": float(pixel_size),
-        "PhysicalSizeY": float(pixel_size),
-        "PhysicalSizeXUnit": "\u00b5m",
-        "PhysicalSizeYUnit": "\u00b5m",
-    }
-    if channel_names:
+    names = channel_names
+    if channel_names and len(channel_names) != n_channels:
         # A count mismatch means the caller and the slide disagree about the panel; naming the
         # channels wrongly is worse than leaving them anonymous, so fall back rather than zip.
-        if len(channel_names) == n_channels:
-            md["Channel"] = {"Name": list(channel_names)}
-        else:
-            logger.warning(
-                f"--channel-names has {len(channel_names)} entries for {n_channels} channel(s); "
-                "writing the OME header without channel names rather than mislabelling them"
-            )
-    return md
+        logger.warning(
+            f"--channel-names has {len(channel_names)} entries for {n_channels} channel(s); "
+            "writing the OME header without channel names rather than mislabelling them"
+        )
+        names = None
+    return ome_metadata(names, float(pixel_size))
 
 
 def main(argv=None) -> int:
@@ -171,7 +167,14 @@ def main(argv=None) -> int:
         # uncompressed at full resolution, so classic TIFF's 32-bit offsets overflow
         # (struct.error: 'I' format requires 0 <= number <= 4294967295) the moment the
         # output crosses 4 GB -- C x H x W x itemsize, reached by any real WSI.
-        with tifffile.TiffWriter(str(a.out), bigtiff=True) as tw:
+        # bigtiff is mandatory here, not an optimisation -- see the comment above.
+        # ome=True (not the previous no-arg / autodetect-by-suffix call): passing
+        # ome=False here, as an earlier draft of this migration did, was measured to
+        # SUPPRESS the OME header outright rather than defer to the `.ome.tiff` suffix
+        # -- tifffile's `ome=None` autodetects, but an explicit False wins over the
+        # suffix. ome=True reproduces the prior autodetected-True header byte-for-byte
+        # (mod UUID); see tests/test_stitch_ome_metadata.py.
+        with ome_tiff_writer(str(a.out), bigtiff=True, ome=True) as tw:
             tw.write(
                 stream_tiles(src, m0, mesh, margin, out_h, out_w, a.out_tile, dtype),
                 shape=(c_n, out_h, out_w),

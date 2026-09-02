@@ -106,6 +106,7 @@ import numpy as np  # noqa: E402
 import tifffile  # noqa: E402
 from fov_tiling import fov_overlaps  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
+from ome_io import ome_metadata, ome_tiff_writer  # noqa: E402
 from pixel_size import (  # noqa: E402
     read_ome_pixel_size,
     resolve_pixel_size,
@@ -357,15 +358,10 @@ def apply_basic_profiles(
 
     arr, _dtype, close = open_lazy(image_path)
     try:
-        metadata = {
-            "axes": "CYX",
-            "Channel": {"Name": list(channel_names)},
-            "PhysicalSizeX": pixel_size_x,
-            "PhysicalSizeXUnit": "\u00b5m",
-            "PhysicalSizeY": pixel_size_y,
-            "PhysicalSizeYUnit": "\u00b5m",
-        }
-        with tifffile.TiffWriter(str(output_path), bigtiff=True, ome=True) as tw:
+        # The dict AND the writer come from bin/utils/ome_io.py. This file used to
+        # rebuild both -- one of the four independent copies of the same six keys.
+        metadata = ome_metadata(list(channel_names), (pixel_size_x, pixel_size_y))
+        with ome_tiff_writer(str(output_path), bigtiff=True, ome=True) as tw:
             tw.write(
                 _tiles(),
                 shape=(n_channels, height, width),
