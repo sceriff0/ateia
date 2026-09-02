@@ -274,6 +274,9 @@ def checkRegisteredMatch() {
     try { RegisteredMatch.pair([refMeta], [refFile], [:]) }
     catch (IllegalStateException e) { noManifestEntry = e.message }
     assert noManifestEntry.startsWith('RegisteredMatch: unmatched') : "got: ${noManifestEntry}"
+    // Distinguish 3a from 3b by message substring, not merely by shared prefix -- see
+    // lib/RegisteredMatch.groovy's two distinct 'unmatched' throw sites.
+    assert noManifestEntry.contains('the channels manifest has no entry for') : "3a message: ${noManifestEntry}"
 
     // Exception 3b: a meta whose channel set no registered file carries.
     def noFileForMeta = ''
@@ -283,6 +286,7 @@ def checkRegisteredMatch() {
     }
     catch (IllegalStateException e) { noFileForMeta = e.message }
     assert noFileForMeta.startsWith('RegisteredMatch: unmatched') : "got: ${noFileForMeta}"
+    assert noFileForMeta.contains('no registered file carries the channel') : "3b message: ${noFileForMeta}"
 
     // Exception 3c: a duplicate FILE signature (as opposed to 3b's duplicate META
     // signature, already rejected earlier). refMeta and movMeta have DISTINCT
