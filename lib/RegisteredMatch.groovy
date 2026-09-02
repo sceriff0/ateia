@@ -74,10 +74,15 @@ class RegisteredMatch {
      */
     static List<List> pair(List<Map> metas, List files, Map<String, List<String>> manifest) {
         if (files.size() != metas.size()) {
+            // Render null-tolerantly: this diagnostic's own job is to explain a count
+            // mismatch, and a meta with channels: null must not make signature() throw
+            // IllegalArgumentException WHILE building that message -- the caller would
+            // then see "channels is null" instead of the count-mismatch it hit first.
+            def sigOrNull = { m -> m.channels == null ? '<null channels>' : signature(m.channels as List) }
             throw new IllegalStateException(
                 "RegisteredMatch: count mismatch - ${metas.size()} slide(s) but " +
                 "${files.size()} registered file(s). " +
-                "Slide signatures: ${metas.collect { signature(it.channels as List) }.join(', ')}. " +
+                "Slide signatures: ${metas.collect { sigOrNull(it) }.join(', ')}. " +
                 "Files: ${files.collect { it.name }.join(', ')}. " +
                 'A registration that returns fewer files than slides is a partial failure; ' +
                 'pairing what arrived would publish a short run as a complete one.')

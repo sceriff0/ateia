@@ -260,6 +260,15 @@ def checkRegisteredMatch() {
     catch (IllegalStateException e) { countMismatch = e.message }
     assert countMismatch.startsWith('RegisteredMatch: count mismatch') : "got: ${countMismatch}"
 
+    // Exception 1b: count mismatch where one meta's channels is null. Building the
+    // diagnostic itself must not throw IllegalArgumentException from signature() --
+    // that would replace "count mismatch" with a confusing "channels is null".
+    def nullChannelsMeta = [patient_id: 'P1', id: 'P1_null', channels: null]
+    def countMismatchNullChannels = ''
+    try { RegisteredMatch.pair([refMeta, nullChannelsMeta], [refFile], manifest) }
+    catch (IllegalStateException e) { countMismatchNullChannels = e.message }
+    assert countMismatchNullChannels.startsWith('RegisteredMatch: count mismatch') : "got: ${countMismatchNullChannels}"
+
     // Exception 2: duplicate signature. Two slides with the same channel set are
     // indistinguishable to this rule, and a map keyed on the signature would
     // silently keep only the last one.
