@@ -415,6 +415,18 @@ after that doc and is detailed inline below:
 - **`ruff format` in check mode is now also blocking**, in the same `_test-suite.yml`
   `ruff` job that already runs `ruff check`, after the whole tree was normalised to
   its output in one commit (133 files). See `tests/README.md`'s CI Jobs section.
+- **`versions.yml` from every process now records `container:`** — the image the
+  task ran in (`stub` under `-stub`) — via `lib/ProcessEnvelope.groovy`'s shared
+  `versions()`/`versionsStub()` rendering.
+- **Stub-mode `*.size.csv` rows carry the real process name instead of the literal
+  `STUB`**; `sample_id` for `QUANTIFY` is now `patient_id` in both halves.
+- **`bin/generate_resource_report.py`'s `parse_size_log` rejects a size log whose
+  header is not `process,sample_id,filename,bytes`** — one owner,
+  `ProcessEnvelope.SIZE_LOG_COLUMNS`.
+- **The measured byte set moved** for `REGISTER` (everything under `ref/` +
+  `input_*/`), `PREFLIGHT_SCALE` (`input_*/*`), `MERGE_AND_PYRAMID` (sum of
+  `channels/*`, no longer the directory inode) and `WARP_SEG_QC` (real bytes, was
+  hard-coded 0) — size-vs-runtime plots are not comparable across this change.
 
 ### Fixed
 - **The resource report is found where Nextflow wrote it.** `main.nf` resolved
