@@ -211,7 +211,7 @@ docs/figures/failure-schematic.html
 # per-file enumeration (research/tma-support-2026-07-01.md, which a directory rule would
 # have shadowed so that git clean and doc indexers treated it as garbage) now lives in
 # docs/_archive/research/. Nothing under research/ is tracked.
-research/
+/research/
 
 # Git worktrees. Was ignored only via .git/info/exclude, which is LOCAL and never
 # committed -- so on a fresh clone the whole tree showed up untracked.

@@ -80,10 +80,15 @@
 # tests/test_bin_entrypoint_idiom.py's 32 new cases (31 parametrised
 # entry-point checks + 1 tripwire); this task's own baseline run (before
 # adding that file) was already 1289 passed / 13 skipped -- 1 skip more than
-# the prior entry's 1290/12 split at the same 1303 total, i.e. pre-existing
-# environment drift within FLOOR_DRIFT, not something this task introduced.
-1335
-
+# the prior entry's 1290/12 split at the same 1303 total. That extra skip is
+# not environment drift: Task 5 (:fire: Delete bin/registration_benchmark.py
+# from this branch) added
+# tests/test_no_dead_bin_modules.py::test_bin_utils_module_has_a_real_importer[reg_benchmark.py]
+# to tests/expected_skips.txt, because bin/utils/reg_benchmark.py lost its
+# only production importer when bin/registration_benchmark.py was deleted for
+# release 1.0. That commit landed on this branch between the 1303 measurement
+# and this task's baseline, which is why the split moved -- not something
+# this task introduced.
 #
 # RE-MEASURED 2026-09-02 on release/p02-cleanliness, task 9 (docstring
 # coverage guard): 1323 passed, 13 skipped, 0 failed -- 1337 collected, up
