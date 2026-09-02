@@ -1,0 +1,126 @@
+/*
+ * VALIS_ADAPTER — the adapter contract, and the channel-signature pairing.
+ *
+ * TILED_ADAPTER has had a test since its fan-out gather was fixed; VALIS_ADAPTER had
+ * none, which mattered because it carries the harder half of the seam: 84 lines of
+ * matching registered outputs back to their slide metas by OME channel signature, now
+ * lib/RegisteredMatch.groovy. That rule fails SILENTLY when it is wrong -- the wrong
+ * meta gets attached to a registered image and the run completes -- so a test that only
+ * asserts `workflow.success` would prove nothing. Every case below asserts the PAIRING.
+ *
+ * The stub is a real exercise of the rule, not a bypass: modules/local/register.nf's
+ * stub: block builds a genuine channels_manifest.json with JsonOutput.toJson from the
+ * incoming metas, so RegisteredMatch.pair runs against real manifest data.
+ *
+ * The seven emit names are asserted by NAME because the contract in both adapter headers
+ * is that a method producing no artifact for a slot emits Channel.empty() rather than
+ * omitting the emit. An omitted name is a compile-time break for every consumer of the
+ * other backend; a null-object empty channel is not. Only naming each one catches the
+ * difference.
+ */
+nextflow_workflow {
+
+    name "Test VALIS_ADAPTER"
+    script "subworkflows/local/adapters/valis_adapter.nf"
+    workflow "VALIS_ADAPTER"
+
+    tag "subworkflow"
+    tag "valis_adapter"
+    tag "stub"
+
+    test("Should pair each registered file with its own slide meta by channel signature - stub") {
+
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [
+                        'P001',
+                        [[patient_id: 'P001', id: 'P001_ref', is_reference: true,
+                          channels: ['DAPI', 'PANCK', 'SMA']],
+                         file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)],
+                        [
+                            [[patient_id: 'P001', id: 'P001_ref', is_reference: true,
+                              channels: ['DAPI', 'PANCK', 'SMA']],
+                             file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)],
+                            [[patient_id: 'P001', id: 'P001_mov', is_reference: false,
+                              channels: ['DAPI', 'CD3']],
+                             file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)]
+                        ]
+                    ]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.registered.size() == 2 },
+                // THE assertion with teeth. REGISTER's stub names each output
+                // <patient>_<channels joined by _>_registered.ome.tiff, so a file whose
+                // name carries CD3 must be paired with the meta whose channels contain
+                // CD3. Swap the two pairings and this fails; assert only .size() and it
+                // would not.
+                { def byId = workflow.out.registered.collectEntries { m, f -> [(m.id): f.toString()] }
+                  assert byId.keySet().toSorted() == ['P001_mov', 'P001_ref']
+                  assert byId['P001_ref'].endsWith('P001_DAPI_PANCK_SMA_registered.ome.tiff')
+                  assert byId['P001_mov'].endsWith('P001_DAPI_CD3_registered.ome.tiff') },
+                // The meta that comes out is the one that went in, not a rebuilt one.
+                { assert workflow.out.registered.every { m, f -> m.patient_id == 'P001' } }
+            )
+        }
+    }
+
+    test("Should emit all seven contract names, empty where VALIS has no artifact - stub") {
+
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [
+                        'P001',
+                        [[patient_id: 'P001', id: 'P001_ref', is_reference: true,
+                          channels: ['DAPI', 'PANCK', 'SMA']],
+                         file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)],
+                        [
+                            [[patient_id: 'P001', id: 'P001_ref', is_reference: true,
+                              channels: ['DAPI', 'PANCK', 'SMA']],
+                             file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)],
+                            [[patient_id: 'P001', id: 'P001_mov', is_reference: false,
+                              channels: ['DAPI', 'CD3']],
+                             file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)]
+                        ]
+                    ]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                // Naming a channel that is not emitted throws here, which is the check.
+                { assert workflow.out.registered != null },
+                { assert workflow.out.transform != null },
+                { assert workflow.out.transform_by_slide != null },
+                { assert workflow.out.stage_checkpoint != null },
+                { assert workflow.out.intrinsic_tre != null },
+                { assert workflow.out.size_logs != null },
+                { assert workflow.out.versions != null },
+                // VALIS's transform is ONE object per patient (the registrar it
+                // optimised over the whole group), so there is no per-slide transform.
+                // The contract's null object: declared, and empty.
+                { assert workflow.out.transform_by_slide.size() == 0 },
+                { assert workflow.out.transform.size() == 1 },
+                // reg_qc defaults to 2, so REGISTER's stub writes the pre-micro
+                // checkpoint directory and this slot is populated rather than empty.
+                { assert workflow.out.stage_checkpoint.size() == 1 }
+            )
+        }
+    }
+}
