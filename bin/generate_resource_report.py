@@ -3,6 +3,21 @@
 generate_resource_report.py
 Self-contained HTML computational-resources report for a MIRAGE run.
 Joins the aggregated input-size log with Nextflow's trace.txt. Stdlib only.
+
+CALLER: main.nf's `workflow.onComplete` -> generateResourceReport(Map cfg), which
+shells out to `python3 ${projectDir}/bin/generate_resource_report.py`. That is the
+ONLY caller, and it is invisible to a grep of modules/ and conf/ because no process
+invokes this script -- which is also why tests/test_pixel_size_is_passed.py's call-site
+scan can never reach it.
+
+STDLIB ONLY, and deliberately: onComplete runs on the LAUNCHING machine's interpreter,
+outside every container, so numpy/matplotlib/pandas may simply not be there. The
+`print()` at the end of main() is the one operator-facing line and stays a print for
+the same reason a report generated on the head node stays stdlib -- it is the script's
+result announcement on an interpreter whose logging configuration belongs to nobody.
+(bin/utils/logger.py IS itself stdlib-only, so importing it would work; it is not
+imported because a sys.path hack into the project tree is a worse dependency for a
+head-node script than one print.)
 """
 
 import argparse

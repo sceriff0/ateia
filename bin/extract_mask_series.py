@@ -9,11 +9,17 @@ mask series (the incremental cyclic-IF mode relies on this).
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
 import numpy as np
 import tifffile
+
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
+from logger import configure_logging, get_logger  # noqa: E402
+
+logger = get_logger(__name__)
 
 #: TIFF tile size (px) for the cell/nuclei mask writes below -- a TIFF LAYOUT choice, not a
 #: processing tile size. See ``bin/convert_image.py:35-49`` for why an untiled write forces
@@ -26,6 +32,7 @@ MASK_TIFF_TILE = 1024
 
 def main() -> None:
     """CLI entry point: extract the mask series from a pyramid OME-TIFF into cell/nuclei mask TIFFs."""
+    configure_logging(level=logging.INFO)
     ap = argparse.ArgumentParser()
     ap.add_argument("--pyramid", type=Path, required=True)
     ap.add_argument("--outdir", type=Path, required=True)
@@ -33,24 +40,31 @@ def main() -> None:
 
     with tifffile.TiffFile(args.pyramid) as tif:
         if len(tif.series) < 2:
-            sys.exit(
-                f"ERROR: {args.pyramid} has no mask series (found {len(tif.series)} series). "
-                f"The prior run must set embed_masks=true with expanded compartment quantification."
+            logger.error(
+                "%s has no mask series (found %d series). The prior run must set "
+                "embed_masks=true with expanded compartment quantification.",
+                args.pyramid,
+                len(tif.series),
             )
+            raise SystemExit(1)
         masks = tif.series[1].asarray()
     if masks.ndim != 3 or masks.shape[0] != 2:
-        sys.exit(
-            f"ERROR: mask series has shape {masks.shape}; expected (2, H, W) [cell, nuclei]."
+        logger.error(
+            "mask series has shape %s; expected (2, H, W) [cell, nuclei].", masks.shape
         )
+        raise SystemExit(1)
     # Fast-fail on dtypes that cannot losslessly represent uint32 label IDs.
     # Accept unsigned-integer masks (uint8/uint16/uint32 -> lossless upcast) and
     # reject anything else (float probability maps, signed/int64 arrays) loudly
     # rather than silently corrupting downstream quantification.
     if masks.dtype not in (np.uint8, np.uint16, np.uint32):
-        sys.exit(
-            f"ERROR: mask series in {args.pyramid} has dtype {masks.dtype}; expected an unsigned "
-            f"integer label mask (uint8/uint16/uint32). Refusing to coerce (silent-corruption risk)."
+        logger.error(
+            "mask series in %s has dtype %s; expected an unsigned integer label mask "
+            "(uint8/uint16/uint32). Refusing to coerce (silent-corruption risk).",
+            args.pyramid,
+            masks.dtype,
         )
+        raise SystemExit(1)
     if masks.dtype != np.uint32:
         masks = masks.astype(np.uint32)  # lossless upcast from uint8/uint16
 
@@ -69,8 +83,11 @@ def main() -> None:
             bigtiff=True,
             tile=(MASK_TIFF_TILE, MASK_TIFF_TILE),
         )
-    print(
-        f"Extracted cell_mask + nuclei_mask from {args.pyramid} (series 1, {masks.shape[1]}x{masks.shape[2]})"
+    logger.info(
+        "Extracted cell_mask + nuclei_mask from %s (series 1, %dx%d)",
+        args.pyramid,
+        masks.shape[1],
+        masks.shape[2],
     )
 
 
