@@ -80,10 +80,28 @@ def test_parse_size_log(tmp_path):
         "process,sample_id,filename,bytes\n"
         "MIRAGE:PRE:CONVERT_IMAGE,P001,a.tiff,100\n"
         "MIRAGE:PRE:CONVERT_IMAGE,P001,b.tiff,50\n"
-        "STUB,P001,stub,0\n"
+        # A stub row: the REAL process name, zero bytes. The literal `STUB` this
+        # test used to carry can no longer be written by any module.
+        "MIRAGE:PRE:SPLIT_CHANNELS,P001,stub,0\n"
     )
     m = grr.parse_size_log(p)
     assert m[("MIRAGE:PRE:CONVERT_IMAGE", "P001")] == 150
+    assert m[("MIRAGE:PRE:SPLIT_CHANNELS", "P001")] == 0
+
+
+def test_parse_size_log_rejects_a_foreign_header(tmp_path):
+    """A reordered or renamed header must fail loudly, not be attributed wrongly.
+
+    csv.DictReader keys on names, so a swapped `filename`/`bytes` pair would make
+    every row's byte count the string 'a.tiff' -- caught by the int() guard and
+    silently counted as 0. A report of all-zero input sizes looks like a run that
+    read nothing, not like a bug.
+    """
+    grr = _load()
+    p = tmp_path / "input_sizes.csv"
+    p.write_text("process,sample_id,bytes,filename\nA,P001,100,a.tiff\n")
+    with pytest.raises(ValueError, match="unexpected size-log header"):
+        grr.parse_size_log(p)
 
 
 def test_rollup_by_process():

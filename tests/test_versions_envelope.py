@@ -39,22 +39,18 @@ LOCAL_PROCESSES = [p for p in processes().values() if p.path.parent.name == "loc
 # than deleted because "SegBackends stores rendered lines" was the stated reason this
 # file allowed the exception, and that reason is now false.
 #
-# aggregate_size_logs.nf runs in `container 'ubuntu:22.04'` and reports a `bash:` version
-# row, not a `python:` one -- it has no Python interpreter at all. ProcessEnvelope always
-# prepends a `python:` row (23 of the 24 modules in modules/local/ report one; this is
-# the genuine anomaly -- at the time ProcessEnvelope was introduced it was 27 of 28, and
-# the four modules removed since -- compile_panel.nf, phenotype.nf, tiled_register.nf,
-# warp_seg_qc_tiled.nf -- all reported `python:`), so routing this module through it
-# would add a fabricated/`unknown` python entry to a published report that has never
-# carried one.
-ALLOWED_HANDWRITTEN = {"aggregate_size_logs.nf"}
+# There is no exception left. aggregate_size_logs.nf was the last one: it runs in
+# `container 'ubuntu:22.04'` with no Python interpreter, and ProcessEnvelope always
+# prepended a `python:` row, so routing it through versions() would have run
+# `python --version 2>&1` and written the shell's own "command not found" message
+# into a published report as a version number. ProcessEnvelope.versionsBash() renders
+# a `bash:` row instead, so all 28 modules under modules/local/ now go through the
+# class and this check covers every one of them.
 
 
 def test_no_module_hand_writes_a_versions_heredoc():
     offenders = []
     for nf in MODULES:
-        if nf.name in ALLOWED_HANDWRITTEN:
-            continue
         text = nf.read_text()
         if "END_VERSIONS" in text and "ProcessEnvelope." not in text:
             offenders.append(nf.name)
@@ -355,12 +351,29 @@ def test_every_module_records_its_container():
     and a comment quoting a 3-arg call would otherwise satisfy it while the real
     call ships two arguments. That mistake was made six times in one day on this
     repo (2026-09-01) and is recorded in CLAUDE.md.
+
+    A module with ZERO ProcessEnvelope.versions*() calls in a half is not scanned by
+    the loop below at all -- `_VERSIONS_CALL_RE.finditer` simply finds nothing, and an
+    empty result reads exactly like "every call it found was fine". That is a real
+    blind spot, not a hypothetical one: aggregate_size_logs.nf hand-wrote its own
+    versions.yml heredoc (no ProcessEnvelope call, in either half) for as long as this
+    test existed, and it was never once flagged as an offender by the loop below. The
+    coverage check first closes that: every process must have at least one
+    ProcessEnvelope.versions*() call in EACH half, or it is reported here explicitly
+    rather than silently skipped.
     """
     offenders = []
     for proc in LOCAL_PROCESSES:
         for half in ("script_body", "stub_body"):
             text = strip_comments(getattr(proc, half))
-            for m in _VERSIONS_CALL_RE.finditer(text):
+            matches = list(_VERSIONS_CALL_RE.finditer(text))
+            if not matches:
+                offenders.append(
+                    f"{proc.path.name}:{half}: no ProcessEnvelope.versions*() call at "
+                    "all, so the container check below never sees this module"
+                )
+                continue
+            for m in matches:
                 args = _find_balanced_call_args(text, m.end() - 1)
                 if args is None:
                     offenders.append(

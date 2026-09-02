@@ -145,16 +145,34 @@ def parse_trace(path):
     return rows
 
 
+# The columns AGGREGATE_SIZE_LOGS writes, and the only header this reader accepts.
+# lib/ProcessEnvelope.groovy's SIZE_LOG_COLUMNS is the owner of the order; the two
+# are held equal by tests/test_size_log_schema_has_one_owner.py, because Python
+# cannot import Groovy and a silent reorder would produce a plausible wrong report
+# rather than an error.
+SIZE_LOG_COLUMNS = ("process", "sample_id", "filename", "bytes")
+
+
 def parse_size_log(path):
     """Sum input bytes per (process, sample_id) from input_sizes.csv."""
     out = {}
     if not path or not Path(path).exists():
         return out
     with open(path, newline="", encoding="utf-8") as fh:
-        for row in csv.DictReader(fh):
+        reader = csv.DictReader(fh)
+        if reader.fieldnames and tuple(reader.fieldnames) != SIZE_LOG_COLUMNS:
+            raise ValueError(
+                f"{path}: unexpected size-log header {tuple(reader.fieldnames)}; "
+                f"expected {SIZE_LOG_COLUMNS}"
+            )
+        for row in reader:
             proc = (row.get("process") or "").strip()
             sample = (row.get("sample_id") or "").strip()
-            if not proc or proc == "STUB":
+            # No `proc == "STUB"` special case any more: ProcessEnvelope.sizeLogStub
+            # writes the REAL process name with 0 bytes, so a stub run's rows are
+            # ordinary rows that happen to sum to zero. The old literal made every
+            # process in a stub run collapse into one fake key.
+            if not proc:
                 continue
             try:
                 b = int(float(row.get("bytes") or 0))

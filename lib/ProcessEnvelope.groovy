@@ -90,12 +90,12 @@ class ProcessEnvelope {
     /**
      * The full versions.yml heredoc for a `script:` block.
      *
-     * `python:` is prepended automatically — at the time this class was introduced, 27
+     * `python:` is prepended automatically. At the time this class was introduced, 27
      * of the then-28 modules reported it (`aggregate_size_logs.nf`, bash-only, was the
      * sole exception; two others called `python3` instead of `python` — still a
      * `python:` report, just a different interpreter name, not a non-report).
-     * aggregate_size_logs.nf was the sole exception and now renders through
-     * versionsBash(), so all 28 modules under modules/local/ go through this class.
+     * `aggregate_size_logs.nf` now renders through `versionsBash()` instead, so all 28
+     * modules under `modules/local/` go through this class.
      * Pass tools in the order they should appear in the report.
      */
     static String versions(String process, List<String> tools, String container = null) {

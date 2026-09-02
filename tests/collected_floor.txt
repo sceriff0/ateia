@@ -431,4 +431,19 @@
 #
 
 # RE-MEASURED 2026-09-03: +2 for the two final-minors robustness tests (span-overflow _bin_counts, null tre_rigid _tiled_tre_plots); no other count moved.
-1428
+#
+# RE-MEASURED 2026-09-02 on release/p04-deepening-a, task 8 (the size-log
+# header gets one owner across both languages): 1328 passed, 13 skipped,
+# 0 failed -- 1341 collected, up from the prior entry's 1336. The increase is
+# exactly 3: tests/test_size_log_schema_has_one_owner.py's 2 new cases
+# (test_the_python_reader_expects_the_groovy_columns and
+# test_the_aggregate_header_is_rendered_from_the_constant) plus
+# tests/test_generate_resource_report.py's new
+# test_parse_size_log_rejects_a_foreign_header. tests/test_versions_envelope.py
+# was also edited in this task (ALLOWED_HANDWRITTEN deleted, and
+# test_every_module_records_its_container widened to flag a module with zero
+# ProcessEnvelope calls) but adds no new test function, so it contributes 0 to
+# the count. Task 13 (same commit batch, deleting the two pass-through
+# extract_dapi_channel wrappers) re-measured at the same 1328/13/1341 -- it
+# only edits existing test bodies, no new or removed test function.
+1433

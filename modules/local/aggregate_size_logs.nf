@@ -5,7 +5,7 @@
  * for post-run analysis of resource usage vs input size.
  *
  * Input: Collection of size.csv files from all processes
- * Output: Aggregated input_sizes.csv file
+ * Output: Aggregated input_sizes.csv (header from ProcessEnvelope.SIZE_LOG_COLUMNS)
  */
 process AGGREGATE_SIZE_LOGS {
     tag "aggregate"
@@ -24,24 +24,19 @@ process AGGREGATE_SIZE_LOGS {
 
     script:
     """
-    echo "process,sample_id,filename,bytes" > input_sizes.csv
+    echo "${ProcessEnvelope.SIZE_LOG_COLUMNS.join(',')}" > input_sizes.csv
     cat ${size_csvs} >> input_sizes.csv
 
     echo "Aggregated \$(wc -l < input_sizes.csv) size log entries"
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        bash: \$(bash --version | head -n1 | sed 's/GNU bash, version //')
-    END_VERSIONS
+    ${ProcessEnvelope.versionsBash(task.process, task.container)}
     """
 
     stub:
     """
-    echo "process,sample_id,filename,bytes" > input_sizes.csv
+    echo "${ProcessEnvelope.SIZE_LOG_COLUMNS.join(',')}" > input_sizes.csv
+    cat ${size_csvs} >> input_sizes.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        bash: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsBashStub(task.process, task.container)}
     """
 }
