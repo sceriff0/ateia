@@ -355,16 +355,21 @@ SVG_PAD_B = 32  # bottom gutter: x-axis labels
 
 
 def _finite(values):
-    """Keep only real, non-NaN numbers from ``values``.
+    """Keep only real, finite numbers from ``values``.
 
     ``bool`` is excluded on purpose: it is an ``int`` subclass, so a stray
-    ``True`` in a metrics dict would otherwise be plotted as 1.0.
+    ``True`` in a metrics dict would otherwise be plotted as 1.0. NaN AND
+    ``±inf`` are both dropped -- ``json.loads`` accepts a literal
+    ``Infinity``, and a zero-denominator QC metric can produce one, so this
+    is a realistic input, not a hypothetical one. An unfiltered inf would
+    become ``lo``/``hi`` in ``_bin_counts``, making its span (and then
+    ``int(span)``) NaN.
     """
     out = []
     for v in values:
         if isinstance(v, bool) or not isinstance(v, (int, float)):
             continue
-        if v != v:  # NaN
+        if not math.isfinite(v):  # NaN, +inf, -inf
             continue
         out.append(float(v))
     return out

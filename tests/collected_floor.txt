@@ -315,4 +315,15 @@
 # test_error_distribution_svg_on_empty_input_is_a_notice,
 # test_error_distribution_svg_drops_missing_values_before_binning); no other
 # test count moved.
-1405
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p09-qc-report, fix round 1 for tasks 4-6
+# (`_finite` dropped NaN via `v != v` but not `+-inf`, so an Infinity metric
+# crashed `_bin_counts` with `ValueError: cannot convert float NaN to
+# integer`): 1336 passed, 13 skipped, 0 failed -- 1349 collected, up from the
+# prior entry's 1347. The increase is exactly two new cases in
+# tests/test_generate_qc_report.py (test_finite_drops_infinities,
+# test_bin_counts_drops_infinities_rather_than_crashing); no other test count
+# moved.
+1407

@@ -520,6 +520,11 @@ def test_finite_drops_none_nan_bool_and_strings():
     assert gqr._finite([1, 2.5, None, float("nan"), "3", True, -4]) == [1.0, 2.5, -4.0]
 
 
+def test_finite_drops_infinities():
+    gqr = _load()
+    assert gqr._finite([1.0, float("inf"), 2.0, float("-inf")]) == [1.0, 2.0]
+
+
 def test_percentile_is_nearest_rank_and_none_on_empty():
     gqr = _load()
     vals = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
@@ -552,6 +557,14 @@ def test_bin_counts_on_nothing_finite_is_empty_not_an_exception():
     assert gqr._bin_counts([], 10) == ([], 0.0, 0.0)
     assert gqr._bin_counts([None, float("nan")], 10) == ([], 0.0, 0.0)
     assert gqr._bin_counts([1.0, 2.0], 0) == ([], 0.0, 0.0)
+
+
+def test_bin_counts_drops_infinities_rather_than_crashing():
+    """inf/-inf must not reach lo/hi -- they'd make span nan and int(nan) raise."""
+    gqr = _load()
+    counts, lo, hi = gqr._bin_counts([1.0, float("inf"), 2.0, float("-inf")], 5)
+    assert (lo, hi) == (1.0, 2.0)
+    assert sum(counts) == 2
 
 
 def test_histogram_svg_draws_one_rect_per_non_empty_bin():
