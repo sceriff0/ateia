@@ -376,9 +376,12 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   (previously dropped). The fan-out's final-accuracy residual comes from the reg_benchmark harness.
 - **Final QC-report integration (done):** the `_tre.json` already flowed into the report's
   `registration_tre/` input; `generate_qc_report.py` now renders it as a "Registration Accuracy
-  (STARE Tiled TRE)" subsection — a per-slide table (coarse / rigid p50-p90 / post-refinement final
-  p50-p90 / refined / tiles) plus a **per-tile SVG heatmap** of the spatial TRE, sitting alongside
-  the VALIS rTRE, feature-distance, and seg-QC tables. Unit-tested.
+  (STARE Tiled TRE)" subsection: a per-slide caption carrying the headline numbers
+  (coarse / rigid p50-p90 / post-refinement final p50-p90 / refined / accepted-of-total
+  tiles), a **per-stage error-distribution plot** for the rigid and post-refinement
+  stages built from the accepted tiles, and the **per-tile SVG heatmap** of the spatial
+  TRE. It sits alongside the VALIS rTRE table and the per-stage seg-QC displacement
+  plots. Unit-tested.
 - **Accuracy harness (done):** `bin/utils/reg_benchmark.py` — a ground-truth-free residual-TRE +
   correlation metric that runs on any method's output, so VALIS vs tiled is a direct
   number-to-number comparison on the same slide. Validated on synthetic ground truth (STARE drops

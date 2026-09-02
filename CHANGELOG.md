@@ -183,6 +183,20 @@ after that doc and is detailed inline below:
   log axis cannot place a zero) and the panel states how many were dropped, and
   a per-task status/exit string is no longer rendered. The script remains
   standard-library only, now guarded.
+- **The HTML QC report is plots, not tables.** `bin/generate_qc_report.py` renders
+  per-stage registration-error distributions (STARE per-tile TRE, accepted tiles
+  only; warp-seg cell displacement, one point per slide), a log-log feature-TRE vs
+  cell-displacement scatter with the 3× divergence band drawn as two diagonals, and
+  a per-cell residual distribution — replacing the per-slide TRE tables, the
+  flattened warp-seg metric table, the reconciliation verdict table and the 500-row
+  head-of-CSV residual dump. All hand-rolled inline SVG; the script remains
+  stdlib-only and is now guarded as such.
+- **The Software Versions and Sample Manifest sections are gone from the report.**
+  Both content sources are unchanged and still published:
+  `qc/mirage_qc_data_<timestamp>/collated_versions.yml` and `run_summary.json`
+  (whose `manifest` block `final_qc.nf` still builds). `--versions` and
+  `--run-summary` are still passed to the script, which still copies both into the
+  data bundle — the rendering was cut, not the artifact.
 - **`pixel_size` default: `null` → `'auto'`.** It used to have no shipped default —
   `ParamUtils.validatePixelSize` forced an operator to assert a positive number of
   micrometres per pixel, or pass `'auto'` explicitly, before a run could start.

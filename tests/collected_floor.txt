@@ -417,4 +417,14 @@
 # tests/test_generate_qc_report.py
 # (test_generate_qc_report_imports_only_the_standard_library); no deletions, no
 # other test count moved.
+
+#
+#
+# RE-MEASURED 2026-09-02 on phase/09-qc-report (spec Phase 4, the QC-report plot
+# rework). 11 tests were DELETED with the code they covered -- 3 for
+# parse_versions_yml/versions_section, 2 for manifest_section, 2 for
+# parse_seg_qc_json/seg_qc_section, and 4 in test_no_full_mask_unique.py for
+# parse_csv_table_head -- and replaced by unit tests for the six new plotting
+# functions plus the section-list characterisation test and the stdlib-only guard.
+# The net is an increase; the number below is measured, not derived.
 1426

@@ -306,10 +306,18 @@ the same masks, polygons, measurements and QC. Full store layout:
 ### Reports
 
 - **`qc/mirage_qc_report_<timestamp>.html`** — aggregated QC report: run summary,
-  pipeline-stage status, sample manifest, preprocessing / registration (overlays,
-  VALIS rTRE, STARE tiled TRE, warp-seg QC) / segmentation overlays /
-  postprocessing QC, and software versions.
+  pipeline-stage status, preprocessing QC images, registration QC (overlays, the
+  VALIS rTRE summary, per-stage STARE TRE distributions with the per-tile spatial
+  heatmap, and per-stage cell-displacement distributions from the warp-seg QC),
+  the feature-TRE vs cell-displacement reconciliation scatter, the per-cell
+  residual distribution, segmentation overlays, and postprocessing QC.
   Controlled by `skip_final_qc_report`.
+- **`qc/mirage_qc_data_<timestamp>/`** — the report's inputs, copied verbatim:
+  `collated_versions.yml`, `run_summary.json` (which carries the sample manifest),
+  and the `registration_tre/`, `seg_qc/`, `seg_residuals/`, `*_qc/` folders. The
+  report renders plots; this folder is what a script reads. Software versions and
+  the sample manifest are **here**, not in the HTML — a 200-row version table and a
+  per-patient count table were two renderings of files that already existed.
 
 ### Reference-free segmentation quality (CSE) — opt-in
 

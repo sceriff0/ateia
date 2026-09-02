@@ -151,3 +151,30 @@ pairing itself is thin — check the rigid stage before trusting the later numbe
 - **Vertices are not clipped to the aligned frame by default**, unlike `Slide.warp_geojson`.
   Clipping flattens boundary-straddling cells onto the crop edge in both slides, inflating their
   IoU for reasons unrelated to registration. Pass `--clip-to-frame` to reproduce VALIS exactly.
+
+## In the HTML QC report
+
+`GENERATE_QC_REPORT` renders these JSONs twice over, both as plots:
+
+- **Registration QC → Warp-Segmentation QC** — one error-distribution plot per
+  registration stage, over the stages' `displacement_um_p50` (or
+  `displacement_px_p50` when no pixel size was available), **one point per slide**.
+  A directory holding both calibrated (µm) and uncalibrated (px) slides for the
+  same stage is never mixed into one histogram: it is split into up to two plots,
+  one per unit actually present, each titled with its own unit — the STARE
+  (tiled) backend is the common source of px-only slides, not an edge case. The
+  JSON carries summary statistics, not per-cell values, so the distribution is
+  across slides; a single-slide run renders a single bar and says `n=1`. The
+  caption also reports the matched-cell count (`matching.n_pairs`) across slides,
+  min and median, so a p50 measured over 12 matched cells reads differently from
+  one measured over 40 000 — the histogram shape alone cannot tell the two apart.
+- **Feature-TRE vs Cell-Displacement Reconciliation** — a log-log scatter of the
+  registration method's own intrinsic TRE (x) against these cell displacements (y),
+  one point per slide-stage, with the 3× divergence band drawn as two diagonals.
+  A point outside the band is a slide-stage where the registrar's own keypoints and
+  the independently segmented nuclei disagree about whether the slide is aligned;
+  that disagreement is the failure neither measure catches alone.
+
+The per-slide records themselves are not re-tabulated in the page — they are copied
+verbatim into `qc/mirage_qc_data_<timestamp>/seg_qc/`, which is where a per-slide
+number belongs.

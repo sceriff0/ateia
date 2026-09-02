@@ -204,6 +204,17 @@ results/                              # = --outdir
                                       #   workflow.onComplete handler, not a process
 ```
 
+!!! info "The QC report is plots; the data folder beside it is data"
+    `mirage_qc_report_<timestamp>.html` is a self-contained page of images and
+    hand-rolled inline SVG: per-stage registration-error distributions, the
+    per-tile spatial heatmap, a log-log scatter of feature-TRE against cell
+    displacement with the 3× divergence band drawn, and the per-cell residual
+    distribution. It carries **no** software-version table and **no** sample
+    manifest table, because both are files: `mirage_qc_data_<timestamp>/`
+    (published beside the report) holds `collated_versions.yml` and
+    `run_summary.json` verbatim, along with every CSV and JSON the plots were
+    built from. Read the page; parse the folder.
+
 !!! info "Why `geojson/export/`, `registered/registered_slides/` and the repeated `qc/`"
     A process that writes into a named subdirectory of its task directory and
     publishes with a `pattern:` naming that subdirectory gets the subdirectory
