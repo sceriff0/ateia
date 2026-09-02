@@ -573,6 +573,16 @@ class ImageInfo:
     would use. It is not necessarily the module that produced this ``ImageInfo``: a
     ``.ome.tif`` routes to ``bioio`` for conversion but is inspected here through
     ``tifffile``, which needs no plugin and is installed everywhere.
+
+    ``channels_are_samples`` is True for an interleaved RGB (or RGBA/CMYK-style) file --
+    bioio reports one of those as TCZYXS with C=1 and S (samples) equal to the number of
+    colour components, which is NOT the same axis this pipeline's own multichannel
+    intermediates carry as C. ``read_info`` REMAPS S onto ``shape_cyx``'s C position (so
+    ``shape_cyx == (S, Y, X)``, never the nonsense ``(1, X, S)`` a naive C/last-two-axes
+    read would produce) and ``read_plane`` follows the same remap when indexing, so a
+    caller never has to know which axis it actually came from. This flag exists so a
+    caller that DOES care (a caller writing an RGB thumbnail, say) can tell "3 real
+    channels" apart from "3 colour samples of one channel" after the fact.
     """
 
     path: Path
@@ -581,6 +591,7 @@ class ImageInfo:
     channels: Optional[List[str]]
     pixel_size_um: Optional[float]
     reader: str
+    channels_are_samples: bool = False
 
 
 #: Extensions this module can inspect and read planes from with `tifffile` alone.
@@ -726,20 +737,67 @@ def _first_image_dataset(group):
     return None
 
 
-def _info_via_bioio(path: Path, reader: str) -> ImageInfo:
+def _open_bioio(path: Path, reader: str):
+    """The one place bioio is imported and a ``BioImage`` constructed.
+
+    ``require_reader`` lives INSIDE this function, not in its callers, so that a test
+    monkeypatching ``_open_bioio`` bypasses the bioio/bioio-bioformats installed-ness
+    check entirely -- a fake reader object handed back by the test stands in for the
+    WHOLE bioio round trip, not just the ``BioImage(...)`` construction, which is what
+    makes the S->C remap (see ``ImageInfo.channels_are_samples``) testable without bioio
+    installed anywhere in this environment.
+    """
     require_reader(reader)
     from bioio import BioImage
 
-    img = BioImage(str(path))
-    shape = (int(img.dims.C), int(img.shape[-2]), int(img.shape[-1]))
+    return BioImage(str(path))
+
+
+def _info_via_bioio(path: Path, reader: str) -> ImageInfo:
+    """``ImageInfo`` for anything routed through bioio, INCLUDING the S->C remap.
+
+    bioio reports an interleaved RGB (or similar) file as ``TCZYXS`` with ``C=1`` and
+    ``S`` (samples) equal to the number of colour components -- three colour SAMPLES of
+    one channel, not three channels. Reading ``C`` and the trailing two shape entries
+    without accounting for ``S`` (the pre-fix behaviour) reports ``(1, X, S)``: a
+    channel count of 1, a "height" that is actually the image width, and a "width" that
+    is actually the sample count. Whenever ``S`` is present and greater than 1 while
+    ``C`` is exactly 1, this remaps ``S`` onto ``shape_cyx``'s C position instead, and
+    defaults channel names to ``R``/``G``/``B`` for a 3-sample file (``S0``.. otherwise)
+    when the file names none. Y and X are located by NAME in ``dims.order`` rather than
+    assumed to be the trailing two shape entries, because a samples axis can itself
+    trail Y/X (``...YXS``).
+    """
+    img = _open_bioio(path, reader)
+    order = getattr(img.dims, "order", None) or ""
+    shape = tuple(int(n) for n in img.shape)
+    y = shape[order.index("Y")] if "Y" in order else shape[-2]
+    x = shape[order.index("X")] if "X" in order else shape[-1]
+    c = int(img.dims.C)
+    s = int(img.dims.S) if "S" in order else 1
+
+    channels_are_samples = s > 1 and c == 1
+    n_channels = s if channels_are_samples else c
+    raw_names = list(img.channel_names) if img.channel_names else None
+    if channels_are_samples:
+        if raw_names and len(raw_names) == n_channels:
+            channels = raw_names
+        elif n_channels == 3:
+            channels = ["R", "G", "B"]
+        else:
+            channels = [f"S{i}" for i in range(n_channels)]
+    else:
+        channels = raw_names
+
     px = getattr(img.physical_pixel_sizes, "X", None)
     return ImageInfo(
         path=path,
-        shape_cyx=shape,
+        shape_cyx=(n_channels, y, x),
         dtype=np.dtype(img.dtype),
-        channels=list(img.channel_names) if img.channel_names else None,
+        channels=channels,
         pixel_size_um=float(px) if px is not None else None,
         reader=reader,
+        channels_are_samples=channels_are_samples,
     )
 
 
@@ -798,6 +856,11 @@ def read_plane(path, channel: int, *, lazy: bool = True):
 
     ``lazy=False`` exists for the formats ``open_lazy`` cannot open (HDF5, and the vendor
     formats behind bioio) and for a caller that wants the plane materialised anyway.
+
+    On a file where ``read_info`` found ``channels_are_samples`` True (an interleaved
+    RGB-like file), ``channel`` indexes the SAMPLE axis, not C -- the same remap
+    ``read_info`` applies, so a caller never has to know which axis it actually came
+    from.
     """
     path = Path(path)
     info = read_info(path)
@@ -831,8 +894,7 @@ def read_plane(path, channel: int, *, lazy: bool = True):
             return data
         return np.asarray(data[channel])
 
-    require_reader(info.reader)
-    from bioio import BioImage
-
-    img = BioImage(str(path))
+    img = _open_bioio(path, info.reader)
+    if info.channels_are_samples:
+        return np.asarray(img.get_image_data("YX", C=0, S=channel))
     return np.asarray(img.get_image_data("YX", C=channel))

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import sys
+import types
 
 import numpy as np
 import pytest
@@ -546,3 +547,148 @@ def test_parse_ndpis_resolves_entries_against_the_real_directory(tmp_path):
     staged.symlink_to(manifest)
 
     assert ome_io.parse_ndpis(staged) == [real / "s-DAPI.ndpi"]
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1, item 1 -- the S->C (samples->channels) remap for interleaved RGB
+# ---------------------------------------------------------------------------
+
+
+class _FakeBioImage:
+    """Stands in for ``bioio.BioImage``, exposing exactly the attributes
+    ``ome_io``'s bioio path reads (``dims.C``/``.S``/``.order``, ``.shape``, ``.dtype``,
+    ``.channel_names``, ``.physical_pixel_sizes.X``, ``.get_image_data``), so the S->C
+    remap can be exercised without bioio installed anywhere in this test environment.
+    """
+
+    def __init__(self, array, order, channel_names=None, pixel_size_x=None):
+        self._array = array
+        sizes = dict(zip(order, array.shape))
+        self.dims = types.SimpleNamespace(order=order, **sizes)
+        self.shape = array.shape
+        self.dtype = array.dtype
+        self.channel_names = channel_names
+        self.physical_pixel_sizes = types.SimpleNamespace(X=pixel_size_x)
+
+    def get_image_data(self, dims_str, **kwargs):
+        index = []
+        for axis in self.dims.order:
+            if axis in kwargs:
+                index.append(kwargs[axis])
+            elif axis in dims_str:
+                index.append(slice(None))
+            else:
+                index.append(0)
+        return self._array[tuple(index)]
+
+
+def test_read_info_remaps_interleaved_rgb_samples_to_channels(tmp_path, monkeypatch):
+    """bioio reports an interleaved RGB TIFF as TCZYXS with C=1, S=3 -- three SAMPLES of
+    one channel, not three channels. Per the master contract, read_info must remap S
+    onto shape_cyx's C axis (shape_cyx=(3, Y, X)), not report (1, X, 3) nonsense, and
+    default channel names to R/G/B (S==3) when the file names none."""
+    rng = np.random.default_rng(3)
+    array = rng.integers(0, 255, size=(1, 1, 1, 5, 7, 3)).astype(np.uint8)
+    fake = _FakeBioImage(array, order="TCZYXS")
+    monkeypatch.setattr(ome_io, "_open_bioio", lambda path, reader: fake)
+
+    info = ome_io.read_info(tmp_path / "rgb.svs")
+
+    assert info.shape_cyx == (3, 5, 7)
+    assert info.channels == ["R", "G", "B"]
+    assert info.channels_are_samples is True
+
+
+def test_read_info_names_non_rgb_sample_counts_S0_S1(tmp_path, monkeypatch):
+    """S!=3 has no R/G/B convention to fall back on."""
+    rng = np.random.default_rng(7)
+    array = rng.integers(0, 255, size=(1, 1, 5, 7, 4)).astype(np.uint8)
+    fake = _FakeBioImage(array, order="CZYXS")
+    monkeypatch.setattr(ome_io, "_open_bioio", lambda path, reader: fake)
+
+    info = ome_io.read_info(tmp_path / "cmyk.svs")
+
+    assert info.shape_cyx == (4, 5, 7)
+    assert info.channels == ["S0", "S1", "S2", "S3"]
+    assert info.channels_are_samples is True
+
+
+def test_read_plane_selects_the_sample_for_an_interleaved_rgb_file(
+    tmp_path, monkeypatch
+):
+    """A caller must never see the remap: read_plane(path, 2) on an S=3 file returns
+    the third SAMPLE, indexed on the S axis, not a (nonexistent) third channel."""
+    rng = np.random.default_rng(4)
+    array = rng.integers(0, 255, size=(1, 1, 1, 5, 7, 3)).astype(np.uint8)
+    fake = _FakeBioImage(array, order="TCZYXS")
+    monkeypatch.setattr(ome_io, "_open_bioio", lambda path, reader: fake)
+
+    plane = ome_io.read_plane(tmp_path / "rgb.svs", 2)
+
+    assert plane.shape == (5, 7)
+    np.testing.assert_array_equal(plane, array[0, 0, 0, :, :, 2])
+
+
+def test_read_info_leaves_an_ordinary_multichannel_file_unremapped(
+    tmp_path, monkeypatch
+):
+    """C=4, S=1 (S absent from the axis order) is an ordinary multichannel file -- no
+    samples axis to remap, so shape_cyx/channels/channels_are_samples must be exactly
+    what they were before this fix existed."""
+    rng = np.random.default_rng(5)
+    array = rng.integers(0, 4000, size=(4, 1, 1, 6, 9)).astype(np.uint16)
+    fake = _FakeBioImage(
+        array, order="CZTYX", channel_names=["DAPI", "CD3", "CD8", "CD20"]
+    )
+    monkeypatch.setattr(ome_io, "_open_bioio", lambda path, reader: fake)
+
+    info = ome_io.read_info(tmp_path / "slide.czi")
+
+    assert info.shape_cyx == (4, 6, 9)
+    assert info.channels == ["DAPI", "CD3", "CD8", "CD20"]
+    assert info.channels_are_samples is False
+
+
+def test_read_plane_still_selects_by_channel_when_there_is_no_samples_axis(
+    tmp_path, monkeypatch
+):
+    rng = np.random.default_rng(6)
+    array = rng.integers(0, 4000, size=(4, 1, 1, 6, 9)).astype(np.uint16)
+    fake = _FakeBioImage(array, order="CZTYX")
+    monkeypatch.setattr(ome_io, "_open_bioio", lambda path, reader: fake)
+
+    plane = ome_io.read_plane(tmp_path / "slide.czi", 1)
+
+    assert plane.shape == (6, 9)
+    np.testing.assert_array_equal(plane, array[1, 0, 0, :, :])
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1, item 2 -- the pyramid chain, exercised three levels deep
+# ---------------------------------------------------------------------------
+
+
+def test_write_ome_tiff_chains_pyramid_levels_forward_not_from_the_base(tmp_path):
+    """Level 2 must derive from level 1, not be recomputed from the base each time.
+    A loop that forgets to reassign `current` (or resets it to the base every
+    iteration) is invisible at pyramid_levels=2 -- level 1 looks identical either way
+    -- and only shows up chained three deep: level 2 would then have level 1's SHAPE
+    (not further halved) and level 1's CONTENT, instead of being level 1's own
+    downsampling."""
+    data = _stack(c=2, h=37, w=51)
+    out = tmp_path / "chain_pyramid.ome.tif"
+
+    ome_io.write_ome_tiff(
+        out, data, channels=["A", "B"], pixel_size_um=0.2, tile=16, pyramid_levels=3
+    )
+
+    with tifffile.TiffFile(out) as tf:
+        base = tf.series[0]
+        assert len(base.levels) == 3
+        level1 = base.levels[1].asarray()
+        level2 = base.levels[2].asarray()
+
+    assert level1.shape[-2:] == (19, 26)  # ceil(37/2), ceil(51/2)
+    assert level2.shape[-2:] == (10, 13)  # ceil(19/2), ceil(26/2) -- NOT level1's shape
+    np.testing.assert_array_equal(level1, data[:, ::2, ::2])
+    np.testing.assert_array_equal(level2, level1[:, ::2, ::2])
