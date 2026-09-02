@@ -118,7 +118,13 @@ def test_each_feature_carries_a_closed_polygon_ring(exported):
 def test_every_feature_has_a_nucleus_geometry(exported):
     """The combined export's whole point: cell polygon as `geometry`, nucleus polygon
     as top-level `nucleusGeometry`. Zero of them had one."""
-    out, _ = exported
+    out, log = exported
     features = json.loads((out / "cells.geojson").read_text())["features"]
+    assert features, (
+        "no features to inspect -- the export produced 0 features (the same "
+        "0-features regression test_every_csv_row_becomes_a_feature catches), so "
+        "the nucleusGeometry check below would pass vacuously over an empty "
+        f"list.\n\n{log}"
+    )
     without = [i for i, f in enumerate(features) if not f.get("nucleusGeometry")]
     assert not without, f"{len(without)} feature(s) carry no nucleusGeometry: {without[:5]}"
