@@ -340,4 +340,18 @@
 # test_tiled_tre_plots_exclude_rejected_tiles_from_the_distribution), net +1;
 # tests/test_tre_report_accepted.py swapped its two table-caption tests for
 # two plot-caption tests one-for-one, net 0. No other test count moved.
-1408
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p09-qc-report, task 8 (replace the warp-seg
+# QC metric table with per-stage plots -- _seg_qc_table/parse_seg_qc_json/_flatten
+# and the never-wired seg_qc_section deleted, _seg_qc_stage_plots added): 1339
+# passed, 13 skipped, 0 failed -- 1352 collected, up from the prior entry's 1350.
+# tests/test_generate_qc_report.py lost two table-shaped tests
+# (test_parse_seg_qc_json_flattens, test_seg_qc_section_missing) and gained four
+# plot-shaped ones (test_seg_qc_stage_plots_render_one_plot_per_stage,
+# test_seg_qc_stage_plots_order_stages_canonically_not_by_file_order,
+# test_seg_qc_stage_plots_fall_back_to_px_when_no_pixel_size,
+# test_seg_qc_stage_plots_on_an_empty_directory_is_a_notice), net +2. No other
+# test count moved.
+1410

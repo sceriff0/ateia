@@ -66,24 +66,74 @@ def test_status_strip(tmp_path):
     assert "Segmentation" in html
 
 
-def test_parse_seg_qc_json_flattens(tmp_path):
+def _two_slide_seg_qc(tmp_path):
+    d = tmp_path / "seg_qc"
+    d.mkdir()
+    for slide, rigid, nonrigid in (("movA", 6.0, 2.0), ("movB", 5.0, 1.5)):
+        (d / f"{slide}_seg_qc.json").write_text(
+            json.dumps(
+                {
+                    "moving": slide,
+                    "stages": {
+                        "rigid": {"displacement_um_p50": rigid},
+                        "non_rigid": {"displacement_um_p50": nonrigid},
+                    },
+                }
+            )
+        )
+    return d
+
+
+def test_seg_qc_stage_plots_render_one_plot_per_stage(tmp_path):
     gqr = _load()
-    p = tmp_path / "P001_seg_qc.json"
-    p.write_text(json.dumps({"id": "P001", "metrics": {"iou": 0.9, "n": 12}}))
-    rows = gqr.parse_seg_qc_json(p)
-    d = dict(rows)
-    assert d["id"] == "P001"
-    assert d["metrics.iou"] == "0.9"
-    assert d["metrics.n"] == "12"
+    out = gqr._seg_qc_stage_plots(str(_two_slide_seg_qc(tmp_path)))
+    assert out.count("<svg") == 2
+    assert "rigid — cell displacement p50" in out
+    assert "non_rigid — cell displacement p50" in out
+    assert "(n=2)" in out  # two slides contributed to each stage
+    assert "2 slide(s)" in out
 
 
-def test_seg_qc_section_missing(tmp_path):
+def test_seg_qc_stage_plots_order_stages_canonically_not_by_file_order(tmp_path):
+    """Report diffs are read across runs; dict-insertion order is not stable."""
     gqr = _load()
     d = tmp_path / "seg_qc"
     d.mkdir()
-    html = gqr.seg_qc_section(d)
-    assert "Warp" in html or "Segmentation Warp" in html
-    assert "not" in html.lower() or "no " in html.lower()
+    (d / "m_seg_qc.json").write_text(
+        json.dumps(
+            {
+                "moving": "m",
+                "stages": {
+                    "micro": {"displacement_um_p50": 0.8},
+                    "rigid": {"displacement_um_p50": 6.0},
+                    "non_rigid": {"displacement_um_p50": 1.9},
+                },
+            }
+        )
+    )
+    out = gqr._seg_qc_stage_plots(str(d))
+    assert out.index("rigid —") < out.index("non_rigid —") < out.index("micro —")
+
+
+def test_seg_qc_stage_plots_fall_back_to_px_when_no_pixel_size(tmp_path):
+    gqr = _load()
+    d = tmp_path / "seg_qc"
+    d.mkdir()
+    (d / "m_seg_qc.json").write_text(
+        json.dumps({"moving": "m", "stages": {"rigid": {"displacement_px_p50": 4.1}}})
+    )
+    out = gqr._seg_qc_stage_plots(str(d))
+    assert "<svg" in out
+    assert "(n=1)" in out
+
+
+def test_seg_qc_stage_plots_on_an_empty_directory_is_a_notice(tmp_path):
+    gqr = _load()
+    d = tmp_path / "seg_qc"
+    d.mkdir()
+    out = gqr._seg_qc_stage_plots(str(d))
+    assert "<svg" not in out
+    assert 'class="empty-notice"' in out
 
 
 def test_seg_overlay_section_only_overlays(tmp_path):

@@ -583,7 +583,7 @@ def registration_qc_section(reg_dir, valis_dir, seg_qc_dir=None):
         parts.append(
             "<h3 style='margin:20px 0 8px;font-size:1rem;color:#444;'>Warp-Segmentation QC</h3>"
         )
-        parts.extend(_seg_qc_table(jp) for jp in seg_qc_jsons)
+        parts.append(_seg_qc_stage_plots(seg_qc_dir))
 
     return section("Registration QC", "\n".join(parts))
 
@@ -596,47 +596,47 @@ def postprocess_qc_section(postprocess_dir):
     return section("Postprocessing QC", img_grid(pngs, wide=True))
 
 
-def _flatten(prefix, obj, out):
-    """Recursively flatten a nested dict into (dotted-key, str-value) rows."""
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            _flatten(f"{prefix}.{k}" if prefix else str(k), v, out)
-    elif isinstance(obj, list):
-        for i, v in enumerate(obj):
-            _flatten(f"{prefix}[{i}]", v, out)
-    else:
-        out.append((prefix, str(obj)))
+# Canonical stage order for the warp-seg QC plots. WARP_SEG_QC writes `stage_order`
+# into its JSON, but a directory holding several slides can hold several orders and
+# a report is diffed across runs — so the order is fixed here and anything
+# unrecognised is appended, sorted, rather than dropped.
+SEG_QC_STAGE_ORDER = ("native", "rigid", "non_rigid", "micro")
 
 
-def parse_seg_qc_json(path):
-    """Flatten a warp-seg QC JSON into (key, value) rows; schema-agnostic."""
-    with open(path, encoding="utf-8") as fh:
-        data = json.load(fh)
-    out = []
-    _flatten("", data, out)
-    return out
+def _seg_qc_stage_plots(seg_qc_dir):
+    """Per-stage cell-displacement distribution across every slide's WARP_SEG_QC JSON.
 
-
-def _seg_qc_table(json_path):
+    This replaced a per-file flattened metric table (spec Phase 4). The JSON carries
+    per-stage SUMMARY statistics, not raw per-cell values, so the distribution here
+    is across SLIDES: one point per slide per stage, the ``displacement_um_p50``
+    (px fallback) read through ``_read_seg_cell_disp`` — the same reader
+    ``reconcile_rows`` uses, so the plot and the reconciliation scatter cannot
+    disagree about a number. On a one-slide run this is a single bar whose ``n=1``
+    says so; the per-slide records are copied verbatim into the report's
+    ``seg_qc/`` data folder, which is where a single slide's numbers belong.
     """
-    Render a single warp-seg QC JSON as a filename caption + metric table.
-
-    Shared by ``seg_qc_section`` and ``registration_qc_section`` so the
-    warp-seg QC table is built in exactly one place.
-    """
-    parts = [
-        "<p style='font-size:0.85rem;color:#666;margin:8px 0 4px;'>"
-        f"{html.escape(Path(json_path).name)}</p>"
-    ]
-    try:
-        rows = parse_seg_qc_json(json_path)
-    except Exception as exc:  # noqa: BLE001 - report, never crash
+    per_slide = _read_seg_cell_disp(seg_qc_dir)
+    if not per_slide:
+        return '<p class="empty-notice">No warp-segmentation QC metrics found.</p>'
+    seen = set()
+    for metrics in per_slide.values():
+        seen |= set(metrics)
+    stages = [s for s in SEG_QC_STAGE_ORDER if s in seen]
+    stages += sorted(seen - set(SEG_QC_STAGE_ORDER))
+    parts = ['<div style="display:flex;flex-wrap:wrap;gap:12px;">']
+    for stage in stages:
         parts.append(
-            '<p class="empty-notice">Could not parse '
-            f"{html.escape(Path(json_path).name)}: {html.escape(str(exc))}</p>"
+            _error_distribution_svg(
+                [m.get(stage) for m in per_slide.values()],
+                title=f"{stage} — cell displacement p50 (µm), one point per slide",
+            )
         )
-        return "\n".join(parts)
-    parts.append(_html_table(["Metric", "Value"], rows))
+    parts.append("</div>")
+    parts.append(
+        "<p style='font-size:0.8rem;color:#888;margin-top:6px;'>"
+        f"{len(per_slide)} slide(s). Per-slide records are published unchanged "
+        "under <code>seg_qc/</code> in this report's data folder.</p>"
+    )
     return "\n".join(parts)
 
 
@@ -976,16 +976,6 @@ def reconciliation_section(tre_dir, seg_qc_dir):
         )
     body.append("</tbody></table>")
     return section(title, "\n".join(body))
-
-
-def seg_qc_section(seg_qc_dir):
-    """Render warp-seg QC JSONs (one table per file)."""
-    jsons = list_files(seg_qc_dir, "*.json")
-    if not jsons:
-        body = '<p class="empty-notice">No warp-segmentation QC metrics found.</p>'
-        return section("Segmentation Warp QC", body)
-    parts = [_seg_qc_table(jp) for jp in jsons]
-    return section("Segmentation Warp QC", "\n".join(parts))
 
 
 # bin/warp_seg_qc.py's write_per_cell_csv writes one row per matched cell pair,
