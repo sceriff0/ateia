@@ -43,5 +43,16 @@
 #
 # RE-MEASURED 2026-09-02 on the 1.0.0 release branch, plan 01 (suite truth):
 # tests/test_fixtures_have_a_producer.py gained 2 cases and
-# tests/test_export_geojson_fixture_contract.py added 4.
-1298
+# tests/test_export_geojson_fixture_contract.py added 4. That round landed the
+# floor at 1298, but never re-ran `pytest --collect-only` afterward: Task 6's
+# BLOCKING_CHECKS gained a row (a parametrised case of
+# test_the_shared_test_suite_runs_every_blocking_check), +1, which 1298 never
+# counted, and the review round below adds ADVISORY_SUITES' `docs strict site
+# build` entry (I2), another parametrised case, +1. 1298 + 1 + 1 = 1300.
+#
+# RE-MEASURED AGAIN 2026-09-02, final-review fix wave (I1/I2/M1/M2/M4/M5):
+# `pytest --collect-only -q tests/ --ignore=tests/testdata --ignore=tests/modules
+# --ignore=tests/subworkflows --ignore=tests/integration` reports "1300 tests
+# collected", and a full run with MIRAGE_STRICT_SKIPS=1 gives 1288 passed, 12
+# skipped, 0 failed -- 1288 + 12 = 1300, matching the collect count exactly.
+1300

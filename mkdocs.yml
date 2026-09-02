@@ -24,8 +24,10 @@ exclude_docs: |
 # mkdocs 1.6 has no `error` level -- `mkdocs/config/defaults.py`'s _LogLevel accepts
 # exactly warn / info / ignore. Raising these categories from their default `info`
 # to `warn` is what makes `mkdocs build --strict` abort on them, which is how the
-# docs job in .github/workflows/_test-suite.yml turns a dangling anchor into a
-# failed build instead of a line nobody reads.
+# docs job in .github/workflows/nightly.yml turns a dangling anchor into a
+# failed build instead of a line nobody reads. (Relocated from _test-suite.yml
+# on 2026-09-02 -- see nightly.yml's `docs` job comment; plan 12 moves it back
+# once the build is green.)
 #
 # `nav.omitted_files: warn` is the orphan-page rule: a Markdown file in docs/ that
 # no nav entry points at is unreachable from the site. Two exist today

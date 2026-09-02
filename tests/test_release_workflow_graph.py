@@ -1231,6 +1231,14 @@ GATE_DISCONNECTED_JOBS: dict[tuple[str, str], str] = {}
 ADVISORY_SUITES = {
     "nf-test real suite": "--tag real",
     "nf-test integration suite": "--tag integration",
+    # Relocated from _test-suite.yml to nightly.yml on 2026-09-02 (see
+    # nightly.yml's `docs` job comment): a called reusable workflow's own
+    # conclusion is the worst conclusion of ANY job inside it regardless of gate
+    # membership, so the job had to leave _test-suite.yml entirely, not just its
+    # gate's `needs:`. Plan 12 moves it back into BLOCKING_CHECKS (and into
+    # GATE_MEMBERSHIP["_test-suite.yml"]) atomically, once the docs build is
+    # green.
+    "docs strict site build": "mkdocs build --strict",
 }
 
 

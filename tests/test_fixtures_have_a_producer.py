@@ -174,8 +174,14 @@ def test_every_referenced_fixture_is_non_empty_and_openable():
 
 def test_the_empty_on_purpose_allowlist_has_no_dead_entries():
     """An exemption for a fixture that is gone, or that now has real content, is a
-    licence nobody is using and the next reader will trust."""
+    licence nobody is using and the next reader will trust.
+
+    A THIRD way an entry goes dead: nothing references it any more. The fixture
+    still exists at zero bytes, so the two checks above stay silent, but no test
+    opens it -- the exemption is licensing a file the suite no longer looks at.
+    """
     stale = []
+    refs = _referenced()
     for name, reason in EMPTY_ON_PURPOSE.items():
         assert reason.strip(), f"{name} has an empty reason"
         path = TESTDATA / name
@@ -184,6 +190,10 @@ def test_the_empty_on_purpose_allowlist_has_no_dead_entries():
         elif path.stat().st_size != 0:
             stale.append(
                 f"{name}: is {path.stat().st_size} bytes now, not empty -- delete the exemption"
+            )
+        elif name not in refs:
+            stale.append(
+                f"{name}: no longer referenced by any test -- delete the exemption"
             )
     assert not stale, "\n".join(stale)
 

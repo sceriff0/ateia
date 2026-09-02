@@ -151,6 +151,11 @@
 # `push:` trigger here with `branches: [dev]` -- a decision to take then, on a
 # green suite, not now.
 #
+# The `docs` job below is in exactly the same position: `schedule:` runs this
+# file as it exists on the default branch, so the strict mkdocs build has ZERO
+# coverage on `dev` or any feature/release branch -- only a manual
+# `workflow_dispatch` against that branch exercises it there.
+#
 # 05:17 UTC is deliberately not on the hour: GitHub's scheduler queues heavily at
 # :00 and can delay or drop a run entirely under load.
 # =============================================================================
