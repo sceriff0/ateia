@@ -116,6 +116,15 @@ class ParamUtils {
 
     static final List STEP_ORDER = STEPS.collect { it.name }
 
+    /**
+     * Require a non-blank --outdir.
+     *
+     * Without it every publishDir closure interpolates a null and the whole run
+     * publishes under a literal 'null/' path -- which succeeds, so nothing else
+     * catches it.
+     *
+     * @throws IllegalArgumentException when outdir is null, empty or whitespace.
+     */
     static void validateOutdir(String outdir) {
         if (!outdir?.trim()) {
             throw new IllegalArgumentException(
@@ -134,6 +143,30 @@ class ParamUtils {
         }
     }
 
+    /**
+     * Launch-time validation of mode='add_cycle'.
+     *
+     * Three rules, all checked before any process is instantiated:
+     *
+     *  1. --prior_outdir must be given; add_cycle re-enters a completed run's tree.
+     *  2. --outdir must not resolve to the same directory as --prior_outdir.
+     *     Compared as CANONICAL paths, so a trailing slash, a '.', or a symlink
+     *     cannot defeat it. add_cycle writes its registered-checkpoint CSV through
+     *     collectFile(storeDir:), which OVERWRITES: sharing the directory would
+     *     clobber the prior run's complete manifest with add_cycle's partial one
+     *     while the postprocessed checkpoint survived untouched, leaving
+     *     --prior_outdir internally inconsistent and unrecoverable.
+     *  3. Every checkpoint in Layout.ADD_CYCLE_CHECKPOINTS must already exist under
+     *     --prior_outdir. Absence means either the prior run did not reach
+     *     postprocessing, or it ran at the default --cleanup_level, which does not
+     *     publish the intermediates add_cycle re-enters from.
+     *
+     * Which checkpoints those are, and where they live, is Layout's to say --
+     * add_cycle.nf reads the very same files.
+     *
+     * @throws IllegalArgumentException for rules 1 and 2.
+     * @throws FileNotFoundException for rule 3, naming the missing checkpoint.
+     */
     static void validateAddCycle(String outdir, String priorOutdir) {
         if (!priorOutdir?.trim()) {
             throw new IllegalArgumentException(
@@ -492,6 +525,20 @@ class ParamUtils {
         }
     }
 
+    /**
+     * The samplesheet columns `step` requires, from the one STEPS table.
+     *
+     * Derived rather than restated: STEPS is the single ordered definition of what a
+     * step IS, and STEP_ORDER, entryColumnForStep and knownArtifactKinds all come
+     * from the same rows.
+     *
+     * @param step one of STEP_ORDER
+     *
+     * Returns the step's requiredColumns list.
+     * @throws IllegalArgumentException naming `step` when it is not in STEPS -- a
+     *         typo surfaces here rather than as an empty requirement set that
+     *         validates everything.
+     */
     static List requiredColumnsForStep(String step) {
         def entry = STEPS.find { it.name == step }
         if (!entry) {

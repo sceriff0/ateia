@@ -93,10 +93,26 @@ class WarpBackends {
         ],
     ].asImmutable()
 
+    /**
+     * The registration methods WARP_SEG_QC can score, in BACKENDS order.
+     *
+     * Must equal the set of methods nextflow_schema.json's `registration_method`
+     * enum accepts (currently 'valis' and 'tiled'): a method that registers but
+     * cannot be warp-scored would fail only at reg_qc=2, on a real run.
+     */
     static List<String> methods() {
         return BACKENDS.keySet() as List
     }
 
+    /**
+     * The backend row for `method` -- container, stages, versionTools, flags, stubExtras.
+     *
+     * Keyed on the `method` ARGUMENT, never params.registration_method: SEG_QC takes
+     * the method as a parameter so there is one decision site rather than two reads
+     * that can drift.
+     *
+     * @throws IllegalArgumentException naming `method` and listing methods().
+     */
     static Map of(String method) {
         def backend = BACKENDS[method]
         if (!backend)

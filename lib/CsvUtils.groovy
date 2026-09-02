@@ -380,6 +380,32 @@ class CsvUtils {
         return result
     }
 
+    /**
+     * Count the channels that will actually be EMITTED per patient -- the number a
+     * `channels_count`-sized `groupKey` must equal.
+     *
+     * Derived from resolveKeptChannelsPerSlide, which is the rule SPLIT_CHANNELS
+     * applies, so this method and SPLIT_CHANNELS cannot disagree. Summing the
+     * per-slide keep-lists is exact in both directions at once: the resolver claims
+     * each marker name once per patient, so the sum equals BOTH the number of TIFFs
+     * emitted and the number of distinct names. Every consumer is therefore correct
+     * without having to know which of the two it was handed.
+     *
+     * Do NOT substitute countDeclaredChannelsPerPatient. It has no reference and no
+     * nuclear-marker awareness, so it over-counts a reference-less sheet by the
+     * dropped nuclear channel -- and an over-counted groupKey never fills, so the
+     * run hangs rather than failing.
+     *
+     * Returns an empty map on a missing file, a header-only sheet, or an absent
+     * patient_id / channels / <imageColumn> column: every such guard lives in the
+     * resolver rather than being repeated here.
+     *
+     * @param csvPath        path to the samplesheet
+     * @param imageColumn    the column naming the step's input image
+     * @param nuclearMarkers params.nuclear_markers, in any form MarkerUtils accepts
+     *
+     * Returns a Map of patient_id -> emitted channel count.
+     */
     static Map<String, Integer> countChannelsPerPatient(String csvPath, String imageColumn, def nuclearMarkers) {
         // Every guard the old body carried inline -- missing file, header-only sheet,
         // absent patient_id/channels/<imageColumn> column -- now lives in the resolver,
@@ -678,6 +704,30 @@ class CsvUtils {
         ]
     }
 
+    /**
+     * Validate one already-parsed meta map, and return it unchanged.
+     *
+     * Checks, in order: `patient_id` is present; `is_reference` is a real Boolean
+     * (not a truthy String); `channels` is a non-empty List with no null or blank
+     * entry; and at least one channel is a nuclear/fiducial marker.
+     *
+     * The nuclear marker may sit at ANY position -- segmentation and the
+     * registration fiducial both locate it by NAME -- and which names qualify comes
+     * from params.nuclear_markers via MarkerUtils, never a hardcoded 'DAPI', which
+     * used to reject an otherwise valid CELLTOX-only samplesheet before the run
+     * could start.
+     *
+     * @param meta           the map to validate
+     * @param nuclearMarkers params.nuclear_markers, in any form MarkerUtils accepts
+     * @param context        included verbatim in every message, so a failure names
+     *                       the row it came from
+     *
+     * Returns the same `meta` map.
+     * @throws IllegalArgumentException on a missing patient_id, a non-Boolean
+     *         is_reference, or a missing/empty/blank-entry channel list.
+     * @throws IllegalStateException when no channel is a nuclear marker; the
+     *         message lists both the accepted marker names and the channels found.
+     */
     static Map validateMetadata(Map meta, def nuclearMarkers, String context = 'unknown') {
 
         if (!meta.patient_id)
@@ -716,6 +766,22 @@ class CsvUtils {
         throw new IllegalArgumentException("Invalid is_reference value '${value}' in ${context}. Must be 'true' or 'false'.")
     }
 
+    /**
+     * Build a validated meta map from one raw samplesheet row.
+     *
+     * Splits the `channels` cell on '|' and trims each name, parses `is_reference`
+     * strictly through parseIsReference (so a typo like "yes" is rejected rather
+     * than silently coerced to false and corrupting reference selection), then
+     * hands the result to validateMetadata.
+     *
+     * @param row            the raw row, keyed by column name
+     * @param nuclearMarkers params.nuclear_markers, in any form MarkerUtils accepts
+     * @param context        prefix for every message; the patient id is appended
+     *
+     * Returns a Map with `patient_id`, `is_reference` and `channels`.
+     * @throws IllegalArgumentException from parseIsReference or validateMetadata.
+     * @throws IllegalStateException from validateMetadata's nuclear-marker check.
+     */
     static Map parseMetadata(Map row, def nuclearMarkers, String context = 'parseMetadata') {
 
         def channels = row.channels
@@ -731,6 +797,23 @@ class CsvUtils {
         return validateMetadata(meta, nuclearMarkers, "${context} (${row.patient_id})")
     }
 
+    /**
+     * Structural check of a samplesheet: it exists, it is not empty, and its header
+     * carries every required column.
+     *
+     * Structure only -- the per-row semantic checks are validateSamplesheet's. Run
+     * before anything reads a row, so a missing column is named at launch instead of
+     * surfacing as a null further down.
+     *
+     * @param csv           path to the samplesheet
+     * @param required_cols the column names the current step needs, from
+     *                      ParamUtils.requiredColumnsForStep
+     *
+     * @throws FileNotFoundException if the file does not exist.
+     * @throws RuntimeException if the file has no lines at all.
+     * @throws IllegalArgumentException naming the first required column missing
+     *         from the header.
+     */
     static void validateInputCSV(def csv, List required_cols) {
 
         def file = new File(csv)
