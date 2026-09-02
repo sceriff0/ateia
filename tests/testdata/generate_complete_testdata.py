@@ -648,6 +648,49 @@ with open(OUT_DIR / "sample_merged_quant.csv", "w") as f:
         )
 print("  Created sample_merged_quant.csv (20 cells)")
 
+# 6a-bis. The PRIOR RUN's merged quantification CSV, named by
+# prior_run/csv/postprocessed.csv's `cell_csv` and `merged_csv` columns.
+#
+# TWO markers, not three. The prior run has exactly one slide, declared DAPI|PANCK
+# in prior_run/csv/registered.csv, and Task 3's P001_pyramid.ome.tiff carries those
+# two channels. Reusing sample_merged_quant.csv here (three markers, SMA included)
+# would hand ADD_CYCLE's MERGE_QUANT_CSVS a prior marker that appears in no prior
+# image.
+#
+# Column order is bin/merge_quant_csvs.reorder_columns': fov, cell_size, then
+# MORPHOLOGY_COLS' order for whatever morphology is present, then the markers. It is
+# the same order written down in expected/merged_quant_columns.txt below.
+#
+# A DEDICATED Generator, like the keep-set fixtures above (_img_rng at seed 42,
+# _prior_rng at seed 44): this block sits BEFORE several pre-existing fixtures that
+# still draw from the shared np.random stream (sample_{DAPI,PANCK,SMA}.tif,
+# sample_morphology.csv, sample_contours.json, sample_{DAPI,PANCK,SMA}_intensity.csv)
+# -- drawing from that shared stream here would consume 180 of its draws and shift
+# every one of those fixtures' content on regeneration.
+_quant_rng = np.random.default_rng(45)
+_prior_quant_cols = [
+    "fov", "cell_size", "label", "y", "x", "area", "eccentricity", "perimeter",
+    "convex_area", "axis_major_length", "axis_minor_length", "DAPI", "PANCK",
+]
+with open(OUT_DIR / "P001_merged_quant.csv", "w") as f:
+    f.write(",".join(_prior_quant_cols) + "\n")
+    for i in range(1, 21):
+        x = _quant_rng.uniform(10, 118)
+        y = _quant_rng.uniform(10, 118)
+        area = _quant_rng.integers(150, 350)
+        perimeter = _quant_rng.uniform(45, 75)
+        eccentricity = _quant_rng.uniform(0.3, 0.6)
+        major = _quant_rng.uniform(12, 25)
+        minor = _quant_rng.uniform(8, 18)
+        solidity = _quant_rng.uniform(0.85, 0.98)
+        dapi = _quant_rng.integers(6000, 12000)
+        panck = _quant_rng.integers(1500, 8000)
+        f.write(
+            f"P001,{area},{i},{y:.1f},{x:.1f},{area},{eccentricity:.2f},{perimeter:.1f},"
+            f"{int(round(area / solidity))},{major:.1f},{minor:.1f},{dapi},{panck}\n"
+        )
+print("  Created P001_merged_quant.csv (20 cells, DAPI+PANCK -- the prior run's panel)")
+
 # 6d. Sample features JSON
 # 6h. Single channel TIF images (already exist but ensure proper format)
 for ch_name in ["DAPI", "PANCK", "SMA"]:
