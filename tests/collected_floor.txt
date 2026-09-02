@@ -463,4 +463,15 @@
 # this phase (174eea2) -- but the number it set was already arithmetically
 # correct (1338 + 2 + 3 = 1343). Left unchanged; this entry makes the accounting
 # whole.
-1433
+
+#
+#
+# RE-MEASURED 2026-09-03, plan 04's final-review fix wave (six findings: I1, M1,
+# M2, M3, M6, M10). Two new Python test functions:
+# test_segment_cellsam_delegates_to_segment_io (M2, tests/test_segment_lazy_dapi_read.py)
+# and test_size_log_and_stub_write_the_same_outfile (M10,
+# tests/test_versions_envelope.py). I1 and M1 only add assertions inside
+# tests/lib_probe.nf (a Nextflow script, not pytest-collected); M3 and M6 touch no
+# test file. `pytest --collect-only -q` reports "1345 tests collected", and a full
+# run gives 1332 passed, 13 skipped, 0 failed -- 1332 + 13 = 1345.
+1435
