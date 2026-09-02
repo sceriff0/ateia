@@ -376,6 +376,61 @@ def walltime_bars_svg(roll, top=15):
     )
 
 
+def memory_headroom_svg(roll, top=15):
+    """Requested memory vs observed peak RSS, per process, ranked by waste.
+
+    This is where over-provisioning becomes visible, and it is the panel the old
+    report could not have drawn at all: it never read the trace's `memory`
+    column, so it showed usage with nothing to compare it against.
+
+    Two bars per process on a shared scale: a light track for the request and a
+    dark overlay for the observed peak. A wide light bar with a sliver of dark in
+    it is memory reserved and never used -- reserved GB.hours that the scheduler
+    could not give to anything else. A dark bar that overruns its track (drawn in
+    red) is the OOM-retry precursor, and must not be clipped to look like a
+    perfectly-sized task.
+    """
+    rows = [
+        r
+        for r in roll
+        if r.get("mem_req_max_b") and r.get("peak_rss_max_b") is not None
+    ]
+    rows.sort(key=lambda r: -(r["mem_req_max_b"] - r["peak_rss_max_b"]))
+    rows = rows[:top]
+    if not rows:
+        return ""
+    vmax = max(max(r["mem_req_max_b"], r["peak_rss_max_b"]) for r in rows) or 1.0
+    bar_w = _PANEL_W - _LABEL_W - _VALUE_W
+    parts = []
+    for i, r in enumerate(rows):
+        y = i * _ROW_H
+        req, obs = r["mem_req_max_b"], r["peak_rss_max_b"]
+        pct = 100.0 * obs / req
+        over = " over" if obs > req else ""
+        parts.append(
+            f"<text x='0' y='{y + 15}' font-size='12' fill='#333'>"
+            f"{_esc(short_process(r['process']))}</text>"
+            f"<rect class='req' x='{_LABEL_W}' y='{y + 4}' "
+            f"width='{max(1.0, bar_w * req / vmax):.1f}' height='{_ROW_H - 8}' "
+            f"fill='#dfe4ea'>"
+            f"<title>{_esc(r['process'])}: requested {fmt_bytes(req)}</title></rect>"
+            f"<rect class='obs{over}' x='{_LABEL_W}' y='{y + 7}' "
+            f"width='{max(1.0, bar_w * obs / vmax):.1f}' height='{_ROW_H - 14}' "
+            f"fill='{'#c0392b' if over else '#2c3e50'}'>"
+            f"<title>{_esc(r['process'])}: peak RSS {fmt_bytes(obs)} "
+            f"({pct:.0f}% of the request)</title></rect>"
+            f"<text x='{_LABEL_W + bar_w + 8}' y='{y + 15}' font-size='12' "
+            f"fill='{'#c0392b' if over else '#666'}'>{pct:.0f}% of "
+            f"{_esc(fmt_bytes(req))}</text>"
+        )
+    return _svg(
+        _PANEL_W,
+        len(rows) * _ROW_H + 4,
+        "".join(parts),
+        "Requested memory versus observed peak RSS, per process",
+    )
+
+
 _CSS = """
 body{font-family:'Segoe UI',Arial,sans-serif;background:#f4f6f9;color:#333;margin:0}
 header{background:#1a2332;color:#fff;padding:24px 40px}

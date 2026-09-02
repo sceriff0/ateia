@@ -521,3 +521,59 @@ def test_walltime_bars_escapes_a_hostile_process_name():
     svg = grr.walltime_bars_svg([_roll_row("<b>A</b>", 5.0)])
     assert "<b>A</b>" not in svg
     assert "&lt;b&gt;A&lt;/b&gt;" in svg
+
+
+GB = 1024**3
+
+
+def test_memory_headroom_draws_a_request_track_and_an_observed_overlay():
+    grr = _load()
+    roll = [
+        _roll_row(
+            "MIRAGE:A:WASTEFUL", 1.0, mem_req_max_b=200.0 * GB, peak_rss_max_b=20.0 * GB
+        ),
+        _roll_row(
+            "MIRAGE:A:TIGHT", 1.0, mem_req_max_b=32.0 * GB, peak_rss_max_b=30.0 * GB
+        ),
+    ]
+
+    svg = grr.memory_headroom_svg(roll)
+
+    assert svg.count("<rect class='req'") == 2
+    assert svg.count("<rect class='obs'") == 2
+    # Ranked by wasted bytes: 180 GB wasted beats 2 GB wasted.
+    assert svg.index("WASTEFUL") < svg.index("TIGHT")
+    assert "10%" in svg  # 20 of 200 GB used
+    assert "94%" in svg  # 30 of 32 GB used
+
+
+def test_memory_headroom_skips_a_process_with_no_recorded_request():
+    """A process whose trace rows carry `memory` = '-' has no headroom to show.
+    Drawing it against a request of zero would render as 'infinitely
+    over-provisioned', which is the opposite of the truth."""
+    grr = _load()
+    roll = [
+        _roll_row("A", 1.0, mem_req_max_b=None, peak_rss_max_b=10.0 * GB),
+        _roll_row("B", 1.0, mem_req_max_b=100.0 * GB, peak_rss_max_b=None),
+        _roll_row("C", 1.0, mem_req_max_b=100.0 * GB, peak_rss_max_b=50.0 * GB),
+    ]
+    svg = grr.memory_headroom_svg(roll)
+    assert svg.count("<rect class='req'") == 1
+    assert "C" in svg
+
+
+def test_memory_headroom_marks_a_process_that_exceeded_its_request():
+    """peak_rss above the request is the OOM-retry precursor and must be visible
+    as such, not silently clipped to a full bar like a perfectly-sized task."""
+    grr = _load()
+    svg = grr.memory_headroom_svg(
+        [_roll_row("A", 1.0, mem_req_max_b=10.0 * GB, peak_rss_max_b=15.0 * GB)]
+    )
+    assert "class='obs over'" in svg
+    assert "150%" in svg
+
+
+def test_memory_headroom_is_empty_when_nothing_is_plottable():
+    grr = _load()
+    assert grr.memory_headroom_svg([]) == ""
+    assert grr.memory_headroom_svg([_roll_row("A", 1.0)]) == ""

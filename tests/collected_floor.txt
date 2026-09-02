@@ -130,4 +130,17 @@
 # test_walltime_bars_is_empty_for_no_rows,
 # test_walltime_bars_escapes_a_hostile_process_name); no other test count
 # moved.
-1346
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p10-resource-report, phase 10 task 6
+# (generate_resource_report.py: Panel 2, memory_headroom_svg): 1335 passed,
+# 13 skipped, 0 failed -- 1348 collected, up from the prior entry's 1344.
+# The increase is exactly the 4 new cases in
+# tests/test_generate_resource_report.py
+# (test_memory_headroom_draws_a_request_track_and_an_observed_overlay,
+# test_memory_headroom_skips_a_process_with_no_recorded_request,
+# test_memory_headroom_marks_a_process_that_exceeded_its_request,
+# test_memory_headroom_is_empty_when_nothing_is_plottable); no other test
+# count moved.
+1350
