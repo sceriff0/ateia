@@ -687,6 +687,12 @@ BLOCKING_CHECKS = [
     ("param surface consistency", "tests/check_param_consistency.py"),
     ("pipeline validation script", "tests/run_validation_tests.sh"),
     ("work-directory cleanup", "tests/cleanup_work.sh"),
+    # Added 2026-09-02 (plan 01). Same class as cleanup_work.sh: a shell check that
+    # measures a session-teardown / session-to-session OUTCOME, so it can be neither
+    # a pytest nor an nf-test, and it therefore needs its own step or it runs
+    # nowhere. It ran nowhere -- it was named in the developer notes as "the
+    # behavioural resume check" and appeared in no workflow file.
+    ("resume determinism (behavioural)", "tests/resume_check.sh"),
     ("shipped-defaults stub run", "-profile shipped_defaults_test"),
     ("DEEPCELL token-leak guard", "tests/modules/segment_deepcell_token.nf.test"),
     ("token-guard collection assertion", "--dry-run"),

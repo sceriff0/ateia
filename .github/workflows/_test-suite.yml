@@ -390,6 +390,26 @@ jobs:
         run: |
           bash tests/cleanup_work.sh
 
+      - name: Verify -resume reuses the cache (behavioural)
+        # The behavioural counterpart to tests/test_resume_determinism.py, and like
+        # tests/cleanup_work.sh it needs its own step or it runs nowhere: it is
+        # neither a pytest nor an nf-test, because what it measures is an OUTCOME
+        # across two whole pipeline sessions. It was referenced in the project's
+        # developer notes as "the behavioural resume check" while appearing in no
+        # workflow file at all.
+        #
+        # Container-free, like every other step in this job: the script runs
+        # `nextflow -q run . -profile test -stub`.
+        #
+        # ONE resume, not the script's default of three. The property is asserted
+        # per resume -- a re-submitted process outside {GENERATE_QC_REPORT,
+        # AGGREGATE_SIZE_LOGS} fails immediately -- so a second and third pass
+        # buy probability, not coverage, and this job already runs two full stub
+        # pipelines per matrix leg. The static guard is the one the gate leans on
+        # precisely because the regression this looks for was intermittent.
+        run: |
+          bash tests/resume_check.sh 1
+
       - name: Upload stub test results
         if: always()
         uses: actions/upload-artifact@v4
