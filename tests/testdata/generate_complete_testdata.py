@@ -412,6 +412,63 @@ with open(PRIOR_DIR / "postprocessed.csv", "w") as f:
     )
 print("  Created prior_run/csv/{registered,postprocessed}.csv")
 
+# 3d-bis. The prior run's two IMAGE fixtures, named by the two checkpoint CSVs above.
+#
+#   P001_image.tiff       -- the prior run's registered reference. registered.csv
+#                            declares it DAPI|PANCK, so it carries exactly those two.
+#   P001_pyramid.ome.tiff -- the prior run's combined pyramid, WITH the mask series.
+#                            bin/extract_mask_series.py exits non-zero unless series 1
+#                            is a (2, H, W) unsigned-integer [cell, nuclei] stack, and
+#                            add_cycle.nf reads the prior channel names off series 0.
+#
+# A DEDICATED Generator, like the keep-set fixtures above: drawing from _img_rng here
+# would shift the stream that renders every image written before this point.
+#
+# Written with an explicit `ome=True` / TiffWriter rather than through
+# create_multichannel_image, because tifffile only emits OME-XML by default for a
+# name ending in `.ome.tif`/`.ome.tiff` -- and the first of these two deliberately
+# does not (the checkpoint CSV names it `P001_image.tiff`).
+_prior_rng = np.random.default_rng(44)
+_prior_channels = ["DAPI", "PANCK"]
+_prior_planes = np.stack(
+    [
+        _render_channel(p001_anatomy, (128, 128), (0, 0), 1.0 if ch == 0 else 0.5, _prior_rng)
+        for ch in range(len(_prior_channels))
+    ]
+)
+tifffile.imwrite(
+    OUT_DIR / "P001_image.tiff",
+    _prior_planes,
+    photometric="minisblack",
+    ome=True,
+    metadata={"axes": "CYX", "Channel": {"Name": _prior_channels}},
+)
+print(f"  Created P001_image.tiff - shape: {_prior_planes.shape}, channels: {_prior_channels}")
+
+_prior_masks = np.stack(
+    [
+        tifffile.imread(OUT_DIR / "P001_cell_mask.tif").astype(np.uint32),
+        tifffile.imread(OUT_DIR / "P001_nuclei_mask.tif").astype(np.uint32),
+    ]
+)
+with tifffile.TiffWriter(OUT_DIR / "P001_pyramid.ome.tiff", ome=True, bigtiff=True) as _tif:
+    # subifds=1 reserves one sub-resolution level, exactly as
+    # bin/merge_channels_pyramid.py does; the next write with subfiletype=1 fills it.
+    _tif.write(
+        _prior_planes,
+        photometric="minisblack",
+        subifds=1,
+        metadata={"axes": "CYX", "Channel": {"Name": _prior_channels}},
+    )
+    _tif.write(_prior_planes[:, ::2, ::2], photometric="minisblack", subfiletype=1)
+    # A separate top-level write with its own metadata becomes OME Image:1.
+    _tif.write(
+        _prior_masks,
+        photometric="minisblack",
+        metadata={"axes": "CYX", "Channel": {"Name": ["cell_mask", "nuclei_mask"]}},
+    )
+print(f"  Created P001_pyramid.ome.tiff - 2 series (image {_prior_planes.shape} + masks {_prior_masks.shape})")
+
 # 3e. The NEW-CYCLE samplesheet that goes with prior_run/ — i.e. what a real
 #     `--mode add_cycle --prior_outdir <prior_run> --input <this>` run consumes.
 #     By design it has NO reference row: the registration reference is the frozen
