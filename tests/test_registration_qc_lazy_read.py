@@ -114,7 +114,12 @@ def test_registration_qc_never_eagerly_decodes_the_whole_stack(tmp_path, monkeyp
             imread_full_calls.append(str(path))
         return orig_imread(path, *args, **kwargs)
 
-    monkeypatch.setattr(qc.tifffile, "imread", spying_imread)
+    # qc.py no longer binds the name `tifffile` at all (Task 7 routed its two writes
+    # through ome_io.write_tiff and its reads always went through open_lazy/read_decimated),
+    # so the spy patches the shared tifffile module object directly -- the same object any
+    # `import tifffile; tifffile.imread(...)` in qc.py's call chain would resolve to, were
+    # one ever reintroduced.
+    monkeypatch.setattr(tifffile, "imread", spying_imread)
 
     qc.create_registration_qc(
         reference_path=ref_path,

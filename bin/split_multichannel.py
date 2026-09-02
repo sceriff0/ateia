@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from image_utils import ensure_dir, normalize_image_dimensions
 from logger import configure_logging, get_logger
 from metadata import extract_channel_names_from_ome, is_nuclear
+from ome_io import write_tiff
 from pixel_size import (
     read_ome_pixel_size,
     resolve_pixel_size,
@@ -286,7 +287,7 @@ def split_multichannel_tiff(
             # the largest real slide. Pinning would only cost wall clock (serialising the
             # per-tile compression this call would otherwise parallelise) for no memory
             # benefit, so it is left unpinned.
-            tifffile.imwrite(
+            write_tiff(
                 output_path,
                 channel_data,
                 bigtiff=True,

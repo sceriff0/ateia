@@ -18,6 +18,7 @@ import tifffile
 
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 from logger import configure_logging, get_logger  # noqa: E402
+from ome_io import write_tiff  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -76,7 +77,7 @@ def main() -> None:
     # 0 <= number <= 4294967295), which is the same reason tiled_stitch.py:118 sets it.
     # Guarded by tests/test_mask_series_write_contract.py.
     for name, plane in (("cell_mask.tif", masks[0]), ("nuclei_mask.tif", masks[1])):
-        tifffile.imwrite(
+        write_tiff(
             args.outdir / name,
             plane,
             compression="zlib",

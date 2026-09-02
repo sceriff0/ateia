@@ -37,10 +37,10 @@ from typing import Tuple
 
 import cv2
 import numpy as np
-import tifffile
 from logger import get_logger
 from metadata import extract_channel_names_from_ome, pick_nuclear_index
 from numpy.typing import NDArray
+from ome_io import write_tiff
 from registration_utils import autoscale
 from skimage.transform import rescale
 from tiled_io import decimation_factor, open_lazy, read_decimated
@@ -404,7 +404,7 @@ def create_registration_qc(
         )
 
         fullres_output_path = output_path.with_name(output_path.stem + "_fullres.tif")
-        tifffile.imwrite(
+        write_tiff(
             str(fullres_output_path),
             rgb_stack_full,
             imagej=True,
@@ -428,7 +428,7 @@ def create_registration_qc(
     # Save TIFF (ImageJ-compatible, CYX order)
     if save_tiff:
         tiff_output_path = output_path.with_suffix(".tif")
-        tifffile.imwrite(
+        write_tiff(
             str(tiff_output_path),
             rgb_cyx,
             ome=True,

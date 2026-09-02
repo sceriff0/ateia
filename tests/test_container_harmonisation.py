@@ -500,16 +500,19 @@ def _third_party_imports(script):
     return third
 
 
-#: Shared reason for the six (container, bioio/h5py) exemptions below: three writer-only
-#: scripts each reach both names through the same shared module, for the same reason.
+#: Shared reason for the (container, bioio/h5py) exemptions below: every writer-only script
+#: reaches both names through the same shared module, for the same reason.
 _OME_IO_READER_DISPATCH_UNREACHABLE = (
     "bin/utils/ome_io.py's bioio/h5py imports are lazy, INSIDE its reader-dispatch "
     "functions (_open_bioio and read_info's h5py branch), reached only through "
     "detect_reader/require_reader/read_info/read_plane. apply_basic_profiles.py, "
-    "tiled_stitch.py and merge_channels_pyramid.py import ome_metadata/ome_tiff_writer from "
-    "the same module -- the write seam, not the read one -- and never call a reader-dispatch "
-    "name, so the import never runs in these containers. bioio/h5py stay "
-    "containers/convert-only, per ome_io.py's own module docstring. Guarded by "
+    "tiled_stitch.py, merge_channels_pyramid.py, extract_mask_series.py, segment.py, "
+    "segment_cellsam.py, segment_instantseg.py, split_multichannel.py, tile_for_basic.py, "
+    "bin/utils/qc.py and bin/utils/image_utils.py all import write_tiff (or, transitively "
+    "through image_utils.py/qc.py, nothing more than that) from the same module -- the "
+    "write seam, not the read one -- and never call a reader-dispatch name, so the import "
+    "never runs in these containers. bioio/h5py stay containers/convert-only, per "
+    "ome_io.py's own module docstring. Guarded by "
     "test_ome_io_reader_dispatch_is_unreachable_from_the_writer_only_scripts."
 )
 
@@ -530,6 +533,24 @@ UNREACHABLE_IMPORTS = {
     ("tiled", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
     ("merge", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
     ("merge", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
+    # segment.py/segment_cellsam.py/segment_instantseg.py (Task 7) each added a direct
+    # `from ome_io import write_tiff`, and every one of them already imports image_utils.py
+    # (also now `from ome_io import write_tiff`) for `ensure_dir`. Neither route calls a
+    # reader-dispatch name.
+    ("stardist", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
+    ("stardist", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
+    ("cellsam", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
+    ("cellsam", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
+    ("instanseg", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
+    ("instanseg", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
+    # export_geojson.py, extract_cell_properties.py and quantify.py all import image_utils.py
+    # for ensure_dir/load_image; image_utils.py's save_tiff now delegates to ome_io.write_tiff.
+    ("quantify", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
+    ("quantify", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
+    # generate_registration_qc.py imports bin/utils/qc.py, which now imports
+    # ome_io.write_tiff for its two composite writes. containers/regqc already installs
+    # h5py (requirements/regqc.txt) for its own vendor readers, so only bioio is missing.
+    ("regqc", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
     # There is deliberately NO ("tiled", "torch")/("tiled", "kornia") entry. Both used to be
     # exempted here on the grounds that torch/kornia shipped "only in the stare-ml container",
     # so :tiled was never expected to satisfy the import. containers/tiled now installs both,
@@ -563,20 +584,30 @@ def test_unreachable_import_exemptions_are_still_unreachable():
 
 
 def test_ome_io_reader_dispatch_is_unreachable_from_the_writer_only_scripts():
-    """The premise behind the six (preprocess|tiled|merge, bioio|h5py) exemptions above.
+    """The premise behind every (preprocess|tiled|merge|stardist|cellsam|instanseg|quantify|
+    regqc, bioio|h5py) exemption above.
 
-    apply_basic_profiles.py, tiled_stitch.py and merge_channels_pyramid.py import
-    ome_metadata/ome_tiff_writer from bin/utils/ome_io.py -- the write seam. That module's
-    ONLY bioio/h5py imports are lazy, inside its reader-dispatch functions
-    (detect_reader/require_reader/read_info/read_plane and the private helpers they call).
-    If any of the three scripts starts calling one of those names, this fails and the
-    exemption must be reconsidered rather than assumed to still hold.
+    Each script below imports something from bin/utils/ome_io.py -- directly (write_tiff)
+    or transitively, through image_utils.py's/qc.py's own `from ome_io import write_tiff` --
+    which is the write seam, never the read one. That module's ONLY bioio/h5py imports are
+    lazy, inside its reader-dispatch functions (detect_reader/require_reader/read_info/
+    read_plane and the private helpers they call). If any of these scripts starts calling
+    one of those names, this fails and the exemption must be reconsidered rather than
+    assumed to still hold.
     """
     dispatch_names = ("detect_reader", "require_reader", "read_info", "read_plane")
     writer_only_scripts = (
         "apply_basic_profiles.py",
         "tiled_stitch.py",
         "merge_channels_pyramid.py",
+        "extract_mask_series.py",
+        "segment.py",
+        "segment_cellsam.py",
+        "segment_instantseg.py",
+        "split_multichannel.py",
+        "tile_for_basic.py",
+        "utils/qc.py",
+        "utils/image_utils.py",
     )
     callers = []
     for rel in writer_only_scripts:
@@ -587,12 +618,12 @@ def test_ome_io_reader_dispatch_is_unreachable_from_the_writer_only_scripts():
                 if f"{fn}(" in code:
                     callers.append(f"{rel}:{lineno} ({fn})")
     assert not callers, (
-        "UNREACHABLE_IMPORTS exempts containers/preprocess, containers/tiled and "
-        "containers/merge from installing bioio/h5py because apply_basic_profiles.py, "
-        "tiled_stitch.py and merge_channels_pyramid.py never call ome_io's reader-dispatch "
-        f"functions -- but they now do, at {callers}. The lazy bioio/h5py imports inside "
-        "those functions now execute, so the affected container must install bioio/h5py "
-        "(or the call must go)."
+        "UNREACHABLE_IMPORTS exempts containers/preprocess, containers/tiled, "
+        "containers/merge, containers/stardist, containers/cellsam, containers/instanseg, "
+        "containers/quantify and containers/regqc from installing bioio/h5py because none "
+        f"of {writer_only_scripts} call ome_io's reader-dispatch functions -- but they now "
+        f"do, at {callers}. The lazy bioio/h5py imports inside those functions now execute, "
+        "so the affected container must install bioio/h5py (or the call must go)."
     )
 
 

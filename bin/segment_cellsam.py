@@ -43,10 +43,10 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 import dask.array as da
 import numpy as np
-import tifffile
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
 from numpy.typing import NDArray
+from ome_io import write_tiff
 from segment_io import extract_dapi_channel
 from skimage import segmentation
 
@@ -259,7 +259,7 @@ def run_cellsam(
     # a 40000x40000 uint32 label mask is 6.4 GB before compression, and classic TIFF's
     # 32-bit offsets overflow past 4 GB. Compression usually keeps it under -- usually is
     # not a contract. Guarded by tests/test_slide_io_seam.py.
-    tifffile.imwrite(
+    write_tiff(
         nuclei_mask_path,
         nuclei_mask,
         compression="zlib",
@@ -269,7 +269,7 @@ def run_cellsam(
     del nuclei_mask
 
     logger.info(f"  Cell mask: {cell_mask_path.name}")
-    tifffile.imwrite(
+    write_tiff(
         cell_mask_path,
         cell_mask,
         compression="zlib",

@@ -68,6 +68,7 @@ import tifffile  # noqa: E402
 from fov_tiling import count_fovs, fov_positions, iter_padded_fovs  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
 from metadata import is_nuclear  # noqa: E402
+from ome_io import write_tiff  # noqa: E402
 from tiled_io import open_lazy  # noqa: E402
 
 logger = get_logger(__name__)
@@ -221,7 +222,7 @@ def tile_for_basic(
         # decoding. Its only reader is BASICPY's /opt/main.py, which loads the whole
         # (C, I, Y, X) stack into one ndarray regardless of tiling -- so a tile layout here
         # would add TIFF overhead for a windowed read that never happens.
-        tifffile.imwrite(
+        write_tiff(
             str(output_path),
             _planes(),
             shape=(len(profile_channels), n_tiles, tile_shape[0], tile_shape[1]),
