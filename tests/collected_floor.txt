@@ -61,4 +61,25 @@
 # BLOCKING_CHECKS case (the "ruff format" needle), +1, and task 3b added
 # tests/test_nf_test_shards_cover_the_suite.py's two cases, +2.
 # 1300 + 1 + 2 = 1303, confirmed by `pytest --collect-only`.
-1303
+# RE-MEASURED 2026-09-02 on release/p02-cleanliness (release 1.0, phase 02,
+# tasks 3 + 3b): 1290 passed, 12 skipped, 0 failed -- 1303 collected.
+# Two of this phase's own commits account for 3 of the 4 tests above the
+# previous floor: task 3 (`:white_check_mark: Make ruff format --check
+# blocking in the shared suite`) added one BLOCKING_CHECKS case (the "ruff
+# format" needle), and task 3b (`:zap: Shard the nf-test stub job four ways`)
+# added tests/test_nf_test_shards_cover_the_suite.py's two cases. The
+# remaining 1 predates this phase: it is drift from plan 01 commits already on
+# this branch between the 1298 measurement (cf001d3) and phase 02's start
+# (8e74c9e) -- e.g. 1c25a99's vacuous-pass fix -- that had grown the suite
+# within FLOOR_DRIFT (50) without yet being re-ratcheted. Re-ratcheting here
+# folds that drift in rather than leaving it unaccounted.
+#
+# RE-MEASURED 2026-09-02 on release/p02-cleanliness, task 7 (bin/ entry-point
+# idiom guard): 1321 passed, 13 skipped, 0 failed -- 1335 collected, up from
+# the prior entry's 1303. The increase is exactly
+# tests/test_bin_entrypoint_idiom.py's 32 new cases (31 parametrised
+# entry-point checks + 1 tripwire); this task's own baseline run (before
+# adding that file) was already 1289 passed / 13 skipped -- 1 skip more than
+# the prior entry's 1290/12 split at the same 1303 total, i.e. pre-existing
+# environment drift within FLOOR_DRIFT, not something this task introduced.
+1335
