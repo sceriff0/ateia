@@ -11,7 +11,6 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from xml.sax.saxutils import escape as xml_escape
 
 import numpy as np
 import tifffile
@@ -20,6 +19,7 @@ import tifffile
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from logger import configure_logging, get_logger
+from ome_io import ome_metadata, ome_tiff_writer
 from pixel_size import resolve_pixel_size
 from tiled_io import open_lazy
 from validation import StreamingWrappedValues
@@ -80,14 +80,6 @@ MARKER_COLORS = {
     "CD74": (255, 255, 128),
     "Segmentation": (255, 255, 255),
 }
-
-
-def _rgb_to_ome_color(r: int, g: int, b: int, a: int = 255) -> int:
-    """Convert RGBA to OME-XML signed 32-bit ARGB color."""
-    value = (a << 24) | (r << 16) | (g << 8) | b
-    if value >= 0x80000000:
-        value -= 0x100000000
-    return value
 
 
 def generate_channel_color(name: str, index: int) -> Tuple[int, int, int]:
@@ -237,78 +229,6 @@ def calculate_pyramid_levels(
         levels.append((h, w))
 
     return levels
-
-
-def build_ome_xml(
-    width: int,
-    height: int,
-    num_channels: int,
-    dtype: np.dtype,
-    channel_names: List[str],
-    channel_colors: List[Tuple[int, int, int]],
-    physical_size_x: float = 0.325,
-    physical_size_y: float = 0.325,
-    physical_size_unit: str = "µm",
-) -> str:
-    """
-    Build OME-XML metadata for multi-channel pyramidal image.
-
-    IMPORTANT: For tifffile's automatic OME-TIFF handling, we use the
-    metadata dict approach rather than raw XML for the base image,
-    but we can still embed additional annotations.
-    """
-    dtype_map = {
-        "uint8": "uint8",
-        "uint16": "uint16",
-        "uint32": "uint32",
-        "int8": "int8",
-        "int16": "int16",
-        "int32": "int32",
-        "float32": "float",
-        "float64": "double",
-    }
-    ome_dtype = dtype_map.get(str(dtype), "uint16")
-
-    # Build channel elements
-    channel_elements = []
-    for i, (name, color) in enumerate(zip(channel_names, channel_colors)):
-        ome_color = _rgb_to_ome_color(*color)
-        safe_name = xml_escape(name)
-        channel_elements.append(
-            f'      <Channel ID="Channel:0:{i}" Name="{safe_name}" '
-            f'Color="{ome_color}" SamplesPerPixel="1"/>'
-        )
-
-    channels_xml = "\n".join(channel_elements)
-
-    # Build complete OME-XML
-    # NOTE: TiffData is left simple - tifffile will handle IFD mapping
-    ome_xml = f'''<?xml version="1.0" encoding="UTF-8"?>
-<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06"
-     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-     xsi:schemaLocation="http://www.openmicroscopy.org/Schemas/OME/2016-06 http://www.openmicroscopy.org/Schemas/OME/2016-06/ome.xsd">
-  <Image ID="Image:0" Name="MultiplexImage">
-    <Pixels ID="Pixels:0"
-            Type="{ome_dtype}"
-            SizeX="{width}"
-            SizeY="{height}"
-            SizeZ="1"
-            SizeC="{num_channels}"
-            SizeT="1"
-            DimensionOrder="XYCZT"
-            PhysicalSizeX="{physical_size_x}"
-            PhysicalSizeY="{physical_size_y}"
-            PhysicalSizeXUnit="{physical_size_unit}"
-            PhysicalSizeYUnit="{physical_size_unit}"
-            Interleaved="false"
-            BigEndian="false">
-{channels_xml}
-      <TiffData/>
-    </Pixels>
-  </Image>
-</OME>'''
-
-    return ome_xml
 
 
 def to_uint16(data):
@@ -821,15 +741,10 @@ def write_pyramidal_ome_tiff_from_source(
     for i, (h, w) in enumerate(levels):
         log(f"  Level {i}: {w} x {h}")
 
-    # Build metadata dict for tifffile (it will generate proper OME-XML)
-    metadata = {
-        "axes": "CYX",
-        "Channel": {"Name": channel_names},
-        "PhysicalSizeX": physical_size_x,
-        "PhysicalSizeXUnit": "µm",
-        "PhysicalSizeY": physical_size_y,
-        "PhysicalSizeYUnit": "µm",
-    }
+    # bin/utils/ome_io.py builds it. This was the third of four independent copies of
+    # the same six keys; the fourth, a hand-written <OME ...> XML template in this same
+    # file, turned out to have no callers at all and is deleted.
+    metadata = ome_metadata(channel_names, (physical_size_x, physical_size_y))
 
     # Common write options
     options = dict(
@@ -863,7 +778,7 @@ def write_pyramidal_ome_tiff_from_source(
     if compressionargs:
         options["compressionargs"] = compressionargs
 
-    with tifffile.TiffWriter(output_path, bigtiff=True, ome=True) as tif:
+    with ome_tiff_writer(output_path, bigtiff=True, ome=True) as tif:
         # Write base resolution with all channels
         # subifds parameter reserves space for pyramid levels
         log(f"  Writing base resolution ({width} x {height})...")
