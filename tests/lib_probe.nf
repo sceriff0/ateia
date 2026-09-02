@@ -88,6 +88,63 @@ def checkResourceReport() {
     assert !traceOff.contains('--enable_trace') : 'must not suggest a CLI boolean'
 }
 
+/**
+ * ProcessEnvelope — the size-log row and container identity in versions.yml.
+ *
+ * Lives outside `workflow { ... }` deliberately: see "THE WORKFLOW BLOCK HAS A HARD
+ * SIZE CEILING" above. Called once from the workflow block, before the final println.
+ */
+def checkProcessEnvelope() {
+    // ------------------------------------------------------------------ //
+    // ProcessEnvelope — the size-log row
+    // ------------------------------------------------------------------ //
+    // The rendered strings are asserted BYTE FOR BYTE, because they are shell
+    // text that no `-stub` run and no snapshot ever evaluates: `-stub` skips
+    // script: entirely, and the aggregated CSV records only the row's VALUES.
+    // If the `$(`/`${` escaping is wrong here, .command.sh gets the literal
+    // command text instead of a byte count and nothing downstream notices --
+    // the exact failure that shipped once in versions() (see probe()'s comment).
+    assert ProcessEnvelope.SIZE_LOG_COLUMNS == ['process', 'sample_id', 'filename', 'bytes']
+
+    def oneFile = ProcessEnvelope.sizeLog('MIRAGE:PRE:CONVERT_IMAGE', 'P001',
+                                          ['P001_slide.ome.tiff'], 'P001_slide.CONVERT_IMAGE.size.csv')
+    assert oneFile == 'size_bytes=$(stat -L --printf="%s\\n" P001_slide.ome.tiff 2>/dev/null | awk \'{s+=$1} END {print s+0}\')\n' +
+                      'echo "MIRAGE:PRE:CONVERT_IMAGE,P001,P001_slide.ome.tiff,${size_bytes}" > P001_slide.CONVERT_IMAGE.size.csv'
+
+    // A staged path keeps only its BASENAME in the filename column -- `mov/x.ome.tiff`
+    // is stageAs positioning, not part of the file's identity.
+    def staged = ProcessEnvelope.sizeLog('MIRAGE:REG:TILED_STITCH', 'P001',
+                                         ['mov/x.ome.tiff'], 'P001.TILED_STITCH.size.csv')
+    assert staged.contains('MIRAGE:REG:TILED_STITCH,P001,x.ome.tiff,${size_bytes}')
+    assert staged.contains('stat -L --printf="%s\\n" mov/x.ome.tiff ')
+
+    // More than one path -> the literal `inputs/`, and every path is stat'ed in ONE call.
+    def many = ProcessEnvelope.sizeLog('MIRAGE:REG:REGISTER', 'P001',
+                                       ['ref/*', 'input_*/*'], 'P001.REGISTER.size.csv')
+    assert many.contains('stat -L --printf="%s\\n" ref/* input_*/* 2>/dev/null')
+    assert many.contains('MIRAGE:REG:REGISTER,P001,inputs/,${size_bytes}')
+
+    // A SOLE path that is a glob is `inputs/` too: a glob is by construction more
+    // than one path, so naming it after its own wildcard ('*') would be a lie.
+    def glob = ProcessEnvelope.sizeLog('MIRAGE:POST:MERGE_AND_PYRAMID', 'P001',
+                                       ['channels/*'], 'P001.MERGE_AND_PYRAMID.size.csv')
+    assert glob.contains('MIRAGE:POST:MERGE_AND_PYRAMID,P001,inputs/,${size_bytes}')
+
+    // The stub row carries the SAME process name as the real row. That is the whole
+    // point: `STUB` as a process name made a stub CSV structurally incomparable with
+    // a real one, and bin/generate_resource_report.py had to special-case it.
+    assert ProcessEnvelope.sizeLogStub('MIRAGE:PRE:CONVERT_IMAGE', 'P001', 'P001_slide.CONVERT_IMAGE.size.csv') ==
+           'echo "MIRAGE:PRE:CONVERT_IMAGE,P001,stub,0" > P001_slide.CONVERT_IMAGE.size.csv'
+
+    // An empty path list is a caller bug, not an empty measurement: `stat` with no
+    // operands would report 0 bytes for a task that certainly read something.
+    def noPaths = false
+    try { ProcessEnvelope.sizeLog('P', 'S', [], 'x.size.csv') }
+    catch (IllegalArgumentException ignored) { noPaths = true }
+    assert noPaths : 'ProcessEnvelope.sizeLog must reject an empty shellPaths list'
+
+}
+
 workflow {
 
     // ------------------------------------------------------------------ //
@@ -1099,6 +1156,11 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     // ceiling (see the file header note above).
     // ------------------------------------------------------------------ //
     checkResourceReport()
+
+    // ProcessEnvelope — size-log row + container identity in versions.yml.
+    // See checkProcessEnvelope() above the workflow block, and the header
+    // comment's "HARD SIZE CEILING" note for why it lives outside this block.
+    checkProcessEnvelope()
 
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info

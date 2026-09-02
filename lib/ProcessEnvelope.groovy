@@ -2,11 +2,16 @@
 ========================================================================================
     ProcessEnvelope — the versions.yml boilerplate, rendered once
 ========================================================================================
-    Every process in modules/local/ ends its script: block with a versions.yml heredoc.
-    (Most also begin their script: block with a hand-written size-log line — this class
-    renders none of that; every module still writes its own.) The versions.yml heredoc
-    was written out by hand in every module, and written TWICE per module — once in
-    script:, once in stub: with every value replaced by the literal `stub`.
+    Every process in modules/local/ ends its script: block with a versions.yml heredoc,
+    and 21 of them begin it with a *.size.csv row. This class renders BOTH, for both
+    blocks, from one call each. The size-log half was hand-written 21 times in script:
+    and 21 times in stub:, and the two halves were not comparable: the stub copies wrote
+    the literal `STUB` as the process name, and the byte computation had grown ~25
+    spellings across the 21 (three `find ... -printf` variants, `du -sLb`, and
+    `stat || echo 0`), three of which yielded an empty string rather than 0.
+    The versions.yml heredoc was written out by hand in every module, and written TWICE
+    per module — once in script:, once in stub: with every value replaced by the
+    literal `stub`.
 
     WHY THAT WAS DANGEROUS RATHER THAN MERELY REPETITIVE. `-stub` never evaluates a
     script: block. So the stub copy is not a mirror the test suite compares against the
@@ -120,5 +125,85 @@ class ProcessEnvelope {
         lines += tools.collect { "    ${yamlKey(it)}: stub" }
         lines << 'END_VERSIONS'
         return lines.join('\n')
+    }
+
+    /**
+     * Column order of every *.size.csv row and of AGGREGATE_SIZE_LOGS' header.
+     *
+     * THE OWNER OF THE ORDER, not a description of it: sizeLog/sizeLogStub build
+     * their row by looking each column up in this list, and
+     * modules/local/aggregate_size_logs.nf renders its header with
+     * ${ProcessEnvelope.SIZE_LOG_COLUMNS.join(',')}. Reordering here reorders
+     * both. bin/generate_resource_report.py declares the same tuple and
+     * tests/test_size_log_schema_has_one_owner.py fails if the two drift.
+     */
+    static final List<String> SIZE_LOG_COLUMNS = ['process', 'sample_id', 'filename', 'bytes'].asImmutable()
+
+    /**
+     * The `filename` cell for a row: the basename of the sole path, or the literal
+     * `inputs/` when the measurement covers more than one file.
+     *
+     * A glob is more than one file by construction, so it takes `inputs/` too --
+     * naming a row after its own wildcard ('*', from 'channels/*') would be worse
+     * than saying nothing. A staged prefix is dropped ('mov/x.tif' -> 'x.tif')
+     * because stageAs positioning is not part of the file's identity, and because
+     * that is exactly what the hand-written rows interpolated (`${moving.name}`).
+     */
+    private static String filenameCell(List<String> shellPaths) {
+        if (shellPaths.size() != 1) { return 'inputs/' }
+        def p = shellPaths[0]
+        if (p.contains('*') || p.contains('?')) { return 'inputs/' }
+        def slash = p.lastIndexOf('/')
+        return slash < 0 ? p : p.substring(slash + 1)
+    }
+
+    private static String row(Map cells, String outFile) {
+        return 'echo "' + SIZE_LOG_COLUMNS.collect { cells[it] }.join(',') + '" > ' + outFile
+    }
+
+    /**
+     * The size-log lines for a `script:` block: one `stat` of every path in
+     * `shellPaths`, summed, then ONE row into `outFile`.
+     *
+     * `shellPaths` entries are text that reaches BASH. A module passes a staged
+     * input as "${image_file}" -- DOUBLE quotes, so the call site interpolates it
+     * to the staged name before this method ever sees it -- or a literal glob as
+     * 'channels/*'. Single-quoting a `${...}` at the call site would hand this
+     * method the four characters `${x}`, which land verbatim in .command.sh and
+     * expand to an UNSET SHELL VARIABLE: an empty stat operand and a silent zero.
+     *
+     * Every path is stat'ed in ONE invocation and summed by awk, replacing the ~25
+     * spellings the modules had grown (`stat || echo 0`, `du -sLb`, three different
+     * `find ... -printf` forms), three of which returned an empty string rather
+     * than 0 for a missing file and relied on a `${x:-0}` at the echo site.
+     */
+    static String sizeLog(String process, String sampleId, List<String> shellPaths, String outFile) {
+        if (!shellPaths) {
+            throw new IllegalArgumentException(
+                "ProcessEnvelope.sizeLog: shellPaths must not be empty (${process})")
+        }
+        // Single-quoted Groovy fragments: `$` has no interpolation meaning here, and a
+        // bare `$(`/`${` is exactly what must land in .command.sh. `\\n` inside a
+        // single-quoted string is backslash + n -- the two characters bash's `--printf`
+        // needs -- not a newline. See probe()'s comment for what over-escaping does.
+        def stat = 'size_bytes=$(stat -L --printf="%s\\n" ' + shellPaths.join(' ') +
+                   ' 2>/dev/null | awk \'{s+=$1} END {print s+0}\')'
+        def cells = [process: process, sample_id: sampleId,
+                     filename: filenameCell(shellPaths), bytes: '${size_bytes}']
+        return stat + '\n' + row(cells, outFile)
+    }
+
+    /**
+     * The size-log line for a `stub:` block: `process,sampleId,stub,0`.
+     *
+     * The process name is the REAL one, not the literal `STUB` the 21 hand-written
+     * stub blocks wrote. A stub CSV whose first column says `STUB` cannot be
+     * compared with a real one at all -- it groups every process in the run into a
+     * single fake row -- and bin/generate_resource_report.py carried a special case
+     * to drop it. Same name, zero bytes, is honest and comparable.
+     */
+    static String sizeLogStub(String process, String sampleId, String outFile) {
+        def cells = [process: process, sample_id: sampleId, filename: 'stub', bytes: '0']
+        return row(cells, outFile)
     }
 }
