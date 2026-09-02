@@ -500,6 +500,19 @@ def _third_party_imports(script):
     return third
 
 
+#: Shared reason for the six (container, bioio/h5py) exemptions below: three writer-only
+#: scripts each reach both names through the same shared module, for the same reason.
+_OME_IO_READER_DISPATCH_UNREACHABLE = (
+    "bin/utils/ome_io.py's bioio/h5py imports are lazy, INSIDE its reader-dispatch "
+    "functions (_open_bioio and read_info's h5py branch), reached only through "
+    "detect_reader/require_reader/read_info/read_plane. apply_basic_profiles.py, "
+    "tiled_stitch.py and merge_channels_pyramid.py import ome_metadata/ome_tiff_writer from "
+    "the same module -- the write seam, not the read one -- and never call a reader-dispatch "
+    "name, so the import never runs in these containers. bioio/h5py stay "
+    "containers/convert-only, per ome_io.py's own module docstring. Guarded by "
+    "test_ome_io_reader_dispatch_is_unreachable_from_the_writer_only_scripts."
+)
+
 # Imports the static graph reaches but that can never EXECUTE. Narrow on purpose: keyed by
 # (container, imported name), each with the reason, and each reason guarded by its own test below
 # so an exemption cannot outlive the fact that justified it.
@@ -511,6 +524,12 @@ UNREACHABLE_IMPORTS = {
         "upstream on purpose. Nothing in bin/ calls either function, so the import never runs. "
         "Guarded by test_unreachable_import_exemptions_are_still_unreachable."
     ),
+    ("preprocess", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
+    ("preprocess", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
+    ("tiled", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
+    ("tiled", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
+    ("merge", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
+    ("merge", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
     # There is deliberately NO ("tiled", "torch")/("tiled", "kornia") entry. Both used to be
     # exempted here on the grounds that torch/kornia shipped "only in the stare-ml container",
     # so :tiled was never expected to satisfy the import. containers/tiled now installs both,
@@ -540,6 +559,40 @@ def test_unreachable_import_exemptions_are_still_unreachable():
         f"{' / '.join(dead)} are never called -- but they are, at {callers}. The lazy "
         "`from aicsimageio import AICSImage` inside them now executes, so segeval must install "
         "aicsimageio (or the call must go)."
+    )
+
+
+def test_ome_io_reader_dispatch_is_unreachable_from_the_writer_only_scripts():
+    """The premise behind the six (preprocess|tiled|merge, bioio|h5py) exemptions above.
+
+    apply_basic_profiles.py, tiled_stitch.py and merge_channels_pyramid.py import
+    ome_metadata/ome_tiff_writer from bin/utils/ome_io.py -- the write seam. That module's
+    ONLY bioio/h5py imports are lazy, inside its reader-dispatch functions
+    (detect_reader/require_reader/read_info/read_plane and the private helpers they call).
+    If any of the three scripts starts calling one of those names, this fails and the
+    exemption must be reconsidered rather than assumed to still hold.
+    """
+    dispatch_names = ("detect_reader", "require_reader", "read_info", "read_plane")
+    writer_only_scripts = (
+        "apply_basic_profiles.py",
+        "tiled_stitch.py",
+        "merge_channels_pyramid.py",
+    )
+    callers = []
+    for rel in writer_only_scripts:
+        path = REPO / "bin" / rel
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            code = line.split("#", 1)[0]
+            for fn in dispatch_names:
+                if f"{fn}(" in code:
+                    callers.append(f"{rel}:{lineno} ({fn})")
+    assert not callers, (
+        "UNREACHABLE_IMPORTS exempts containers/preprocess, containers/tiled and "
+        "containers/merge from installing bioio/h5py because apply_basic_profiles.py, "
+        "tiled_stitch.py and merge_channels_pyramid.py never call ome_io's reader-dispatch "
+        f"functions -- but they now do, at {callers}. The lazy bioio/h5py imports inside "
+        "those functions now execute, so the affected container must install bioio/h5py "
+        "(or the call must go)."
     )
 
 
