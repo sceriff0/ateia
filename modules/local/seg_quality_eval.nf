@@ -47,8 +47,7 @@ process SEG_QUALITY_EVAL {
             "flag to omit.")
     def px_arg = "--pixel-size-um ${px}"
     """
-    bytes=\$(stat -L --printf="%s" ${image} 2>/dev/null || echo 0)
-    echo "${task.process},${meta.patient_id},${image.name},\${bytes}" > ${prefix}.SEG_QUALITY_EVAL.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, meta.patient_id, ["${image}"], "${prefix}.SEG_QUALITY_EVAL.size.csv")}
 
     seg_quality_eval.py \\
         --cell-mask ${cell_mask} \\
@@ -58,14 +57,14 @@ process SEG_QUALITY_EVAL {
         --out ${prefix}_seg_eval.json \\
         ${px_arg} \\
         ${args}
-    ${ProcessEnvelope.versions(task.process, ['python', 'scikit-learn', 'scipy', 'CellSegmentationEvaluator'])}
+    ${ProcessEnvelope.versions(task.process, ['python', 'scikit-learn', 'scipy', 'CellSegmentationEvaluator'], task.container)}
     """
 
     stub:
     def prefix = "${meta.patient_id}"
     """
     echo '{"id": "${prefix}", "QualityScore": 0.0, "metrics": {}}' > ${prefix}_seg_eval.json
-    echo "STUB,${meta.patient_id},stub,0" > ${prefix}.SEG_QUALITY_EVAL.size.csv
-    ${ProcessEnvelope.versionsStub(task.process, ['python', 'scikit-learn', 'scipy', 'CellSegmentationEvaluator'])}
+    ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${prefix}.SEG_QUALITY_EVAL.size.csv")}
+    ${ProcessEnvelope.versionsStub(task.process, ['python', 'scikit-learn', 'scipy', 'CellSegmentationEvaluator'], task.container)}
     """
 }

@@ -31,9 +31,7 @@ process EXTRACT_CELL_PROPERTIES {
     script:
     def args = task.ext.args ?: ''
     """
-    # Log input size for tracing (-L follows symlinks)
-    input_bytes=\$(stat -L --printf="%s" ${cell_mask} 2>/dev/null || echo 0)
-    echo "${task.process},${meta.patient_id},${cell_mask.name},\${input_bytes}" > ${meta.patient_id}.EXTRACT_CELL_PROPERTIES.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, meta.patient_id, ["${cell_mask}"], "${meta.patient_id}.EXTRACT_CELL_PROPERTIES.size.csv")}
 
     echo "Sample: ${meta.patient_id}"
 
@@ -42,14 +40,14 @@ process EXTRACT_CELL_PROPERTIES {
         --outdir . \\
         ${args}
 
-    ${ProcessEnvelope.versions(task.process, ['skimage'])}
+    ${ProcessEnvelope.versions(task.process, ['skimage'], task.container)}
     """
 
     stub:
     """
     touch morphology.csv contours.json
-    echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.EXTRACT_CELL_PROPERTIES.size.csv
+    ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${meta.patient_id}.EXTRACT_CELL_PROPERTIES.size.csv")}
 
-    ${ProcessEnvelope.versionsStub(task.process, ['skimage'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['skimage'], task.container)}
     """
 }

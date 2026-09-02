@@ -19,12 +19,12 @@ process MERGE_SEG_EVAL {
     script:
     """
     merge_seg_eval.py --inputs ${seg_eval_jsons} --out segmentation_metrics.csv
-    ${ProcessEnvelope.versions(task.process, ['python', 'pandas'])}
+    ${ProcessEnvelope.versions(task.process, ['python', 'pandas'], task.container)}
     """
 
     stub:
     """
     printf 'id,QualityScore\\np1,0.0\\n' > segmentation_metrics.csv
-    ${ProcessEnvelope.versionsStub(task.process, ['python', 'pandas'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['python', 'pandas'], task.container)}
     """
 }

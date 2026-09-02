@@ -63,9 +63,7 @@ process SEGMENT {
     // its own leading whitespace would flatten the surrounding block.
     def guard = backend.guard(ctx).join('\n    ')
     """
-    # Log input size for tracing (-L follows symlinks)
-    input_bytes=\$(stat -L --printf="%s" ${merged_file} 2>/dev/null || echo 0)
-    echo "${task.process},${meta.patient_id},${merged_file.name},\${input_bytes}" > ${prefix}.SEGMENT.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, meta.patient_id, ["${merged_file}"], "${prefix}.SEGMENT.size.csv")}
 
     echo "Sample: ${meta.patient_id}"
     echo "Backend: ${params.seg_method} (attempt ${task.attempt})"
@@ -79,7 +77,7 @@ process SEGMENT {
         ${backend.flags(ctx)} \\
         ${args}
 
-    ${ProcessEnvelope.versions(task.process, backend.versionTools)}
+    ${ProcessEnvelope.versions(task.process, backend.versionTools, task.container)}
     """
 
     stub:
@@ -92,8 +90,8 @@ process SEGMENT {
     """
     touch ${prefix}_nuclei_mask.tif
     touch ${prefix}_cell_mask.tif
-    echo "STUB,${meta.patient_id},stub,0" > ${prefix}.SEGMENT.size.csv
+    ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${prefix}.SEGMENT.size.csv")}
 
-    ${ProcessEnvelope.versionsStub(task.process, backend.versionTools)}
+    ${ProcessEnvelope.versionsStub(task.process, backend.versionTools, task.container)}
     """
 }

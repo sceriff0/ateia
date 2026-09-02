@@ -57,9 +57,7 @@ process SPLIT_CHANNELS {
             "subworkflows/local/add_cycle.nf), not handed here.")
     def keep_args = meta.keep_channels ? "--keep-channels ${meta.keep_channels.join(' ')}" : ""
     """
-    # Log input size for tracing (-L follows symlinks)
-    input_bytes=\$(stat -L --printf="%s" ${registered_image} 2>/dev/null || echo 0)
-    echo "${task.process},${meta.patient_id},${registered_image.name},\${input_bytes}" > ${meta.patient_id}_${registered_image.simpleName}.SPLIT_CHANNELS.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, meta.patient_id, ["${registered_image}"], "${meta.patient_id}_${registered_image.simpleName}.SPLIT_CHANNELS.size.csv")}
 
     echo "Sample: ${meta.patient_id}"
     echo "Channels: ${(meta.channels && meta.channels instanceof List) ? meta.channels.join(', ') : 'Will read from OME metadata'}"
@@ -73,7 +71,7 @@ process SPLIT_CHANNELS {
         --pixel-size ${params.pixel_size} \\
         ${args}
 
-    ${ProcessEnvelope.versions(task.process, ['tifffile', 'numpy'])}
+    ${ProcessEnvelope.versions(task.process, ['tifffile', 'numpy'], task.container)}
     """
 
     stub:
@@ -102,8 +100,8 @@ process SPLIT_CHANNELS {
     # One stub file per channel in the keep-set, which is what the real split emits.
     ${touch_cmds}
 
-    echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${registered_image.simpleName}.SPLIT_CHANNELS.size.csv
+    ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${meta.patient_id}_${registered_image.simpleName}.SPLIT_CHANNELS.size.csv")}
 
-    ${ProcessEnvelope.versionsStub(task.process, ['tifffile', 'numpy'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['tifffile', 'numpy'], task.container)}
     """
 }

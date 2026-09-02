@@ -35,11 +35,7 @@ process MERGE_QUANT_CSVS {
     // (tests/test_nuclear_marker_routing.py).
     def nuclear_args = "--nuclear-markers ${MarkerUtils.markerList(params.nuclear_markers).join(' ')}"
     """
-    # Log input size for tracing
-    total_bytes=\$(find . -name '*_quant.csv' -exec stat -L --printf="%s\\n" {} + 2>/dev/null | awk '{sum+=\$1} END {print sum}')
-    morph_bytes=\$(stat -L --printf="%s" ${morphology_csv} 2>/dev/null || echo 0)
-    total_bytes=\$((total_bytes + morph_bytes))
-    echo "${task.process},${meta.patient_id},csvs/,\${total_bytes}" > ${meta.patient_id}.MERGE_QUANT_CSVS.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, meta.patient_id, ['*_quant.csv', "${morphology_csv}"], "${meta.patient_id}.MERGE_QUANT_CSVS.size.csv")}
 
     merge_quant_csvs.py \\
         --csv-files ${individual_csvs} \\
@@ -49,14 +45,14 @@ process MERGE_QUANT_CSVS {
         ${nuclear_args} \\
         ${args}
 
-    ${ProcessEnvelope.versions(task.process, ['pandas'])}
+    ${ProcessEnvelope.versions(task.process, ['pandas'], task.container)}
     """
 
     stub:
     """
     touch merged_quant.csv
-    echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.MERGE_QUANT_CSVS.size.csv
+    ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${meta.patient_id}.MERGE_QUANT_CSVS.size.csv")}
 
-    ${ProcessEnvelope.versionsStub(task.process, ['pandas'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['pandas'], task.container)}
     """
 }
