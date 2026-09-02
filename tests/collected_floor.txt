@@ -55,4 +55,10 @@
 # --ignore=tests/subworkflows --ignore=tests/integration` reports "1300 tests
 # collected", and a full run with MIRAGE_STRICT_SKIPS=1 gives 1288 passed, 12
 # skipped, 0 failed -- 1288 + 12 = 1300, matching the collect count exactly.
-1300
+#
+# RE-MEASURED 2026-09-02 on release/p02-cleanliness (phase 02, tasks 3 + 3b),
+# rebased onto plan 01's final tip (35b30db = 1300): task 3 added one
+# BLOCKING_CHECKS case (the "ruff format" needle), +1, and task 3b added
+# tests/test_nf_test_shards_cover_the_suite.py's two cases, +2.
+# 1300 + 1 + 2 = 1303, confirmed by `pytest --collect-only`.
+1303

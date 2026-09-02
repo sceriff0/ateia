@@ -421,12 +421,25 @@ jobs:
             .nextflow.log
 
   # ============================================================================
-  # nf-test stub suite (fast, every push/PR)
+  # nf-test stub suite (fast, every push/PR) — SHARDED FOUR WAYS.
+  #
+  # Measured on CI run 33641966166 (branch release/p01-suite-truth, 2026-09-02):
+  # every other job in this file finishes in <= 5 min, but nf-test (stub) alone
+  # ran > 25 min over 214 tests, serially -- it IS the CI wall-clock. nf-test
+  # 0.9.0+ (the pinned NFTEST_VERSION) supports `--shard i/n` with
+  # `--shard-strategy round-robin`, so the suite is split into four parallel
+  # legs instead of run end to end on one machine. `round-robin` (rather than
+  # splitting by file) keeps the four shards close to even as tests are added
+  # or removed, without anyone having to rebalance a static list by hand.
   # ============================================================================
   nf-test-stub:
-    name: nf-test (stub)
+    name: nf-test (stub, ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout repository
@@ -446,17 +459,18 @@ jobs:
       - name: Generate test data
         uses: ./.github/actions/generate-testdata
 
-      - name: Run nf-test stub suite
+      - name: Run nf-test stub suite (this shard)
         # Container-free (-profile test) and stub-only (--tag stub): stub blocks
         # need no images. Real cases are tagged "real" and run in nightly.yml.
         run: |
-          nf-test test --tag stub --profile test --verbose
+          nf-test test --tag stub --profile test --verbose \
+            --shard ${{ matrix.shard }}/4 --shard-strategy round-robin
 
       - name: Upload nf-test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nf-test-stub-results
+          name: nf-test-stub-results-${{ matrix.shard }}
           path: |
             .nf-test/
             tests/output/
