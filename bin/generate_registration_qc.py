@@ -169,7 +169,7 @@ Output:
     return parser.parse_args()
 
 
-def process_single_image(
+def _process_single_image(
     reference_path: Path,
     registered_path: Path,
     output_dir: Path,
@@ -308,7 +308,7 @@ def main() -> int:
             continue
 
         # Process image
-        success, message = process_single_image(
+        success, message = _process_single_image(
             reference_path=args.reference,
             registered_path=reg_path,
             output_dir=args.output,

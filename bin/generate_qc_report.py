@@ -89,7 +89,7 @@ def list_files(directory, pattern="*"):
     return sorted(d.glob(pattern))
 
 
-def img_to_b64(path):
+def _img_to_b64(path):
     """Return a data URI string for an image file (PNG or TIFF)."""
     ext = Path(path).suffix.lower()
     mime_types = {
@@ -416,7 +416,7 @@ def img_grid(png_files, wide=False):
     grid_class = "img-grid-wide" if wide else "img-grid"
     cards = []
     for p in png_files:
-        b64 = img_to_b64(p)
+        b64 = _img_to_b64(p)
         name = html.escape(Path(p).name)
         cards.append(
             f'<div class="img-card">'

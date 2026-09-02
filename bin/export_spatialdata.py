@@ -513,7 +513,7 @@ def build_spatialdata(args) -> "object":
 
 
 # ── attach mode ────────────────────────────────────────────────────────────────
-def attach_phenotypes(zarr_path: str, csv_path: str, gate_tree: Optional[str]) -> None:
+def _attach_phenotypes(zarr_path: str, csv_path: str, gate_tree: Optional[str]) -> None:
     """Add FlowPath gating results to an existing store.
 
     Joins on ``label``. FlowPath's own ``cell_id`` is a positional index into a
@@ -623,7 +623,7 @@ def main(argv=None) -> int:
     if a.attach_phenotypes:
         if not a.zarr:
             raise SystemExit("--attach-phenotypes requires --zarr")
-        attach_phenotypes(a.zarr, a.attach_phenotypes, a.gate_tree)
+        _attach_phenotypes(a.zarr, a.attach_phenotypes, a.gate_tree)
         return 0
 
     for req in ("quant_csv", "contours_json", "cell_mask", "output"):

@@ -141,7 +141,7 @@ def from_feature_collection(fc) -> PolySet:
     )
 
 
-def feature_ring_slices(ps: PolySet) -> np.ndarray:
+def _feature_ring_slices(ps: PolySet) -> np.ndarray:
     """``(n_features + 1,)`` offsets into the ring arrays: feature ``f``'s rings are
     ``range(out[f], out[f + 1])``.
 
@@ -195,7 +195,7 @@ def feature_area_centroid(ps: PolySet):
     # fall back to the mean vertex so it still has a position and can still be matched.
     bad = ~ok
     if bad.any():
-        slices = feature_ring_slices(ps)
+        slices = _feature_ring_slices(ps)
         for f in np.flatnonzero(bad):
             lo, hi = int(slices[f]), int(slices[f + 1])
             if hi > lo:
@@ -206,7 +206,7 @@ def feature_area_centroid(ps: PolySet):
 def feature_bboxes(ps: PolySet) -> np.ndarray:
     """``(n_features, 4)`` array of ``[minx, miny, maxx, maxy]``; NaN for empty features."""
     out = np.full((ps.n_features, 4), np.nan, dtype=float)
-    slices = feature_ring_slices(ps)
+    slices = _feature_ring_slices(ps)
     for f in range(ps.n_features):
         lo, hi = int(slices[f]), int(slices[f + 1])
         if hi <= lo:
@@ -463,7 +463,7 @@ def pair_iou(
         return iou, scored
 
     ss = max(1, int(supersample))
-    sl_a, sl_b = feature_ring_slices(ps_a), feature_ring_slices(ps_b)
+    sl_a, sl_b = _feature_ring_slices(ps_a), _feature_ring_slices(ps_b)
     bb_a, bb_b = feature_bboxes(ps_a), feature_bboxes(ps_b)
 
     for k in range(n):

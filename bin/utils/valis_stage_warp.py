@@ -97,7 +97,7 @@ def warp_points(xy, params, fwd_dxdy=None, clip=False) -> np.ndarray:
     return warped
 
 
-def slide_fwd_dxdy(slide):
+def _slide_fwd_dxdy(slide):
     """The slide's *current* forward displacement field, or None if it has none.
 
     Reference slides carry no field (``register_micro`` skips them), and a run whose non-rigid
@@ -153,7 +153,7 @@ def make_warper(registrar, crop="overlap", clip=False, checkpoint=None):
         if stage == STAGE_RIGID:
             field = None
         elif stage == STAGE_MICRO:
-            field = slide_fwd_dxdy(registrar.slide_dict[name])
+            field = _slide_fwd_dxdy(registrar.slide_dict[name])
         elif stage == STAGE_NON_RIGID:
             if checkpoint is None:
                 raise ValueError(

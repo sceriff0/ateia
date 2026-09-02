@@ -75,7 +75,7 @@ def load_mask(mask_path: Path) -> np.ndarray:
     return mask
 
 
-def generate_seg_overlay(
+def _generate_seg_overlay(
     mask: np.ndarray,
     output_path: Path,
     logger: Optional[logging.Logger] = None,
@@ -145,7 +145,7 @@ def generate_seg_overlay(
     return output_path
 
 
-def generate_cell_stats(
+def _generate_cell_stats(
     df: pd.DataFrame,
     output_path: Path,
     logger: Optional[logging.Logger] = None,
@@ -263,7 +263,7 @@ def generate_cell_stats(
     return output_path
 
 
-def generate_intensity_distributions(
+def _generate_intensity_distributions(
     df: pd.DataFrame,
     output_path: Path,
     logger: Optional[logging.Logger] = None,
@@ -393,17 +393,17 @@ def generate_postprocessing_qc(
 
     # 1. Segmentation overlay
     seg_path = output_dir / f"{prefix}_seg_overlay.png"
-    generate_seg_overlay(mask, seg_path, logger, n_cells_from_csv=len(df))
+    _generate_seg_overlay(mask, seg_path, logger, n_cells_from_csv=len(df))
     output_files.append(seg_path)
 
     # 2. Cell statistics
     stats_path = output_dir / f"{prefix}_cell_stats.png"
-    generate_cell_stats(df, stats_path, logger)
+    _generate_cell_stats(df, stats_path, logger)
     output_files.append(stats_path)
 
     # 3. Intensity distributions
     intensity_path = output_dir / f"{prefix}_intensity_distributions.png"
-    result = generate_intensity_distributions(df, intensity_path, logger)
+    result = _generate_intensity_distributions(df, intensity_path, logger)
     if result is not None:
         output_files.append(result)
 

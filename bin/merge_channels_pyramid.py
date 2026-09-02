@@ -76,7 +76,7 @@ MARKER_COLORS = {
 }
 
 
-def rgb_to_ome_color(r: int, g: int, b: int, a: int = 255) -> int:
+def _rgb_to_ome_color(r: int, g: int, b: int, a: int = 255) -> int:
     """Convert RGBA to OME-XML signed 32-bit ARGB color."""
     value = (a << 24) | (r << 16) | (g << 8) | b
     if value >= 0x80000000:
@@ -266,7 +266,7 @@ def build_ome_xml(
     # Build channel elements
     channel_elements = []
     for i, (name, color) in enumerate(zip(channel_names, channel_colors)):
-        ome_color = rgb_to_ome_color(*color)
+        ome_color = _rgb_to_ome_color(*color)
         safe_name = xml_escape(name)
         channel_elements.append(
             f'      <Channel ID="Channel:0:{i}" Name="{safe_name}" '

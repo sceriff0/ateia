@@ -266,7 +266,7 @@ def load_table(zarr_path: str):
     return sdata, sdata.tables["table"]
 
 
-def process_one(zarr_path: str, csv_path: str, args) -> Tuple[object, Dict]:
+def _process_one(zarr_path: str, csv_path: str, args) -> Tuple[object, Dict]:
     """Join one patient and return its (updated) AnnData plus join stats."""
     logger.info("Patient store: %s", zarr_path)
     sdata, table = load_table(zarr_path)
@@ -339,7 +339,7 @@ def pair_inputs(zarrs: List[str], csvs: List[str]) -> List[Tuple[str, str]]:
 
 
 # ── cohort assembly ────────────────────────────────────────────────────────────
-def concat_cohort(tables: List[object]):
+def _concat_cohort(tables: List[object]):
     import anndata as ad
 
     if len(tables) == 1:
@@ -449,11 +449,11 @@ def main(argv=None) -> int:
 
     tables, all_stats = [], []
     for zarr_path, csv_path in pairs:
-        table, stats = process_one(zarr_path, csv_path, a)
+        table, stats = _process_one(zarr_path, csv_path, a)
         tables.append(table)
         all_stats.append(stats)
 
-    cohort = concat_cohort(tables)
+    cohort = _concat_cohort(tables)
     logger.info("Cohort: %d cells x %d measurements", cohort.n_obs, cohort.n_vars)
 
     if a.out_h5ad:
