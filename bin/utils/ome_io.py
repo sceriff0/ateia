@@ -35,19 +35,26 @@ import contextlib
 import importlib.util
 import itertools
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import tifffile
+from pixel_size import read_ome_pixel_size
+from tiled_io import open_lazy
 
 __all__ = [
     "CONVERT_TIFF_TILE",
     "READERS",
+    "ImageInfo",
     "UnsupportedFormatError",
     "detect_reader",
     "ome_metadata",
     "ome_tiff_writer",
+    "parse_ndpis",
+    "read_info",
+    "read_plane",
     "require_reader",
     "write_ome_tiff",
     "write_tiff",
@@ -545,3 +552,287 @@ def write_tiff(path, data: Any, **kwargs) -> Path:
     """
     tifffile.imwrite(str(path), data, **kwargs)
     return Path(path)
+
+
+@dataclass(frozen=True)
+class ImageInfo:
+    """What is known about an image without decoding its pixels.
+
+    ``shape_cyx`` is ALWAYS three-dimensional and channel-first, even for a 2-D file
+    (promoted to ``C=1``). Every consumer in this pipeline indexes ``(C, Y, X)``, and a
+    2-D image reported as ``(Y, X)`` makes ``shape_cyx[0]`` the image height -- a bug that
+    reads as a plausible channel count.
+
+    ``channels is None`` means the file carries no channel names, which is ORDINARY: most
+    intermediates in this pipeline carry none, and `meta.channels` is what the pipeline
+    actually trusts. ``pixel_size_um is None`` means the file declares no scale, which is
+    likewise ordinary -- see ``bin/utils/pixel_size.py`` for why that must stay
+    distinguishable from a scale that happens to equal the configured one.
+
+    ``reader`` is ``detect_reader``'s answer for this path -- what a CONVERSION of it
+    would use. It is not necessarily the module that produced this ``ImageInfo``: a
+    ``.ome.tif`` routes to ``bioio`` for conversion but is inspected here through
+    ``tifffile``, which needs no plugin and is installed everywhere.
+    """
+
+    path: Path
+    shape_cyx: Tuple[int, int, int]
+    dtype: np.dtype
+    channels: Optional[List[str]]
+    pixel_size_um: Optional[float]
+    reader: str
+
+
+#: Extensions this module can inspect and read planes from with `tifffile` alone.
+#: `.ndpis` is NOT here: it is a manifest, not a TIFF, and is handled by delegating to
+#: the first NDPI it names.
+_TIFFFILE_READABLE = (".ome.tif", ".ome.tiff", ".tif", ".tiff", ".ndpi")
+
+
+def _is_tifffile_readable(path) -> bool:
+    name = Path(path).name.lower()
+    return any(name.endswith(suffix) for suffix in _TIFFFILE_READABLE)
+
+
+def parse_ndpis(ndpis_path) -> List[Path]:
+    """The ``.ndpi`` files a Hamamatsu ``.ndpis`` manifest names, in declared order.
+
+    The manifest format::
+
+        [NanoZoomer Digital Pathology Image Set]
+        NoImages=4
+        Image0=2025-10-22 10.53.32-CY5.ndpi
+        Image1=2025-10-22 10.53.32-TRITC.ndpi
+
+    Each entry names a SIBLING file, so the manifest is ``resolve()``d first: Nextflow
+    stages inputs as symlinks into a task directory while the ``.ndpi`` files stay where
+    they were, and resolving is what makes the sibling lookup find them.
+    """
+    ndpis_path = Path(ndpis_path)
+    parent = ndpis_path.resolve().parent
+    entries: List[Path] = []
+    for raw in ndpis_path.read_text().splitlines():
+        line = raw.strip()
+        if line.startswith("Image") and "=" in line:
+            entries.append(parent / line.split("=", 1)[1].strip())
+    logger.info(f"Parsed NDPIS: {len(entries)} images (from {parent})")
+    return entries
+
+
+def _channel_names_from_ome(xml: Optional[str]) -> Optional[List[str]]:
+    """OME ``Channel/@Name`` values, or None when the header names none.
+
+    ``xml.etree`` rather than a regex: a channel name is operator-supplied text and may
+    legitimately contain the characters a regex would have to guess about.
+    """
+    if not xml or not isinstance(xml, str):
+        return None
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
+        return None
+    names = [c.get("Name") for c in root.iter() if c.tag.endswith("}Channel")]
+    named = [n for n in names if n]
+    return named or None
+
+
+def _info_via_tifffile(path: Path, reader: str) -> ImageInfo:
+    with tifffile.TiffFile(str(path)) as tf:
+        series = tf.series[0] if tf.series else tf.pages[0]
+        shape = tuple(int(n) for n in series.shape)
+        dtype = np.dtype(series.dtype)
+        channels = _channel_names_from_ome(getattr(tf, "ome_metadata", None))
+
+    if len(shape) == 2:
+        shape = (1,) + shape
+    elif len(shape) > 3:
+        # Squeeze leading singletons (a TCZYX file whose T and Z are 1); anything left
+        # over is genuinely more than this pipeline's (C, Y, X) contract covers.
+        lead = [n for n in shape[:-2] if n != 1] or [1]
+        if len(lead) != 1:
+            raise ValueError(
+                f"{path.name}: shape {shape} has more than one non-singleton non-spatial "
+                "axis; this pipeline's contract is (C, Y, X)."
+            )
+        shape = (lead[0], shape[-2], shape[-1])
+
+    px_x, px_y = read_ome_pixel_size(path)
+    pixel_size = px_x if px_x is not None else px_y
+
+    return ImageInfo(
+        path=path,
+        shape_cyx=shape,
+        dtype=dtype,
+        channels=channels,
+        pixel_size_um=pixel_size,
+        reader=reader,
+    )
+
+
+def _info_via_hdf5(path: Path, reader: str) -> ImageInfo:
+    require_reader("hdf5")
+    import h5py
+
+    with h5py.File(str(path), "r") as handle:
+        dataset = _first_image_dataset(handle)
+        if dataset is None:
+            raise ValueError(f"No image dataset found in HDF5 file: {path}")
+        shape = tuple(int(n) for n in dataset.shape)
+        dtype = np.dtype(dataset.dtype)
+        px = None
+        for obj in (dataset, handle):
+            if "element_size_um" in obj.attrs:
+                value = obj.attrs["element_size_um"]
+                px = float(value[-1]) if hasattr(value, "__len__") else float(value)
+                break
+        channels = None
+        for obj in (dataset, handle):
+            if "channel_names" in obj.attrs:
+                raw = obj.attrs["channel_names"]
+                if hasattr(raw, "__len__") and len(raw):
+                    channels = [str(n) for n in raw]
+                    break
+
+    if len(shape) == 2:
+        shape = (1,) + shape
+    elif len(shape) > 3:
+        shape = (shape[-3], shape[-2], shape[-1])
+
+    return ImageInfo(
+        path=path,
+        shape_cyx=shape,
+        dtype=dtype,
+        channels=channels,
+        pixel_size_um=px,
+        reader=reader,
+    )
+
+
+def _first_image_dataset(group):
+    """The first >=2-D numeric dataset in an HDF5 group, depth first."""
+    import h5py
+
+    for key in group:
+        item = group[key]
+        if isinstance(item, h5py.Dataset):
+            if item.ndim >= 2 and np.issubdtype(item.dtype, np.number):
+                return item
+        elif isinstance(item, h5py.Group):
+            found = _first_image_dataset(item)
+            if found is not None:
+                return found
+    return None
+
+
+def _info_via_bioio(path: Path, reader: str) -> ImageInfo:
+    require_reader(reader)
+    from bioio import BioImage
+
+    img = BioImage(str(path))
+    shape = (int(img.dims.C), int(img.shape[-2]), int(img.shape[-1]))
+    px = getattr(img.physical_pixel_sizes, "X", None)
+    return ImageInfo(
+        path=path,
+        shape_cyx=shape,
+        dtype=np.dtype(img.dtype),
+        channels=list(img.channel_names) if img.channel_names else None,
+        pixel_size_um=float(px) if px is not None else None,
+        reader=reader,
+    )
+
+
+def read_info(path) -> ImageInfo:
+    """Everything known about an image without decoding its pixels.
+
+    THE READER THAT INSPECTS IS NOT ALWAYS THE READER THAT CONVERTS, and that is
+    deliberate. ``detect_reader`` names what a CONVERSION would use -- ``bioio`` for a
+    ``.ome.tif``, because the conversion path wants BioImage's dimension handling. But
+    ``bioio`` is installed in exactly one image, and this pipeline's own intermediates are
+    ``.ome.tif``, so routing inspection through it would make ``read_info`` unusable
+    everywhere except ``containers/convert``. Anything ``tifffile`` can open is therefore
+    inspected with ``tifffile``, which is installed in every image and in CI, while
+    ``ImageInfo.reader`` still reports ``detect_reader``'s answer.
+
+    ``pixel_size.read_ome_pixel_size`` is asked for the scale rather than the header being
+    re-parsed here: that module owns the unit table, the OME default-unit rule and the
+    non-positive rejection, and a second copy of any of them is a silent scale error in
+    whichever copy falls behind.
+    """
+    path = Path(path)
+    reader = detect_reader(path)
+
+    if path.name.lower().endswith(".ndpis"):
+        entries = parse_ndpis(path)
+        if not entries:
+            raise ValueError(f"No NDPI files found in NDPIS manifest: {path}")
+        first = _info_via_tifffile(entries[0], reader)
+        # One NDPI per channel; the manifest's entry count IS the channel count.
+        return ImageInfo(
+            path=path,
+            shape_cyx=(len(entries), first.shape_cyx[1], first.shape_cyx[2]),
+            dtype=first.dtype,
+            channels=None,  # the manifest names files, not markers
+            pixel_size_um=first.pixel_size_um,
+            reader=reader,
+        )
+
+    if _is_tifffile_readable(path):
+        return _info_via_tifffile(path, reader)
+    if reader == "hdf5":
+        return _info_via_hdf5(path, reader)
+    return _info_via_bioio(path, reader)
+
+
+def read_plane(path, channel: int, *, lazy: bool = True):
+    """One 2-D ``(Y, X)`` plane.
+
+    ``lazy=True`` (the default) reads through ``tiled_io.open_lazy`` -- tifffile's zarr
+    view -- so ONLY that channel's tiles are decoded. The eager alternative,
+    ``TiffFile.asarray(out="memmap")``, is misleadingly named: on compressed input it
+    decodes the ENTIRE image into a new full-size uncompressed temp file and memory-maps
+    THAT, so "extract one channel" costs a full decode and a full-size scratch file. On a
+    20 GB slide that is 20 GB of temp disk to use one plane. ``bin/utils/segment_io.py``'s
+    docstring records the measurement.
+
+    ``lazy=False`` exists for the formats ``open_lazy`` cannot open (HDF5, and the vendor
+    formats behind bioio) and for a caller that wants the plane materialised anyway.
+    """
+    path = Path(path)
+    info = read_info(path)
+    n_channels = info.shape_cyx[0]
+    if not 0 <= channel < n_channels:
+        raise ValueError(
+            f"{path.name}: channel {channel} out of range for C={n_channels}"
+        )
+
+    if lazy and _is_tifffile_readable(path):
+        view, _dtype, close = open_lazy(str(path))
+        try:
+            return np.array(view[channel, :, :], copy=True)
+        finally:
+            close()
+
+    if _is_tifffile_readable(path):
+        stack = np.asarray(tifffile.imread(str(path)))
+        if stack.ndim == 2:
+            return stack
+        return np.asarray(stack[channel])
+
+    if info.reader == "hdf5":
+        require_reader("hdf5")
+        import h5py
+
+        with h5py.File(str(path), "r") as handle:
+            dataset = _first_image_dataset(handle)
+            data = dataset[()]
+        if data.ndim == 2:
+            return data
+        return np.asarray(data[channel])
+
+    require_reader(info.reader)
+    from bioio import BioImage
+
+    img = BioImage(str(path))
+    return np.asarray(img.get_image_data("YX", C=channel))

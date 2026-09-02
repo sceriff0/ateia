@@ -392,3 +392,157 @@ def test_write_tiff_does_not_force_bigtiff(tmp_path):
     )
     with tifffile.TiffFile(out) as tf:
         assert tf.is_bigtiff is False
+
+
+# ---------------------------------------------------------------------------
+# read_info / read_plane
+# ---------------------------------------------------------------------------
+
+
+def _written(tmp_path, name="src.ome.tif", c=3, h=32, w=24, px=0.325, channels=None):
+    data = _stack(c=c, h=h, w=w)
+    out = tmp_path / name
+    ome_io.write_ome_tiff(
+        out,
+        data,
+        channels=channels if channels is not None else [f"C{i}" for i in range(c)],
+        pixel_size_um=px,
+        tile=16,
+    )
+    return out, data
+
+
+def test_read_info_reports_shape_dtype_channels_scale_and_reader(tmp_path):
+    path, data = _written(tmp_path, channels=["DAPI", "CD3", "CD8"])
+
+    info = ome_io.read_info(path)
+
+    assert info.path == path
+    assert info.shape_cyx == data.shape
+    assert info.dtype == data.dtype
+    assert info.channels == ["DAPI", "CD3", "CD8"]
+    assert info.pixel_size_um == pytest.approx(0.325)
+    assert info.reader in ome_io.READERS
+
+
+def test_read_info_delegates_the_scale_to_pixel_size_py(tmp_path, monkeypatch):
+    """bin/utils/pixel_size.py is the read-side owner of the OME PhysicalSize rule
+    -- units, the absent-attribute default, the non-positive rejection. read_info
+    must ASK it, not re-derive it, or there are two rules again."""
+    import pixel_size
+
+    path, _ = _written(tmp_path)
+    calls = []
+    real = pixel_size.read_ome_pixel_size
+
+    def _spy(p):
+        calls.append(str(p))
+        return real(p)
+
+    monkeypatch.setattr(ome_io, "read_ome_pixel_size", _spy)
+    ome_io.read_info(path)
+    assert calls, "read_info must go through pixel_size.read_ome_pixel_size"
+
+
+def test_read_info_reports_none_for_a_file_that_carries_no_scale(tmp_path):
+    """None means "the file did not say" and must stay distinguishable from a
+    scale that genuinely equals the configured one."""
+    out = tmp_path / "no_scale.ome.tif"
+    ome_io.write_ome_tiff(
+        out, _stack(c=2), channels=["a", "b"], pixel_size_um=None, tile=16
+    )
+    assert ome_io.read_info(out).pixel_size_um is None
+
+
+def test_read_info_promotes_a_two_dimensional_image_to_c_equals_one(tmp_path):
+    """Every consumer in this pipeline indexes (C, Y, X). A 2-D file arriving as
+    (Y, X) would make `info.shape_cyx[0]` the image HEIGHT."""
+    out = tmp_path / "flat.tif"
+    ome_io.write_tiff(out, np.zeros((10, 12), dtype=np.uint16))
+    assert ome_io.read_info(out).shape_cyx == (1, 10, 12)
+
+
+def test_read_plane_returns_one_two_dimensional_plane(tmp_path):
+    path, data = _written(tmp_path)
+    plane = ome_io.read_plane(path, 1)
+    assert plane.ndim == 2
+    np.testing.assert_array_equal(plane, data[1])
+
+
+def test_read_plane_lazy_and_eager_agree(tmp_path):
+    path, data = _written(tmp_path)
+    np.testing.assert_array_equal(
+        ome_io.read_plane(path, 2, lazy=True), ome_io.read_plane(path, 2, lazy=False)
+    )
+    np.testing.assert_array_equal(ome_io.read_plane(path, 2, lazy=False), data[2])
+
+
+def test_read_plane_goes_through_open_lazy_when_lazy(tmp_path, monkeypatch):
+    """tiled_io.open_lazy is the lazy backend behind read_plane -- a tifffile zarr
+    view, so only the requested channel's tiles are decoded. A read_plane that
+    quietly decoded the whole stack would be indistinguishable on a fixture and
+    catastrophic on a 20 GB slide."""
+    import tiled_io
+
+    path, _ = _written(tmp_path)
+    calls = []
+    real = tiled_io.open_lazy
+
+    def _spy(p):
+        calls.append(str(p))
+        return real(p)
+
+    monkeypatch.setattr(ome_io, "open_lazy", _spy)
+    ome_io.read_plane(path, 0, lazy=True)
+    assert calls, "read_plane(lazy=True) must go through tiled_io.open_lazy"
+
+
+def test_read_plane_rejects_an_out_of_range_channel(tmp_path):
+    path, _ = _written(tmp_path, c=2)
+    with pytest.raises(ValueError, match="out of range"):
+        ome_io.read_plane(path, 5)
+
+
+def test_read_info_refuses_an_unsupported_extension(tmp_path):
+    bad = tmp_path / "thumb.png"
+    bad.write_bytes(b"not an image")
+    with pytest.raises(ome_io.UnsupportedFormatError):
+        ome_io.read_info(bad)
+
+
+# ---------------------------------------------------------------------------
+# parse_ndpis -- the Hamamatsu manifest
+# ---------------------------------------------------------------------------
+
+
+def test_parse_ndpis_reads_the_image_entries_in_order(tmp_path):
+    (tmp_path / "a-CY5.ndpi").write_bytes(b"")
+    (tmp_path / "a-TRITC.ndpi").write_bytes(b"")
+    manifest = tmp_path / "a.ndpis"
+    manifest.write_text(
+        "[NanoZoomer Digital Pathology Image Set]\n"
+        "NoImages=2\n"
+        "Image0=a-CY5.ndpi\n"
+        "Image1=a-TRITC.ndpi\n"
+    )
+
+    entries = ome_io.parse_ndpis(manifest)
+
+    assert [p.name for p in entries] == ["a-CY5.ndpi", "a-TRITC.ndpi"]
+    assert all(p.parent == tmp_path for p in entries)
+
+
+def test_parse_ndpis_resolves_entries_against_the_real_directory(tmp_path):
+    """The manifest is routinely staged by Nextflow as a SYMLINK into a task
+    directory while the .ndpi files it names stay where they were. Resolving the
+    manifest first is what makes the sibling lookup find them."""
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "s-DAPI.ndpi").write_bytes(b"")
+    manifest = real / "s.ndpis"
+    manifest.write_text("[Set]\nNoImages=1\nImage0=s-DAPI.ndpi\n")
+
+    staged = tmp_path / "staged.ndpis"
+    staged.symlink_to(manifest)
+
+    assert ome_io.parse_ndpis(staged) == [real / "s-DAPI.ndpi"]
