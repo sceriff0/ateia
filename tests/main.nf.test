@@ -1042,7 +1042,17 @@ nextflow_pipeline {
         }
 
         then {
-            def said = workflow.stdout + workflow.stderr
+            // The message is a log.warn from workflow.onComplete. nf-test launches
+            // Nextflow with -quiet unless it is itself run with --verbose (CI is),
+            // and under -quiet Nextflow 25 AND 26 drop log.warn from the console
+            // streams entirely -- workflow.stdout/stderr come back empty while the
+            // line sits in the run log. Measured 2026-09-03: 4/4 local failures
+            // without --verbose, 0 with; what the master plan recorded as a 'stdout
+            // capture race' was this. So read the run log too: nf-test writes it to
+            // <launchDir>/meta/nextflow.log, and the assertion holds in both modes.
+            def runLog = new File("${launchDir}/meta/nextflow.log")
+            def said = workflow.stdout + workflow.stderr +
+                       (runLog.exists() ? runLog.readLines() : [])
             assertAll(
                 { assert workflow.success },
                 { assert said.any { it.contains('/plan10_relative_trace_dir/trace.txt') },
