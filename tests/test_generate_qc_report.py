@@ -606,3 +606,34 @@ def test_histogram_svg_escapes_its_title_and_axis_label():
     svg = gqr._histogram_svg([1.0], title="<b>t</b>", x_label="<i>x</i>")
     assert "<b>t</b>" not in svg and "&lt;b&gt;t&lt;/b&gt;" in svg
     assert "<i>x</i>" not in svg and "&lt;i&gt;x&lt;/i&gt;" in svg
+
+
+def test_error_distribution_svg_marks_p50_and_p90():
+    gqr = _load()
+    values = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 9.0]
+    svg = gqr._error_distribution_svg(values, title="rigid stage (px)")
+    assert svg.count('class="rule"') == 2
+    assert "p50" in svg and "p90" in svg
+    assert "rigid stage (px)" in svg
+    assert ">error<" in svg
+
+
+def test_error_distribution_svg_states_n_so_a_one_slide_run_is_honest():
+    gqr = _load()
+    svg = gqr._error_distribution_svg([2.5], title="micro (µm)")
+    assert "(n=1)" in svg
+    assert "<svg" in svg
+
+
+def test_error_distribution_svg_on_empty_input_is_a_notice():
+    gqr = _load()
+    out = gqr._error_distribution_svg([], title="non_rigid (px)")
+    assert "<svg" not in out
+    assert 'class="empty-notice"' in out
+    assert "non_rigid (px)" in out
+
+
+def test_error_distribution_svg_drops_missing_values_before_binning():
+    gqr = _load()
+    svg = gqr._error_distribution_svg([1.0, None, float("nan"), 3.0], title="t")
+    assert "(n=2)" in svg

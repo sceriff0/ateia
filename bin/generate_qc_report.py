@@ -484,6 +484,26 @@ def _histogram_svg(values, *, title, x_label, bins=20, rules=()):
     return "".join(parts)
 
 
+def _error_distribution_svg(values, *, title, bins=20):
+    """A stage's error distribution: the histogram plus its p50 and p90 markers.
+
+    A registration-error distribution is read by its TAIL — the median says the
+    run was fine, the p90 says where it was not — so both percentiles are drawn
+    on the plot rather than left to be eyeballed off the bars. Units belong in
+    ``title`` (px for per-tile TRE, µm for cell displacement); the x-axis is
+    labelled ``error`` because one function serves both.
+    """
+    rules = [
+        (v, lbl)
+        for v, lbl in (
+            (_percentile(values, 50), "p50"),
+            (_percentile(values, 90), "p90"),
+        )
+        if v is not None
+    ]
+    return _histogram_svg(values, title=title, x_label="error", bins=bins, rules=rules)
+
+
 def img_grid(png_files, wide=False):
     """Render a list of PNG files as a grid of base64-embedded image cards."""
     if not png_files:

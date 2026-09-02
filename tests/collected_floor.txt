@@ -303,4 +303,16 @@
 # test_histogram_svg_on_empty_input_is_a_notice_not_an_svg,
 # test_histogram_svg_escapes_its_title_and_axis_label); no other test count
 # moved.
-1401
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p09-qc-report, task 6
+# (_error_distribution_svg, the per-stage error view): 1334 passed, 13
+# skipped, 0 failed -- 1347 collected, up from the prior entry's 1343. The
+# increase is exactly the four new cases in tests/test_generate_qc_report.py
+# (test_error_distribution_svg_marks_p50_and_p90,
+# test_error_distribution_svg_states_n_so_a_one_slide_run_is_honest,
+# test_error_distribution_svg_on_empty_input_is_a_notice,
+# test_error_distribution_svg_drops_missing_values_before_binning); no other
+# test count moved.
+1405
