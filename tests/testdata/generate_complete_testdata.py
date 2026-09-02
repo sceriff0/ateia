@@ -626,11 +626,29 @@ print("  - tiles_12_rows_blank_interspersed.csv, tiles_header_only.csv")
 # =============================================================================
 print("\n6. Creating additional test fixtures for module tests...")
 
-# 6a. Merged quantification CSV for export/QC module tests
+# 6a. Merged quantification CSV for export/QC module tests.
+#
+# COLUMN ORDER IS bin/merge_quant_csvs.reorder_columns': fov, cell_size, then
+# MORPHOLOGY_COLS' order for whatever morphology is present, then the markers. It is
+# the same list written to expected/merged_quant_columns.txt at the bottom of this
+# file, and the same one sample_morphology.csv uses.
+#
+# It used to be `label,centroid_x,centroid_y,...`, which NO producer writes.
+# bin/export_geojson._iter_rows_positional looks up "x"/"y", got None for both, and
+# dropped all 20 rows at its `pd.isna(x_px)` guard -- red cause (2) in
+# .github/workflows/nightly.yml's header, "0 features against 20 CSV rows".
+#
+# The eleven np.random draws below are UNCHANGED in count, order and distribution
+# from the version that wrote the wrong header. Every fixture this script writes
+# after this block is seeded off the same stream; changing the draws would rewrite
+# all of them for no reason. `solidity` is still drawn -- it now produces
+# convex_area, which is what it physically determines (solidity = area / convex_area).
+_merged_quant_cols = [
+    "fov", "cell_size", "label", "y", "x", "area", "eccentricity", "perimeter",
+    "convex_area", "axis_major_length", "axis_minor_length", "DAPI", "PANCK", "SMA",
+]
 with open(OUT_DIR / "sample_merged_quant.csv", "w") as f:
-    f.write(
-        "label,centroid_x,centroid_y,area,perimeter,eccentricity,major_axis,minor_axis,solidity,DAPI,PANCK,SMA\n"
-    )
+    f.write(",".join(_merged_quant_cols) + "\n")
     for i in range(1, 21):
         cx = np.random.uniform(10, 118)
         cy = np.random.uniform(10, 118)
@@ -644,7 +662,8 @@ with open(OUT_DIR / "sample_merged_quant.csv", "w") as f:
         panck = np.random.randint(1500, 8000)
         sma = np.random.randint(1000, 5000)
         f.write(
-            f"{i},{cx:.1f},{cy:.1f},{area},{perimeter:.1f},{eccentricity:.2f},{major:.1f},{minor:.1f},{solidity:.2f},{dapi},{panck},{sma}\n"
+            f"P001,{area},{i},{cy:.1f},{cx:.1f},{area},{eccentricity:.2f},{perimeter:.1f},"
+            f"{int(round(area / solidity))},{major:.1f},{minor:.1f},{dapi},{panck},{sma}\n"
         )
 print("  Created sample_merged_quant.csv (20 cells)")
 
@@ -783,7 +802,13 @@ for i in range(1, 21):
         [round(cx + r * np.cos(a), 1), round(cy + r * np.sin(a), 1)] for a in angles
     ]
     coords.append(coords[0])  # close polygon
-    contours[str(i)] = {"coordinates": coords}
+    # str(label) -> [[x, y], ...], a BARE closed ring. This is what
+    # bin/extract_cell_properties.extract_contours returns and what
+    # bin/export_geojson._polygon_geometry uses directly as the polygon ring
+    # (`{"type": "Polygon", "coordinates": [contours[label_str]]}`). Wrapping it in a
+    # {"coordinates": ...} dict -- which this line used to do -- produced a Polygon
+    # whose one "ring" was a dict, and nothing in bin/ reads such a key back out.
+    contours[str(i)] = coords
 
 with open(OUT_DIR / "sample_contours.json", "w") as f:
     json.dump(contours, f, indent=2)

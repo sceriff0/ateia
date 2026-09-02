@@ -40,4 +40,8 @@
 # to fall arbitrarily far behind stops being a floor, so conftest.py also fails
 # once the suite has grown FLOOR_DRIFT (50) tests past this number, with the
 # replacement value in the message. Re-ratcheting is then one line, here.
-1292
+#
+# RE-MEASURED 2026-09-02 on the 1.0.0 release branch, plan 01 (suite truth):
+# tests/test_fixtures_have_a_producer.py gained 2 cases and
+# tests/test_export_geojson_fixture_contract.py added 4.
+1298
