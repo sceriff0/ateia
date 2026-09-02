@@ -243,6 +243,42 @@ def test_cli_writes_report(tmp_path):
     assert "Retries" in html or "Failures" in html
 
 
+def test_cli_exits_nonzero_on_a_header_only_trace(tmp_path):
+    """A header-only trace.txt (the file EXISTS, so the entry script's own
+    existence check passes and this script is invoked, but Nextflow wrote
+    zero task rows -- e.g. a run that was killed before its first task
+    started) used to exit 0 and print the 'not available' page as though
+    nothing was wrong. The entry script's exit-code branch already logs a
+    warning for a non-zero exit; this makes that branch reachable for a real
+    'we found the file but it is empty' failure rather than papering over it
+    with a false success line."""
+    trace = tmp_path / "trace.txt"
+    trace.write_text(
+        "task_id\tprocess\ttag\tname\tstatus\texit\tsubmit\tstart\tcomplete\t"
+        "duration\trealtime\t%cpu\tcpus\tmemory\tpeak_rss\tpeak_vmem\trchar\twchar\n"
+    )
+    out = tmp_path / "resource.html"
+    r = subprocess.run(
+        [sys.executable, str(SCRIPT), "--trace", str(trace), "--output", str(out)],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 3, r.stderr
+    assert out.exists()
+    assert "not available" in out.read_text().lower()
+
+
+def test_no_trace_message_does_not_show_the_broken_cli_boolean_form():
+    """Nextflow 26 rejects `--enable_trace` on the command line (every boolean
+    param must come from a profile or -params-file); the operator-facing
+    "not available" message must not tell someone to type the one form that
+    cannot work."""
+    grr = _load()
+    html_out = grr.build_html([], {}, "ts")
+    assert "--enable_trace" not in html_out
+    assert "enable_trace" in html_out
+
+
 def test_cli_missing_inputs_is_graceful(tmp_path):
     out = tmp_path / "resource.html"
     r = subprocess.run(
@@ -868,6 +904,141 @@ def test_run_totals_survives_with_every_number_it_had():
         "Peak single-task RSS",
     ):
         assert needle in html_out
+
+
+MB = 1024**2
+
+
+# ---------------------------------------------------------------------------
+# Final-fix wave (2026-09-02): I1 (legend ranked + capped, not first-appearance
+# and unbounded), M2 (drop-count note when everything is dropped), M3 (Run
+# Totals %CPU guard + parse_percent rejects non-finite), M4 (wall-time % is
+# share of the run total, not of the longest bar).
+# ---------------------------------------------------------------------------
+
+
+def test_size_vs_runtime_legend_ranked_by_point_count_not_first_appearance():
+    """`order` used to be built by first appearance, so on a real trace a
+    504-point early process took a legend slot ahead of a 17,921-point process
+    that appears later -- exactly the defect measured against
+    traces/tiled_run/trace.txt. Rank by point count instead, and push anything
+    past `top_processes` into one explicit grey 'other' row rather than
+    leaving it unlegended."""
+    grr = _load()
+    joined = []
+    for i in range(8):
+        joined.append(_joined(f"SMALL_{i}", f"S{i}", (i + 1) * MB, 10.0))
+    for i in range(1000):
+        joined.append(_joined("BIG", f"B{i}", (i % 50 + 1) * MB, 5.0 + i))
+
+    svg = grr.size_vs_runtime_svg(joined)
+    ET.fromstring(svg)
+    # BIG has the most points (1000) and must be legended first even though it
+    # appears LAST in the input list.
+    assert svg.index("BIG") < svg.index("SMALL_0")
+    # 9 distinct processes, default top_processes=8 -> one SMALL is bucketed
+    # as "other" rather than silently unlegended grey.
+    assert svg.count("<rect class='key'") == 9
+    assert "other (1 process)" in svg
+
+
+def test_size_vs_runtime_caps_points_per_series():
+    """A single dominant process must not draw one <circle> per task -- each
+    series is deterministically stride-subsampled to at most 2,000 points, and
+    the panel states how many of how many are shown."""
+    grr = _load()
+    joined = [
+        _joined("BIG", f"T{i}", (i % 1000 + 1) * 1024, 1.0 + i) for i in range(5000)
+    ]
+    svg = grr.size_vs_runtime_svg(joined)
+    ET.fromstring(svg)
+    # ceil(5000 / ceil(5000/2000)) = ceil(5000/3) = 1667, deterministic stride.
+    assert svg.count("<circle") == 1667
+    assert "1667 of 5000" in svg
+
+
+def test_size_vs_runtime_reports_drop_count_when_nothing_is_plottable():
+    """When EVERY point is dropped but at least one was matched, the panel
+    must say so rather than return the empty string, which the caller would
+    then paper over with the false "No size logs matched trace tasks."."""
+    grr = _load()
+    joined = [_joined("A", "P1", 2 * GB, 0.0)]  # realtime_s == 0.0: not positive
+    svg = grr.size_vs_runtime_svg(joined)
+    assert svg != ""
+    assert "could not be plotted" in svg
+
+
+def test_build_html_size_panel_is_not_falsely_empty_when_everything_dropped():
+    grr = _load()
+    trace_rows = [
+        {
+            "process": "A",
+            "tag": "P1",
+            "exit": "0",
+            "status": "COMPLETED",
+            "realtime_s": 0.0,
+            "peak_rss_b": None,
+            "peak_vmem_b": None,
+            "rchar_b": None,
+            "wchar_b": None,
+            "cpu_pct": None,
+            "duration_s": None,
+            "memory_b": None,
+            "cpus": None,
+        }
+    ]
+    html_out = grr.build_html(trace_rows, {("A", "P1"): 2 * GB}, "ts")
+    assert "No size logs matched trace tasks." not in html_out
+    assert "could not be plotted" in html_out
+
+
+def test_parse_percent_rejects_non_finite_strings():
+    """A corrupted trace field like 'nan%' parses cleanly with a bare
+    float(), silently introducing a non-finite value that later renders as
+    the literal text 'nan%'/'inf%'. Reject it at the source."""
+    grr = _load()
+    assert grr.parse_percent("nan%") is None
+    assert grr.parse_percent("inf%") is None
+    assert grr.parse_percent("-inf%") is None
+
+
+def test_run_totals_peak_cpu_guards_against_non_finite():
+    grr = _load()
+    trace_rows = [
+        {
+            "process": "A",
+            "tag": "P1",
+            "status": "COMPLETED",
+            "exit": "0",
+            "realtime_s": 1.0,
+            "peak_rss_b": None,
+            "peak_vmem_b": None,
+            "rchar_b": None,
+            "wchar_b": None,
+            "cpu_pct": float("nan"),
+            "duration_s": None,
+            "memory_b": None,
+            "cpus": None,
+        },
+    ]
+    html_out = grr.build_html(trace_rows, {}, "ts")
+    marker = "<h2>Run Totals</h2>"
+    section = html_out[html_out.index(marker) :]
+    section = section[: section.index("</section>")]
+    assert "nan%" not in section
+    assert "n/a" in section
+
+
+def test_walltime_bars_percentage_is_share_of_total_not_longest():
+    """The top bar's percentage used to be v/vmax, so it always read 100% --
+    the share of the longest process, not of the run. It must be the share of
+    the run's total wall-time instead."""
+    grr = _load()
+    roll = [_roll_row("A", 300.0), _roll_row("B", 100.0)]
+    svg = grr.walltime_bars_svg(roll)
+    assert "(75%)" in svg
+    assert "(25%)" in svg
+    assert "(100%)" not in svg
 
 
 def test_a_panel_with_no_data_degrades_to_a_sentence_not_a_crash():

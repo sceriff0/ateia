@@ -907,8 +907,9 @@ nextflow_pipeline {
                     it.name.startsWith('MIRAGE:FINAL_QC:GENERATE_QC_REPORT') }.size() == 1 },
                 { assert workflow.trace.tasks().findAll {
                     it.name.contains('GENERATE_QC_REPORT') }.size() == 1 },
-                // --enable_trace defaults true, so the size rollup is the other half
-                // of FINAL_QC and must also run exactly once.
+                // `enable_trace` (a boolean param; set it in a profile or -params-file)
+                // defaults true, so the size rollup is the other half of FINAL_QC and
+                // must also run exactly once.
                 { assert workflow.trace.tasks().findAll {
                     it.name.startsWith('MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS') }.size() == 1 },
                 { assert path("$outputDir/qc").list().any {
@@ -1055,7 +1056,8 @@ nextflow_pipeline {
         //
         // trace_dir is deliberately an ABSOLUTE path under $outputDir here, pre-seeded
         // with a minimal trace.txt before the pipeline launches -- it is NOT enough to
-        // rely on the shipped `--enable_trace` default and let Nextflow's own trace{}
+        // rely on the shipped `enable_trace` default (a boolean param; set it in a
+        // profile or -params-file) and let Nextflow's own trace{}
         // scope write the file during the run. nf-test unconditionally appends its OWN
         // `-with-trace <meta/trace.csv>` to every `nextflow run` invocation it makes
         // (confirmed via .nf-test/tests/*/meta/nextflow.log: only ONE

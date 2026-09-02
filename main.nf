@@ -80,13 +80,20 @@ def generateResourceReport(Map cfg) {
         def qc_dir    = Layout.runDir(cfg.outdir, 'qc')
         def out_html  = "${qc_dir}/mirage_resource_report.html"
         new File(qc_dir).mkdirs()
+        // Derived from trace_txt's own resolved parent, not the raw cfg.trace_dir:
+        // trace_txt is already the RESOLVED absolute path (ResourceReport.tracePath
+        // above), so its parent is unambiguous regardless of whether trace_dir was
+        // passed relative or absolute. Building these two from the raw param instead
+        // silently pointed at the wrong directory under the exact relative-trace_dir
+        // launch this class's header describes.
+        def trace_dir_resolved = new File(trace_txt).parent
         def cmd = [
             'python3', script,
             '--trace', trace_txt,
             '--size-log', size_log,
             '--output', out_html,
-            '--native-report', "${cfg.trace_dir}/report.html",
-            '--native-timeline', "${cfg.trace_dir}/timeline.html",
+            '--native-report', "${trace_dir_resolved}/report.html",
+            '--native-timeline', "${trace_dir_resolved}/timeline.html",
         ]
         def proc = cmd.execute()
         proc.waitForProcessOutput(System.out, System.err)

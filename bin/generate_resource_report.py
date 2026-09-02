@@ -79,16 +79,24 @@ def parse_duration(s):
 
 
 def parse_percent(s):
-    """Parse a percentage string ('142.3%', '-') to float."""
+    """Parse a percentage string ('142.3%', '-') to float.
+
+    Rejects a value that parses but is not finite (``'nan%'``, ``'inf%'``): a
+    corrupted trace field must not silently become a non-finite `cpu_pct`
+    that later renders as the literal text ``'nan%'``/``'inf%'`` in the
+    report -- `float()` parses those strings without error, so this has to be
+    checked explicitly rather than left to the `ValueError` path below.
+    """
     if s is None:
         return None
     s = s.strip().rstrip("%")
     if not s or s == "-":
         return None
     try:
-        return float(s)
+        v = float(s)
     except ValueError:
         return None
+    return v if math.isfinite(v) else None
 
 
 def _int_or_none(s):
@@ -397,6 +405,13 @@ def walltime_bars_svg(roll, top=15):
     A process whose `realtime_total_s` is present but non-finite (`+-inf`/
     `nan`) is dropped rather than drawn: `int(inf)` inside `fmt_secs` would
     otherwise crash the whole report over one corrupted rollup row.
+
+    Each bar's percentage is its share of the RUN's total wall-time across
+    every process, not of the longest bar plotted here. Bar WIDTH still scales
+    to the longest of the top-N (`vmax`) so the ranking reads at a glance, but
+    the top bar dividing by itself would always print "100%" regardless of
+    how the run's time was actually distributed -- a truthful percentage needs
+    the run total as its denominator instead.
     """
     roll = [
         r
@@ -404,6 +419,7 @@ def walltime_bars_svg(roll, top=15):
         if r.get("realtime_total_s") is None
         or _finite_or_none(r.get("realtime_total_s")) is not None
     ]
+    total_all = _sumf([r.get("realtime_total_s") for r in roll]) or 1.0
     rows = sorted(roll, key=lambda r: -(r.get("realtime_total_s") or 0.0))[:top]
     if not rows:
         return ""
@@ -414,6 +430,7 @@ def walltime_bars_svg(roll, top=15):
         y = i * _ROW_H
         v = r.get("realtime_total_s") or 0.0
         w = max(1.0, bar_w * v / vmax)
+        pct = 100.0 * v / total_all
         parts.append(
             f"<text x='0' y='{y + 15}' font-size='12' fill='#333'>"
             f"{_esc(short_process(r['process']))}</text>"
@@ -422,13 +439,18 @@ def walltime_bars_svg(roll, top=15):
             f"<title>{_esc(r['process'])}: {fmt_secs(v)} over "
             f"{r.get('n_tasks', 0)} task(s)</title></rect>"
             f"<text x='{_LABEL_W + bar_w + 8}' y='{y + 15}' font-size='12' "
-            f"fill='#666'>{_esc(fmt_secs(v))} ({100.0 * v / vmax:.0f}%)</text>"
+            f"fill='#666'>{_esc(fmt_secs(v))} ({pct:.0f}%)</text>"
         )
+    caption_y = len(rows) * _ROW_H + 14
+    parts.append(
+        f"<text x='{_LABEL_W}' y='{caption_y}' font-size='10' fill='#999'>"
+        "% is each process's share of the run's total wall-time</text>"
+    )
     return _svg(
         _PANEL_W,
-        len(rows) * _ROW_H + 4,
+        len(rows) * _ROW_H + 18,
         "".join(parts),
-        "Per-process wall-time contribution, ranked",
+        "Per-process wall-time contribution, ranked, as % of the run's total wall-time",
     )
 
 
@@ -454,6 +476,11 @@ def memory_headroom_svg(roll, top=15):
     rows = [
         r
         for r in roll
+        # Deliberately a truthiness check, not `is not None`: `pct = 100 *
+        # obs / req` divides by `mem_req_max_b` below, and a genuine `0.0`
+        # request would divide-by-zero there. Skipping a falsy (0.0 or None)
+        # request is therefore load-bearing, not an oversight -- do not
+        # "fix" this to `is not None`.
         if _finite_or_none(r.get("mem_req_max_b"))
         and _finite_or_none(r.get("peak_rss_max_b")) is not None
     ]
@@ -566,7 +593,21 @@ _SERIES = (
 )
 
 
-def size_vs_runtime_svg(joined, top_processes=8):
+def _stride_sample(items, cap):
+    """Deterministically thin `items` to at most `cap` entries.
+
+    A fixed stride (rather than e.g. random sampling) keeps a re-render of the
+    same trace identical byte-for-byte, and keeps the sample spread across the
+    whole series rather than truncated to its first `cap` points.
+    """
+    n = len(items)
+    if n <= cap:
+        return items
+    stride = math.ceil(n / cap)
+    return items[::stride]
+
+
+def size_vs_runtime_svg(joined, top_processes=8, max_points_per_series=2000):
     """Input size against runtime, log-log, one series per process.
 
     Reads join_size's output, i.e. the aggregated input-size log joined to the
@@ -585,6 +626,22 @@ def size_vs_runtime_svg(joined, top_processes=8):
     and ``inf > 0`` is ``True``), so it would otherwise slip through as a
     plottable point and either vanish from the drop count uncounted (`nan`) or
     render as `cx='nan'` and an 'inf TB' axis label (`inf`).
+
+    The legend and the point budget are both RANKED BY POINT COUNT, never by
+    first appearance. On a real tiled-registration trace, `TILED_REG_TILE`
+    contributes 95% of all plottable points and is the run's largest wall-time
+    consumer, but a first-appearance `order` legended five small early
+    processes instead and left it unlabelled grey -- contradicting this
+    panel's own "one series per process" claim. The top `top_processes` by
+    point count get a legend entry and a stable colour; everything else is
+    drawn in one shared grey and rolled into a single "other (K processes)"
+    legend row, so every point is still accounted for by the legend. Each
+    process's own points are additionally capped to `max_points_per_series`
+    via a deterministic stride subsample (`_stride_sample`) -- uncapped, that
+    same 95%-of-points process alone drew one `<circle>` per task and pushed a
+    real report into the megabytes. The caption states how many of how many
+    points are actually drawn whenever the cap changed that number, so the
+    panel never silently shows a subset without saying so.
     """
     usable = [
         j
@@ -602,39 +659,64 @@ def size_vs_runtime_svg(joined, top_processes=8):
         )
     )
     if not usable:
+        if dropped:
+            return (
+                "<p class='empty'>"
+                f"{dropped} task{'s' if dropped != 1 else ''} matched a size "
+                "log but could not be plotted (zero input size or runtime "
+                "cannot be placed on a log axis).</p>"
+            )
         return ""
 
     pad_l, pad_b, pad_t, pad_r = 70, 40, 12, 200
     w, h = _PANEL_W, 380
     plot_w, plot_h = w - pad_l - pad_r, h - pad_t - pad_b
 
-    xs = [math.log10(j["input_bytes"]) for j in usable]
-    ys = [math.log10(j["realtime_s"]) for j in usable]
-    x0, x1 = min(xs), max(xs)
-    y0, y1 = min(ys), max(ys)
+    xs_all = [math.log10(j["input_bytes"]) for j in usable]
+    ys_all = [math.log10(j["realtime_s"]) for j in usable]
+    x0, x1 = min(xs_all), max(xs_all)
+    y0, y1 = min(ys_all), max(ys_all)
     xr = (x1 - x0) or 1.0
     yr = (y1 - y0) or 1.0
 
-    order = []
-    for j in usable:
-        if j["process"] not in order:
-            order.append(j["process"])
-    colour = {p: _SERIES[i % len(_SERIES)] for i, p in enumerate(order[:top_processes])}
+    # Group by process (preserving arrival order within each group, so the
+    # stride subsample below is deterministic), then rank the GROUPS by point
+    # count -- see the docstring's real-trace measurement above.
+    by_proc = {}
+    for j, lx, ly in zip(usable, xs_all, ys_all):
+        by_proc.setdefault(j["process"], []).append((j, lx, ly))
+    order = sorted(by_proc, key=lambda p: -len(by_proc[p]))
+    top = order[:top_processes]
+    rest = order[top_processes:]
+    colour = {p: _SERIES[i % len(_SERIES)] for i, p in enumerate(top)}
+    _OTHER_COLOUR = "#bdc3c7"
 
     parts = [
         f"<rect x='{pad_l}' y='{pad_t}' width='{plot_w}' height='{plot_h}' "
         f"fill='#fbfcfd' stroke='#e3e7ea'/>"
     ]
-    for j, lx, ly in zip(usable, xs, ys):
-        cx = pad_l + plot_w * (lx - x0) / xr
-        cy = pad_t + plot_h * (1.0 - (ly - y0) / yr)
-        parts.append(
-            f"<circle cx='{cx:.1f}' cy='{cy:.1f}' r='4' fill-opacity='0.7' "
-            f"fill='{colour.get(j['process'], '#bdc3c7')}'>"
-            f"<title>{_esc(j['process'])} [{_esc(j.get('tag', ''))}]: "
-            f"{fmt_bytes(j['input_bytes'])} in {fmt_secs(j['realtime_s'])}"
-            f"</title></circle>"
-        )
+    total_shown = 0
+    for proc in order:
+        pts = _stride_sample(by_proc[proc], max_points_per_series)
+        total_shown += len(pts)
+        fill = colour.get(proc, _OTHER_COLOUR)
+        for j, lx, ly in pts:
+            cx = pad_l + plot_w * (lx - x0) / xr
+            cy = pad_t + plot_h * (1.0 - (ly - y0) / yr)
+            parts.append(
+                f"<circle cx='{cx:.1f}' cy='{cy:.1f}' r='4' fill-opacity='0.7' "
+                f"fill='{fill}'>"
+                # short_process, not the fully-qualified name: at up to
+                # max_points_per_series circles for the run's largest series,
+                # the qualified prefix repeated once per <title> was most of
+                # this panel's on-disk size. The legend already carries the
+                # mapping from short name to colour, and every other bar/key
+                # label in this file uses the short name too.
+                f"<title>{_esc(short_process(j['process']))} "
+                f"[{_esc(j.get('tag', ''))}]: "
+                f"{fmt_bytes(j['input_bytes'])} in {fmt_secs(j['realtime_s'])}"
+                f"</title></circle>"
+            )
 
     parts.append(
         f"<text x='{pad_l}' y='{h - 10}' font-size='11' fill='#666'>"
@@ -647,13 +729,22 @@ def size_vs_runtime_svg(joined, top_processes=8):
         f"text-anchor='end'>{_esc(fmt_secs(10**y0))}</text>"
     )
 
-    for i, proc in enumerate(order[:top_processes]):
+    for i, proc in enumerate(top):
         ly = pad_t + i * 18
         parts.append(
             f"<rect class='key' x='{pad_l + plot_w + 16}' y='{ly}' width='10' "
             f"height='10' fill='{colour[proc]}'/>"
             f"<text x='{pad_l + plot_w + 32}' y='{ly + 9}' font-size='11' "
             f"fill='#333'>{_esc(short_process(proc))}</text>"
+        )
+    if rest:
+        ly = pad_t + len(top) * 18
+        parts.append(
+            f"<rect class='key' x='{pad_l + plot_w + 16}' y='{ly}' width='10' "
+            f"height='10' fill='{_OTHER_COLOUR}'/>"
+            f"<text x='{pad_l + plot_w + 32}' y='{ly + 9}' font-size='11' "
+            f"fill='#333'>other ({len(rest)} process"
+            f"{'es' if len(rest) != 1 else ''})</text>"
         )
 
     if dropped:
@@ -666,13 +757,23 @@ def size_vs_runtime_svg(joined, top_processes=8):
             f"{dropped} tasks not shown (zero input size or runtime cannot be "
             f"placed on a log axis)</text>"
         )
+    if total_shown < len(usable):
+        parts.append(
+            f"<text x='{pad_l}' y='{h - 24}' font-size='11' fill='#888'>"
+            f"{total_shown} of {len(usable)} points shown (each process "
+            f"capped to {max_points_per_series})</text>"
+        )
 
-    return _svg(
-        w,
-        h,
-        "".join(parts),
-        "Input size against runtime, log-log, one series per process",
+    title = (
+        "Input size against runtime, log-log, one series per process"
+        if not rest
+        else (
+            "Input size against runtime, log-log; legend shows the "
+            f"{len(top)} process(es) with the most points, {len(rest)} more "
+            'grouped as "other"'
+        )
     )
+    return _svg(w, h, "".join(parts), title)
 
 
 _CSS = """
@@ -739,7 +840,8 @@ def build_html(
             _section(
                 "Resource Usage",
                 "<p class='empty'>Trace data not available "
-                "(run with --enable_trace to collect it).</p>",
+                "(enable_trace is a boolean param -- turn it on with a "
+                "profile or -params-file to collect it).</p>",
             )
         )
         parts.append("</main></body></html>")
@@ -750,14 +852,23 @@ def build_html(
     n_fail = sum(1 for r in trace_rows if _is_failure(r))
     peak = _maxf([r.get("peak_rss_b") for r in trace_rows])
     peak_cpu = _maxf([r.get("cpu_pct") for r in trace_rows])
+    # Same missing/corrupted distinction as fmt_bytes/fmt_secs: `None` (no
+    # reading at all) is "N/A"; a present-but-non-finite reading (a corrupted
+    # trace's `%cpu` field) is "n/a" rather than the literal string 'nan%' or
+    # 'inf%'.
+    if peak_cpu is None:
+        peak_cpu_cell = "N/A"
+    elif _finite_or_none(peak_cpu) is None:
+        peak_cpu_cell = "n/a"
+    else:
+        peak_cpu_cell = f"{peak_cpu}%"
     totals = (
         f"<table><tbody>"
         f"<tr><th>Total tasks</th><td>{len(trace_rows)}</td></tr>"
         f"<tr><th>Total CPU wall-time</th><td>{fmt_secs(total_wall)}</td></tr>"
         f"<tr><th>Failed/non-zero exit</th><td>{n_fail}</td></tr>"
         f"<tr><th>Peak single-task RSS</th><td>{fmt_bytes(peak)}</td></tr>"
-        f"<tr><th>Peak single-task %CPU</th>"
-        f"<td>{'N/A' if peak_cpu is None else f'{peak_cpu}%'}</td></tr>"
+        f"<tr><th>Peak single-task %CPU</th><td>{peak_cpu_cell}</td></tr>"
         f"</tbody></table>"
     )
     parts.append(_section("Run Totals", totals))
@@ -844,10 +955,22 @@ def main():
     Returns
     -------
     int
-        0 on success.
+        0 on success; 3 when the trace PATH EXISTED but carried zero task
+        rows (a header-only ``trace.txt``). That distinction matters because
+        main.nf only invokes this script once its own existence check on
+        `trace_txt` has already passed -- a missing path is caught and
+        warned about there without ever calling this script, so the one
+        remaining way to reach this branch from main.nf is a real file with
+        nothing in it. Exiting 0 there let a caller log "Resource report:
+        <path>" over a page that says "Trace data not available"; main.nf's
+        exit-code branch already exists to log a warning instead, so this is
+        the one line that makes it reachable. A path that never existed at
+        all (e.g. this script run by hand against a wrong --trace) still
+        exits 0 -- unchanged, and still "graceful" for that case.
     """
     args = parse_args()
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    trace_path_exists = Path(args.trace).exists() if args.trace else False
     trace_rows = parse_trace(args.trace)
     size_map = parse_size_log(args.size_log)
     # Named report_html (not `html`) to avoid shadowing the stdlib `html`
@@ -859,6 +982,8 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(report_html, encoding="utf-8")
     print(f"Resource report written to: {out}")
+    if trace_path_exists and not trace_rows:
+        return 3
     return 0
 
 
