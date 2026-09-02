@@ -123,3 +123,26 @@ def test_shard_divisor_matches_the_matrix_length():
         "runs some of them on every leg while others run on none (divisor < "
         "matrix length)."
     )
+
+
+def test_shard_strategy_is_round_robin():
+    """The job's `run:` body must actually pass `--shard-strategy round-robin`.
+
+    Without it, `--shard i/n` alone falls back to nf-test's default splitting
+    strategy, which shards by FILE rather than by individual test -- given how
+    unevenly sized this repo's nf-test files are, that would silently starve
+    some legs and overload others while every leg still reports green (the
+    same "verification reality" failure shape the two guards above exist for).
+    Read through `ci_actions.job_run_scripts`, the same comment-stripped view
+    used above, so a `--shard-strategy round-robin` left behind only in a
+    comment does not satisfy this test.
+    """
+    job = _nf_test_stub_job()
+    script = ci_actions.job_run_scripts(job)
+    assert "--shard-strategy round-robin" in script, (
+        f"{JOB_ID}'s `run:` bodies (comments stripped) do not contain "
+        "`--shard-strategy round-robin` -- without it, `--shard i/n` falls "
+        "back to nf-test's default per-file splitting, which can silently "
+        "starve or overload individual shard legs while every leg still "
+        "reports green."
+    )

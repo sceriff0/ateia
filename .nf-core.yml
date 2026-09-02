@@ -28,8 +28,9 @@
 # in `nf_core/utils.py` on
 #     self.pipeline_prefix, self.pipeline_name = manifest.name.split("/")
 # because MIRAGE's `manifest.name` is `mirage` and the tool requires `<org>/<name>`.
-# It is not the `lint:` block below, and it is not the 3.0 `nf-core lint` ->
-# `nf-core pipelines lint` rename.
+# It is not the `lint:` block that used to sit below (see the deletion note at the
+# top of this file), and it is not the 3.0 `nf-core lint` -> `nf-core pipelines lint`
+# rename.
 #
 # Forced past it (manifest.name temporarily set to `bolt3x/mirage`), 3.4.1 then:
 #   * needs `pre-commit` on PATH, and crashes with FileNotFoundError without it;

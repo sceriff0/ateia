@@ -339,6 +339,7 @@ Location: `.github/workflows/ci.yml`
 
 3. **ruff** (inside `_test-suite.yml`, blocking)
    - Runs `ruff check .`
+   - Runs `ruff format --check .`
    - Runs `actionlint` over `.github/workflows/**` and `.github/actions/**`
 
 There is no `nf-core lint` job. It ran `|| true` and could never fail, and it was

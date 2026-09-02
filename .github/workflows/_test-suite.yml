@@ -549,7 +549,7 @@ jobs:
   # Python lint (blocking) — BOTH `ruff check` (pyflakes/pycodestyle/import-sort
   # per ruff.toml) and `ruff format --check`. Format enforcement used to be out
   # of scope because the repo was not normalized; it was normalized in one commit
-  # for release 1.0 (132 files) and the check went blocking in the same phase, so
+  # for release 1.0 (133 files) and the check went blocking in the same phase, so
   # that the normalisation cannot silently rot back. ruff is version-pinned in
   # requirements/lint.txt precisely because a formatter release changes output.
   # ============================================================================

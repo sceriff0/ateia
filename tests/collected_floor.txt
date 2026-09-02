@@ -96,4 +96,14 @@
 # tests/test_docstring_coverage.py's 2 new cases
 # (test_the_walk_actually_visited_the_tree and
 # test_no_public_definition_lacks_a_docstring); no other test count moved.
-1337
+#
+# RE-MEASURED 2026-09-02, final-review fix wave for phase 02 (M8): `pytest
+# --collect-only -q tests/ --ignore=tests/testdata --ignore=tests/modules
+# --ignore=tests/subworkflows --ignore=tests/integration` reports "1338 tests
+# collected", up from the prior entry's 1337. The increase is exactly
+# tests/test_nf_test_shards_cover_the_suite.py's one new case,
+# test_shard_strategy_is_round_robin, which asserts the nf-test-stub job's
+# run script actually passes `--shard-strategy round-robin` (verified
+# red/green: deleting the flag from .github/workflows/_test-suite.yml fails
+# this test, restoring it passes). No other test count moved.
+1338

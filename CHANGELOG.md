@@ -384,6 +384,12 @@ after that doc and is detailed inline below:
   for DISPATCH, in `subworkflows/local/registration.nf`; `WARP_SEG_QC`'s
   `--jvm-heap-gb 8` (VALIS-only) is resolved from the `method` process input via
   `lib/WarpBackends.groovy`, not from the param, so the two can never disagree.
+- **The blocking `nf-test test --tag stub` job is sharded four ways** (a
+  `shard-strategy round-robin` matrix in `_test-suite.yml`'s `nf-test-stub` job),
+  cutting that leg's wall time from roughly 30 minutes to roughly 9.
+- **`ruff format` in check mode is now also blocking**, in the same `_test-suite.yml`
+  `ruff` job that already runs `ruff check`, after the whole tree was normalised to
+  its output in one commit (133 files). See `tests/README.md`'s CI Jobs section.
 
 ### Fixed
 - **The release workflow built a release from three different commits.**
@@ -854,6 +860,13 @@ after that doc and is detailed inline below:
   hold at production scale). `TILE_FOR_BASIC` and `APPLY_PROFILES` read through the same
   lazy primitive by construction (`docs/figures/zarr-schematic.html` panel **c**, "the
   fifth site").
+- **`bin/registration_benchmark.py` — deleted from the pipeline branches**; it
+  survives on the `benchmarking` branch, where the benchmark harness that calls it
+  lives. `bin/utils/reg_benchmark.py` lost its only production importer with it and
+  is now covered by an allowlisted skip
+  (`tests/test_no_dead_bin_modules.py::test_bin_utils_module_has_a_real_importer[reg_benchmark.py]`,
+  `tests/expected_skips.txt`) rather than deleted, since it is still imported by
+  `tests/test_reg_benchmark.py` and `tests/test_tiled_fanout.py`.
 
 ## [1.0.0] - 2026-07-29
 
