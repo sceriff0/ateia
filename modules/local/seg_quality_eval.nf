@@ -57,7 +57,7 @@ process SEG_QUALITY_EVAL {
         --out ${prefix}_seg_eval.json \\
         ${px_arg} \\
         ${args}
-    ${ProcessEnvelope.versions(task.process, ['python', 'scikit-learn', 'scipy', 'CellSegmentationEvaluator'], task.container)}
+    ${ProcessEnvelope.versions(task.process, ['sklearn', 'scipy', 'CellSegmentationEvaluator'], task.container)}
     """
 
     stub:
@@ -65,6 +65,6 @@ process SEG_QUALITY_EVAL {
     """
     echo '{"id": "${prefix}", "QualityScore": 0.0, "metrics": {}}' > ${prefix}_seg_eval.json
     ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${prefix}.SEG_QUALITY_EVAL.size.csv")}
-    ${ProcessEnvelope.versionsStub(task.process, ['python', 'scikit-learn', 'scipy', 'CellSegmentationEvaluator'], task.container)}
+    ${ProcessEnvelope.versionsStub(task.process, ['sklearn', 'scipy', 'CellSegmentationEvaluator'], task.container)}
     """
 }
