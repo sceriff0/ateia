@@ -1003,4 +1003,105 @@ nextflow_pipeline {
         }
     }
 
+    test("Should name the trace path it looked for when no report can be made") {
+
+        // F3: the resource report's real defect was silent trace discovery. main.nf
+        // built "${params.trace_dir}/trace.txt" from the raw param and cmd.execute()
+        // resolved it against the JVM's working directory, so a relative trace_dir
+        // pointed somewhere else entirely on any launch that was not from the run
+        // directory -- and the script exited 0 over an empty page, so main.nf printed
+        // a SUCCESS line.
+        //
+        // trace_dir is RELATIVE here on purpose: the leading slash in the asserted
+        // path is the whole proof that ResourceReport.tracePath resolved it against
+        // launchDir rather than passing the raw param through.
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input       = "$projectDir/tests/testdata/single_sample.csv"
+                outdir      = "$outputDir"
+                start       = "preprocessing"
+                stop        = "preprocessing"
+                seg_gpu     = false
+                enable_trace = false
+                trace_dir   = 'plan10_relative_trace_dir'
+            }
+        }
+
+        then {
+            def said = workflow.stdout + workflow.stderr
+            assertAll(
+                { assert workflow.success },
+                { assert said.any { it.contains('/plan10_relative_trace_dir/trace.txt') },
+                    "the diagnostic did not name an ABSOLUTE trace path: " + said.join(' | ') },
+                { assert said.any { it.contains('enable_trace') },
+                    "the diagnostic did not say whether tracing was on: " + said.join(' | ') },
+                // Nothing is written: an empty report page that says "not available"
+                // is worse than no page, because it looks like a report.
+                { assert !new File("$outputDir/qc/mirage_resource_report.html").exists() }
+            )
+        }
+    }
+
+    test("Should write the resource report when the trace is where it says it is") {
+
+        // The other half of the same fix: when a trace file genuinely exists at the
+        // resolved path, the report IS produced. This is the regression guard for the
+        // discovery change -- there is no in-DAG process to hang a rendered-command
+        // nf-test on, because the report is generated from workflow.onComplete
+        // deliberately, so the artifact's existence is the assertion available.
+        //
+        // trace_dir is deliberately an ABSOLUTE path under $outputDir here, pre-seeded
+        // with a minimal trace.txt before the pipeline launches -- it is NOT enough to
+        // rely on the shipped `--enable_trace` default and let Nextflow's own trace{}
+        // scope write the file during the run. nf-test unconditionally appends its OWN
+        // `-with-trace <meta/trace.csv>` to every `nextflow run` invocation it makes
+        // (confirmed via .nf-test/tests/*/meta/nextflow.log: only ONE
+        // "TraceFileObserver ... saving trace file" line ever appears, and only
+        // meta/trace.csv gets written -- .trace/trace.txt is never created). CLI
+        // options win over `nextflow.config`, so nf-test's flag silently overrides
+        // this pipeline's `trace.file` setting for the run; a competing `-with-trace`
+        // added from a test's own `options` does not help either -- Nextflow's CLI
+        // parser rejects a second occurrence outright ("Can only specify option
+        // -with-trace once"), watched failing while investigating this. Pre-seeding
+        // the exact file ResourceReport.tracePath will resolve to is therefore the
+        // only way to exercise the "found -> report produced" branch under nf-test;
+        // it is not a workaround for anything main.nf gets wrong, and CI's own
+        // `nf-test test` invocation (.github/workflows/_test-suite.yml) carries the
+        // same unconditional `-with-trace`, so this is the real CI shape, not a local
+        // artifact.
+        tag "stub"
+        options "-stub"
+
+        when {
+            new File("$outputDir/faketrace").mkdirs()
+            new File("$outputDir/faketrace/trace.txt").text =
+                "task_id\tprocess\ttag\tname\tstatus\texit\tsubmit\tstart\tcomplete\t" +
+                "duration\trealtime\t%cpu\tcpus\tmemory\tpeak_rss\tpeak_vmem\trchar\twchar\n" +
+                "1\tMIRAGE:PREPROCESSING:CONVERT_IMAGE\tP001\t" +
+                "MIRAGE:PREPROCESSING:CONVERT_IMAGE (P001)\tCOMPLETED\t0\t" +
+                "2026-09-02 00:00:00.000\t2026-09-02 00:00:00.100\t2026-09-02 00:00:00.200\t" +
+                "200ms\t100ms\t50.0%\t1\t2 GB\t500 MB\t1 GB\t10 MB\t5 MB\n"
+            params {
+                input     = "$projectDir/tests/testdata/single_sample.csv"
+                outdir    = "$outputDir"
+                start     = "preprocessing"
+                stop      = "preprocessing"
+                seg_gpu   = false
+                trace_dir = "$outputDir/faketrace"
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert path("$outputDir/qc/mirage_resource_report.html").exists() },
+                { assert path("$outputDir/qc/mirage_resource_report.html").text
+                         .contains("MIRAGE Computational Resource Report") }
+            )
+        }
+    }
+
 }
