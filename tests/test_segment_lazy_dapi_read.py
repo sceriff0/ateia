@@ -352,8 +352,6 @@ def test_segment_cellsam_module_has_no_heavy_top_level_imports():
 @pytest.mark.parametrize("compression", [None, "zlib"])
 @pytest.mark.parametrize("dims", ["2d", "3d"])
 def test_segment_cellsam_extract_dapi_channel_equivalence(tmp_path, compression, dims):
-    import segment_cellsam
-
     if dims == "3d":
         path, stack = _write_3d_stack(tmp_path, compression=compression)
         channel_index = 0
@@ -364,7 +362,7 @@ def test_segment_cellsam_extract_dapi_channel_equivalence(tmp_path, compression,
         expected = plane
 
     old_image = _old_segment_cellsam_extract_dapi_channel(str(path), channel_index)
-    new_image = segment_cellsam.extract_dapi_channel(str(path), channel_index)
+    new_image, _new_meta = segment_io.extract_dapi_channel(str(path), channel_index)
 
     assert new_image.dtype == old_image.dtype
     np.testing.assert_array_equal(new_image, old_image)
@@ -372,8 +370,6 @@ def test_segment_cellsam_extract_dapi_channel_equivalence(tmp_path, compression,
 
 
 def test_segment_cellsam_extract_dapi_channel_uses_lazy_path(tmp_path, monkeypatch):
-    import segment_cellsam
-
     path, _stack = _write_3d_stack(tmp_path, n_channels=3)
 
     calls = []
@@ -385,7 +381,7 @@ def test_segment_cellsam_extract_dapi_channel_uses_lazy_path(tmp_path, monkeypat
 
     monkeypatch.setattr(tifffile.TiffFile, "asarray", spying_asarray)
 
-    segment_cellsam.extract_dapi_channel(str(path), dapi_channel_index=0)
+    segment_io.extract_dapi_channel(str(path), dapi_channel_index=0)
 
     memmap_calls = [c for c in calls if c.get("out") == "memmap"]
     assert memmap_calls == []
@@ -452,14 +448,13 @@ def test_segment_py_delegation_is_live_when_importable():
 
     Deliberately additive: this NEVER replaces the structural assertions, so a
     change in what pip happens to resolve can only ever ADD coverage here, never
-    remove it. bin/segment.py:32 binds the delegate as
-    `from segment_io import extract_dapi_channel as _extract_dapi_channel_impl`
-    and its wrapper calls that name, so identity against segment_io's function is
-    the real delegation.
+    remove it. bin/segment.py:32 imports the name directly now
+    (`from segment_io import extract_dapi_channel`), so identity against
+    segment_io's function is the real delegation.
     """
     import segment  # noqa: PLC0415
 
-    assert segment._extract_dapi_channel_impl is segment_io.extract_dapi_channel, (
+    assert segment.extract_dapi_channel is segment_io.extract_dapi_channel, (
         "bin/segment.py no longer delegates its channel read to "
         "segment_io.extract_dapi_channel"
     )

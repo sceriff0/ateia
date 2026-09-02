@@ -47,7 +47,7 @@ import tifffile
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
 from numpy.typing import NDArray
-from segment_io import extract_dapi_channel as _extract_dapi_channel_impl
+from segment_io import extract_dapi_channel
 from skimage import segmentation
 
 logger = get_logger(__name__)
@@ -59,41 +59,6 @@ logger = get_logger(__name__)
 #: own read pattern (many small windowed per-cell/per-region reads, not whole-plane decodes)
 #: -- see docs/perf/2026-08-26-rss.md's tiled-vs-striped table.
 MASK_TIFF_TILE = 1024
-
-
-def extract_dapi_channel(
-    multichannel_image_path: str,
-    dapi_channel_index: int = 0,
-) -> NDArray:
-    """Extract a single (DAPI/nuclear) channel from a multichannel OME-TIFF.
-
-    Delegates to ``segment_io.extract_dapi_channel`` (``bin/utils/segment_io.py``),
-    which reads through ``tiled_io.open_lazy`` -- a tifffile zarr view that decodes
-    only the tiles a slice actually touches, so only the requested channel is ever
-    decoded. This is a lazy zarr read, NOT a memory-map of the source file: unlike
-    what ``tif.asarray(out="memmap")`` implies, that call decodes the ENTIRE image
-    into a new full-size *uncompressed* temp file on compressed input before any
-    slicing happens. Negative interpolation artefacts (e.g. bicubic overshoot from
-    registration) are clipped to zero by ``segment_io``. Shares its implementation
-    with ``segment.py:extract_dapi_channel`` -- ``segment_io`` has no stardist/
-    tensorflow or cellSAM/torch imports, so it stays lightweight for both backends.
-
-    Parameters
-    ----------
-    multichannel_image_path
-        Path to multichannel OME-TIFF (e.g. registration output).
-    dapi_channel_index
-        Index of the nuclear channel. Default 0 (DAPI in channel 0).
-
-    Returns
-    -------
-    NDArray, shape (Y, X)
-        The extracted nuclear channel.
-    """
-    dapi_image, _metadata = _extract_dapi_channel_impl(
-        multichannel_image_path, dapi_channel_index, logger=logger
-    )
-    return dapi_image
 
 
 def expand_labels_tiled(
@@ -244,7 +209,9 @@ def run_cellsam(
         logger.info(f"  CUDA available: {torch.cuda.get_device_name(0)}")
 
     # 1. Extract DAPI channel and build CellSAM's (H, W, 3) input.
-    dapi_image = extract_dapi_channel(image_path, dapi_channel_index)
+    dapi_image, _metadata = extract_dapi_channel(
+        image_path, dapi_channel_index, logger=logger
+    )
     cellsam_input = _build_cellsam_input(dapi_image)
     del dapi_image
 

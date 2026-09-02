@@ -29,7 +29,7 @@ from csbdeep.utils import normalize
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
 from numpy.typing import NDArray
-from segment_io import extract_dapi_channel as _extract_dapi_channel_impl
+from segment_io import extract_dapi_channel
 from skimage import segmentation
 from stardist.models import StarDist2D
 
@@ -44,52 +44,11 @@ logger = get_logger(__name__)
 MASK_TIFF_TILE = 1024
 
 __all__ = [
-    "extract_dapi_channel",
     "normalize_dapi",
     "load_stardist_model",
     "segment_nuclei",
     "run_segmentation",
 ]
-
-
-def extract_dapi_channel(
-    multichannel_image_path: str, dapi_channel_index: int = 0
-) -> Tuple[NDArray, dict]:
-    """
-    Extract DAPI channel from multichannel OME-TIFF image using a lazy zarr read.
-
-    Delegates to ``segment_io.extract_dapi_channel`` (``bin/utils/segment_io.py``),
-    which reads through ``tiled_io.open_lazy`` -- a tifffile zarr view that decodes
-    only the tiles a slice actually touches. This is NOT the same as
-    ``tif.asarray(out="memmap")``: on compressed input that call does not map the
-    source file at all, it decodes the ENTIRE image into a new full-size
-    *uncompressed* temp file and memory-maps THAT, so "extracting only the DAPI
-    channel" from it happens only after every channel has already been decoded.
-    ``segment_io`` lives outside this module specifically so it stays importable
-    (and testable) without this module's ``stardist``/``csbdeep`` dependencies.
-
-    Parameters
-    ----------
-    multichannel_image_path : str
-        Path to multichannel OME-TIFF file (e.g., from VALIS registration).
-    dapi_channel_index : int, optional
-        Index of DAPI channel. Default is 0 (first channel).
-
-    Returns
-    -------
-    dapi_image : ndarray, shape (Y, X)
-        DAPI channel image.
-    metadata : dict
-        Image metadata from OME-TIFF.
-
-    Raises
-    ------
-    ValueError
-        If image has wrong dimensions or DAPI channel doesn't exist.
-    """
-    return _extract_dapi_channel_impl(
-        multichannel_image_path, dapi_channel_index, logger=logger
-    )
 
 
 def normalize_dapi(
@@ -384,7 +343,9 @@ def run_segmentation(
     ensure_dir(output_dir)
 
     # 1. Extract DAPI channel from multichannel image
-    dapi_image, metadata = extract_dapi_channel(image_path, dapi_channel_index)
+    dapi_image, metadata = extract_dapi_channel(
+        image_path, dapi_channel_index, logger=logger
+    )
 
     # 2. Normalize using CSBDeep
     normalized_dapi = normalize_dapi(dapi_image, pmin=pmin, pmax=pmax)

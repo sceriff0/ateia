@@ -27,6 +27,12 @@ plane of it.
 ``open_lazy``'s zarr view decodes lazily on region access instead, so
 indexing a single channel only decodes that channel's tiles -- no full-image
 decode, no full-size temp file.
+
+Both segmentation backends call this directly: ``bin/segment.py`` (StarDist) and
+``bin/segment_cellsam.py`` (CellSAM). They used to wrap it in a one-line
+delegating function each, which added a second docstring to keep in sync and a
+second name to grep for, and hid that the CellSAM copy silently discarded the
+metadata half of the return.
 """
 
 from __future__ import annotations
