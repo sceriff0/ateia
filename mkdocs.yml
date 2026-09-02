@@ -134,6 +134,7 @@ nav:
   - Illumination correction: basic_illumination.md
   - Incremental cycles: add_cycle.md
   - Registration QC: registration_qc.md
+  - Development: developing.md
   - SpatialData & FlowPath: spatialdata.md
   - Citation: citation.md
   # NOTE (plan 12, 2026-09-02; trimmed 2026-09-03): the brief for this phase
