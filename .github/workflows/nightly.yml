@@ -311,3 +311,76 @@ jobs:
           path: |
             .nf-test/
             tests/output/
+
+  # ============================================================================
+  # Documentation build (mkdocs --strict)
+  # ============================================================================
+  # LIVES HERE, NOT IN _test-suite.yml, BECAUSE OF WHAT "NON-BLOCKING" ACTUALLY
+  # MEANS FOR A REUSABLE WORKFLOW. Measured on CI run 33641966166: every blocking
+  # leg and `Suite gate` succeeded, but ci.yml's `All Tests` FAILED with "The
+  # shared test suite did not pass (result: failure)". Being outside
+  # `suite-gate`'s `needs:` does not make a job non-blocking -- a called reusable
+  # workflow's conclusion is the worst conclusion of ANY job inside it, gate
+  # membership included or not, so this job's red concluded `_test-suite.yml`
+  # itself as `failure` and ci.yml's `all-tests` reads that one result. Same
+  # mechanism this file's own header describes for `nf-test-real` in ci.yml,
+  # discovered a second time because the earlier fix put the job in the wrong
+  # kind of file rather than the wrong `needs:` list.
+  #
+  # `--strict` plus the `validation:` block in mkdocs.yml turns three categories
+  # that default to `info` -- orphan pages, dangling anchors, dead relative links
+  # -- into a failed build. mkdocs 1.6 has no `error` level; `warn` + `--strict`
+  # IS the mechanism (see mkdocs.yml's own note).
+  #
+  # THIS JOB IS RED THE DAY IT LANDS, same as `nf-test-real` above: 2 orphan
+  # pages (nextflow-26-bump.md, perf/2026-08-26-rss.md) and 3 dangling anchors,
+  # measured 2026-09-02, reported as 4 warnings. No `continue-on-error` and no
+  # `|| true` -- a failing docs build FAILS here, visibly, in this workflow's own
+  # status, which is the entire point of nightly.yml existing.
+  #
+  # Plan 12 (the docs phase of this release) fixes those four warnings and moves
+  # this job BACK into `_test-suite.yml` as a blocking, gate-enumerated job --
+  # added to `suite-gate`'s `needs:` and to GATE_MEMBERSHIP["_test-suite.yml"] in
+  # tests/test_release_workflow_graph.py. Until then it stays here, where a red
+  # result cannot fail a caller's gate: nightly.yml carries no gate aggregator at
+  # all, so `test_every_job_is_connected_to_its_workflows_gate` and
+  # `GATE_DISCONNECTED_JOBS` do not apply to it -- there is no gate here for the
+  # job to be disconnected from.
+  docs:
+    name: Docs build (mkdocs --strict)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # FULL HISTORY, unlike the two nf-test jobs above. mkdocs.yml loads
+          # mkdocs-git-revision-date-localized, which reads each page's last-commit
+          # date out of git. On the default shallow clone it falls back to the
+          # build date and logs a WARNING to do so -- and under `--strict` a
+          # warning is an abort, so a shallow checkout would fail this job for a
+          # reason that has nothing to do with the documentation.
+          fetch-depth: 0
+
+      - name: Set up Python and install the docs stack
+        # docs/requirements.txt, not a requirements/ file: this stack is
+        # documentation tooling, shares no package with any container image, and
+        # Read the Docs installs the same file. tests/test_ci_stack_pinned.py's
+        # rules are satisfied -- the install goes through `-r`, and no version
+        # string appears in this YAML.
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: '3.10'
+          requirements: 'docs/requirements.txt'
+
+      - name: Build the documentation
+        run: |
+          mkdocs build --strict --site-dir _site
+
+      - name: Upload the built site
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-site
+          path: _site/

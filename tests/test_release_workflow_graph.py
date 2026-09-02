@@ -1199,29 +1199,31 @@ def test_no_workflow_branches_on_the_workflow_call_event_name():
 
 # Jobs deliberately outside their workflow's gate DAG. BY (file, job id), with the
 # reason, because an unexplained one is exactly the defect.
-# EMPTY AS OF 2026-09-01 (CI redesign, Phase 7), and that is the point rather than
-# an oversight. The single entry was ("ci.yml", "lint") -- the nf-core structural
-# lint, whose one substantive step ended in `|| true` and therefore could never fail.
-# Phase 7 deleted the JOB: no released nf-core/tools version can lint this repository
+# EMPTY AS OF 2026-09-02 (CI redesign, Phase 7; and again after the `docs` fix
+# round below), and that is the point rather than an oversight. The single Phase 7
+# entry was ("ci.yml", "lint") -- the nf-core structural lint, whose one
+# substantive step ended in `|| true` and therefore could never fail. Phase 7
+# deleted the JOB: no released nf-core/tools version can lint this repository
 # (2.14.1 through 4.1.0 all die on `manifest.name` having no `/`; see .nf-core.yml's
 # header for the measurement), so there was nothing to un-swallow.
+#
+# A SECOND entry, ("_test-suite.yml", "docs"), existed briefly on 2026-09-02: the
+# `docs` job was landed in `_test-suite.yml` outside `suite-gate`'s `needs:`, on the
+# premise that being outside the gate's `needs:` made it non-blocking. CI run
+# 33641966166 disproved that: `_test-suite.yml` is a `workflow_call` reusable
+# workflow, and a called workflow's own CONCLUSION is the worst conclusion of ANY
+# job inside it, gate membership included or not -- so the red `docs` job made
+# `_test-suite.yml` itself conclude `failure`, and ci.yml's `all-tests` reads that
+# one result regardless of `suite-gate`. The fix was relocation, not an exemption:
+# `docs` now lives in `.github/workflows/nightly.yml`, which carries no gate
+# aggregator at all, so there is no gate for it to be disconnected FROM and this
+# allowlist has nothing to say about it. See nightly.yml's own job comment for the
+# full account and the plan-12 return path.
 #
 # Every job in every gated workflow is now wired to its gate. Leave this dict empty
 # if you can: an entry here is a job that cannot fail the MERGE and can still fail
 # the RUN, which is how a green gate comes to report a red commit.
-GATE_DISCONNECTED_JOBS: dict[tuple[str, str], str] = {
-    ("_test-suite.yml", "docs"): (
-        "Added 2026-09-02. `mkdocs build --strict` is RED on arrival: 2 orphan pages "
-        "(nextflow-26-bump.md, perf/2026-08-26-rss.md) and 3 dangling anchors, "
-        "measured, reported as 4 warnings. The check is landed now so the fix has "
-        "something to turn green; putting it in suite-gate's `needs:` today would "
-        "block every merge in the 1.0.0 release on a documentation defect no other "
-        "phase owns. The docs phase fixes those, adds `docs` to suite-gate's "
-        "`needs:` and to GATE_MEMBERSHIP, and DELETES this entry -- which "
-        "test_the_gate_disconnected_allowlist_has_no_dead_entries then requires, so "
-        "the move cannot be left half-done."
-    ),
-}
+GATE_DISCONNECTED_JOBS: dict[tuple[str, str], str] = {}
 
 # The advisory nf-test suites, keyed on the COMMAND, never on a job or file name.
 # Naming the job would let a rename hide a deletion, and naming the file would go

@@ -585,68 +585,6 @@ jobs:
         uses: ./.github/actions/actionlint
 
   # ============================================================================
-  # Documentation build — NON-BLOCKING TODAY, ON PURPOSE
-  # ============================================================================
-  # NOTHING IN THIS REPOSITORY BUILT THE DOCS. Read the Docs builds them on its own
-  # infrastructure after a merge, so a broken cross-reference or an unreachable page
-  # was discovered, if at all, by a reader.
-  #
-  # `--strict` plus the `validation:` block in mkdocs.yml turns three categories that
-  # default to `info` -- orphan pages, dangling anchors, dead relative links -- into a
-  # failed build. mkdocs 1.6 has no `error` level; `warn` + `--strict` IS the
-  # mechanism (see mkdocs.yml's own note).
-  #
-  # THIS JOB IS RED THE DAY IT LANDS, and that is why it is not in `suite-gate`'s
-  # `needs:`. Measured 2026-09-02: 2 orphan pages (nextflow-26-bump.md,
-  # perf/2026-08-26-rss.md) and 3 dangling anchors, reported as 4 warnings. The docs
-  # phase of this release fixes those and moves this job into the gate -- which means
-  # deleting its entry from tests/test_release_workflow_graph.py's
-  # GATE_DISCONNECTED_JOBS and adding "docs" to GATE_MEMBERSHIP["_test-suite.yml"].
-  # That allowlist has a dead-entry check, so the move cannot be half-done.
-  #
-  # Putting it in the gate NOW would block every merge in this release on a
-  # documentation defect no other phase owns.
-  docs:
-    name: Docs build (mkdocs --strict)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
-          # FULL HISTORY, unlike every other job here. mkdocs.yml loads
-          # mkdocs-git-revision-date-localized, which reads each page's last-commit
-          # date out of git. On the default shallow clone it falls back to the build
-          # date and logs a WARNING to do so -- and under `--strict` a warning is an
-          # abort, so a shallow checkout would fail this job for a reason that has
-          # nothing to do with the documentation.
-          fetch-depth: 0
-
-      - name: Set up Python and install the docs stack
-        # docs/requirements.txt, not a requirements/ file: this stack is
-        # documentation tooling, shares no package with any container image, and
-        # Read the Docs installs the same file. tests/test_ci_stack_pinned.py's
-        # rules are satisfied -- the install goes through `-r`, and no version
-        # string appears in this YAML.
-        uses: ./.github/actions/setup-python-env
-        with:
-          python-version: '3.10'
-          requirements: 'docs/requirements.txt'
-
-      - name: Build the documentation
-        run: |
-          mkdocs build --strict --site-dir _site
-
-      - name: Upload the built site
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: docs-site
-          path: _site/
-
-  # ============================================================================
   # Suite gate — the single result the callers depend on
   # ============================================================================
   # WITHOUT THIS JOB THE GATE WOULD BE WEAKER THAN THE ONE IT REPLACES, and the
