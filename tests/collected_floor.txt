@@ -446,4 +446,21 @@
 # the count. Task 13 (same commit batch, deleting the two pass-through
 # extract_dapi_channel wrappers) re-measured at the same 1328/13/1341 -- it
 # only edits existing test bodies, no new or removed test function.
+
+#
+#
+# RE-MEASURED 2026-09-02 after release plan 04 (deepening A). The phase adds five
+# tests and removes none: two guards in test_versions_envelope.py (container line,
+# size-log envelope), two in the new test_size_log_schema_has_one_owner.py, and one
+# foreign-header case in test_generate_resource_report.py. Measured after
+# generating the fixtures, with the suite's standard exclusions: `pytest
+# --collect-only -q` reports "1343 tests collected", and a full run gives 1330
+# passed, 13 skipped, 0 failed -- 1330 + 13 = 1343, matching the number already
+# on the last line below. The prior (task 8) entry's prose undercounted -- it
+# attributed only 3 of the phase's five new tests to the floor, missing
+# test_every_module_records_its_container and
+# test_every_size_log_module_uses_the_envelope as a distinct earlier addition in
+# this phase (174eea2) -- but the number it set was already arithmetically
+# correct (1338 + 2 + 3 = 1343). Left unchanged; this entry makes the accounting
+# whole.
 1433
