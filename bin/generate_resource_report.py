@@ -298,6 +298,84 @@ def fmt_secs(s):
     return f"{sec}s"
 
 
+# ---------------------------------------------------------------------------
+# Inline SVG panels
+#
+# Hand-rolled, stdlib-only, in the shape of bin/generate_qc_report.py's
+# _tiled_tre_heatmap_svg(). Copied in SHAPE and not imported: this script runs on
+# the head node OUTSIDE every container (F6), so it must stay importable with the
+# standard library alone, and it is deliberately self-contained -- see _esc's
+# docstring. Do not factor these into a shared module; that would give two
+# separately-owned scripts one file to drift in.
+# ---------------------------------------------------------------------------
+
+_PANEL_W = 900  # viewBox width; the <svg> itself scales to its container
+_ROW_H = 22  # one ranked bar per row
+_LABEL_W = 260  # left gutter for process names
+_VALUE_W = 150  # right gutter for the formatted value
+
+
+def short_process(name):
+    """`MIRAGE:PREPROCESSING:CONVERT_IMAGE` -> `CONVERT_IMAGE`.
+
+    Fully-qualified process names are too long for a bar label at any readable
+    font size, and every one of them shares the same prefix, so the prefix
+    carries no information in a chart of this pipeline's own processes. The full
+    name is kept in each bar's <title> tooltip.
+    """
+    return (name or "").rsplit(":", 1)[-1]
+
+
+def _svg(width, height, body, title):
+    """The one <svg> wrapper every panel here uses.
+
+    A viewBox plus `width:100%` makes the panel scale to the report's column at
+    any window size without a layout library, and `role`/`aria-label` give it a
+    name for a screen reader, which a <table> got for free and a bag of <rect>s
+    does not.
+    """
+    return (
+        f'<svg viewBox="0 0 {width} {height}" width="100%" '
+        f'style="max-width:{width}px;display:block" '
+        f'role="img" aria-label="{_esc(title)}">{body}</svg>'
+    )
+
+
+def walltime_bars_svg(roll, top=15):
+    """Per-process wall-time contribution, ranked, longest first.
+
+    Answers "where did the run's time actually go?" in one glance, which the
+    per-process table it replaces could not: sorted alphabetically, with ten
+    columns, the one number that matters was never adjacent to itself.
+    """
+    rows = sorted(roll, key=lambda r: -(r.get("realtime_total_s") or 0.0))[:top]
+    if not rows:
+        return ""
+    vmax = max((r.get("realtime_total_s") or 0.0) for r in rows) or 1.0
+    bar_w = _PANEL_W - _LABEL_W - _VALUE_W
+    parts = []
+    for i, r in enumerate(rows):
+        y = i * _ROW_H
+        v = r.get("realtime_total_s") or 0.0
+        w = max(1.0, bar_w * v / vmax)
+        parts.append(
+            f"<text x='0' y='{y + 15}' font-size='12' fill='#333'>"
+            f"{_esc(short_process(r['process']))}</text>"
+            f"<rect class='bar' x='{_LABEL_W}' y='{y + 4}' width='{w:.1f}' "
+            f"height='{_ROW_H - 8}' fill='#2c3e50'>"
+            f"<title>{_esc(r['process'])}: {fmt_secs(v)} over "
+            f"{r.get('n_tasks', 0)} task(s)</title></rect>"
+            f"<text x='{_LABEL_W + bar_w + 8}' y='{y + 15}' font-size='12' "
+            f"fill='#666'>{_esc(fmt_secs(v))} ({100.0 * v / vmax:.0f}%)</text>"
+        )
+    return _svg(
+        _PANEL_W,
+        len(rows) * _ROW_H + 4,
+        "".join(parts),
+        "Per-process wall-time contribution, ranked",
+    )
+
+
 _CSS = """
 body{font-family:'Segoe UI',Arial,sans-serif;background:#f4f6f9;color:#333;margin:0}
 header{background:#1a2332;color:#fff;padding:24px 40px}

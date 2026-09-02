@@ -457,3 +457,67 @@ def test_failed_gb_h_falls_back_to_observed_rss_when_no_request_is_recorded():
     ]
     a = {r["process"]: r for r in grr.rollup_by_process(rows)}["A"]
     assert a["failed_gb_h"] == pytest.approx(20.0, rel=1e-6)
+
+
+def _roll_row(proc, total_s, **kw):
+    row = {
+        "process": proc,
+        "n_tasks": 1,
+        "realtime_total_s": total_s,
+        "realtime_mean_s": total_s,
+        "cpu_max_pct": None,
+        "peak_rss_max_b": None,
+        "peak_vmem_max_b": None,
+        "rchar_total_b": 0.0,
+        "wchar_total_b": 0.0,
+        "n_failed": 0,
+        "mem_req_max_b": None,
+        "failed_realtime_s": 0.0,
+        "failed_gb_h": 0.0,
+    }
+    row.update(kw)
+    return row
+
+
+def test_short_process_keeps_only_the_leaf_name():
+    grr = _load()
+    assert grr.short_process("MIRAGE:PRE:CONVERT_IMAGE") == "CONVERT_IMAGE"
+    assert grr.short_process("CONVERT_IMAGE") == "CONVERT_IMAGE"
+    assert grr.short_process("") == ""
+
+
+def test_walltime_bars_draws_one_bar_per_process_longest_first():
+    grr = _load()
+    roll = [
+        _roll_row("MIRAGE:A:SHORT", 10.0),
+        _roll_row("MIRAGE:A:LONG", 1000.0),
+        _roll_row("MIRAGE:A:MID", 100.0),
+    ]
+
+    svg = grr.walltime_bars_svg(roll)
+
+    assert svg.count("<rect class='bar'") == 3
+    # Ranked: the longest process's label is emitted before the shortest.
+    assert svg.index("LONG") < svg.index("MID") < svg.index("SHORT")
+    # The full name survives as a tooltip even though the label is the leaf.
+    assert "MIRAGE:A:LONG" in svg
+
+
+def test_walltime_bars_truncates_to_top_n():
+    grr = _load()
+    roll = [_roll_row(f"P{i}", float(i)) for i in range(1, 40)]
+    svg = grr.walltime_bars_svg(roll, top=5)
+    assert svg.count("<rect class='bar'") == 5
+    assert "P39" in svg and "P1<" not in svg
+
+
+def test_walltime_bars_is_empty_for_no_rows():
+    grr = _load()
+    assert grr.walltime_bars_svg([]) == ""
+
+
+def test_walltime_bars_escapes_a_hostile_process_name():
+    grr = _load()
+    svg = grr.walltime_bars_svg([_roll_row("<b>A</b>", 5.0)])
+    assert "<b>A</b>" not in svg
+    assert "&lt;b&gt;A&lt;/b&gt;" in svg

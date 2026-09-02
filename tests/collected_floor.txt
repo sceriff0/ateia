@@ -116,4 +116,18 @@
 # test_rollup_carries_the_max_request_and_the_cost_of_failures,
 # test_failed_gb_h_falls_back_to_observed_rss_when_no_request_is_recorded);
 # no other test count moved.
-1341
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p10-resource-report, phase 10 task 5
+# (generate_resource_report.py: Panel 1, walltime_bars_svg + short_process):
+# 1331 passed, 13 skipped, 0 failed -- 1344 collected, up from the prior
+# entry's 1339. The increase is exactly the 5 new cases in
+# tests/test_generate_resource_report.py
+# (test_short_process_keeps_only_the_leaf_name,
+# test_walltime_bars_draws_one_bar_per_process_longest_first,
+# test_walltime_bars_truncates_to_top_n,
+# test_walltime_bars_is_empty_for_no_rows,
+# test_walltime_bars_escapes_a_hostile_process_name); no other test count
+# moved.
+1346
