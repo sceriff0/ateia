@@ -801,7 +801,7 @@ class CsvUtils {
      * Structural check of a samplesheet: it exists, it is not empty, and its header
      * carries every required column.
      *
-     * Structure only -- the per-row semantic checks are validateSamplesheet's. Run
+     * Structure only -- the per-row semantic checks are validateInputSemantics's. Run
      * before anything reads a row, so a missing column is named at launch instead of
      * surfacing as a null further down.
      *
