@@ -31,8 +31,7 @@ process TILED_STITCH {
     // and re-run the task on any unrelated parameter change (see CLAUDE.md).
     def out_tile  = RegPresets.stare(params.reg_tiled_mode, 'out_tile', params.reg_tiled_out_tile)
     """
-    total_bytes=\$(stat -L --printf="%s" ${moving} 2>/dev/null || echo 0)
-    echo "${task.process},${meta.patient_id},${moving.name},\${total_bytes}" > ${prefix}.TILED_STITCH.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, meta.patient_id, ["${moving}"], "${prefix}.TILED_STITCH.size.csv")}
 
     mkdir -p registered
     tiled_stitch.py \\
@@ -44,7 +43,7 @@ process TILED_STITCH {
         --channel-names ${meta.channels.join(' ')} \\
         --out registered/${prefix}_registered.ome.tiff
 
-    ${ProcessEnvelope.versions(task.process, ['tifffile'])}
+    ${ProcessEnvelope.versions(task.process, ['tifffile'], task.container)}
     """
 
     stub:
@@ -52,7 +51,7 @@ process TILED_STITCH {
     """
     mkdir -p registered
     touch registered/${prefix}_registered.ome.tiff
-    echo "STUB,${meta.patient_id},stub,0" > ${prefix}.TILED_STITCH.size.csv
-    ${ProcessEnvelope.versionsStub(task.process, ['tifffile'])}
+    ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${prefix}.TILED_STITCH.size.csv")}
+    ${ProcessEnvelope.versionsStub(task.process, ['tifffile'], task.container)}
     """
 }

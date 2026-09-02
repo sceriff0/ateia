@@ -34,10 +34,7 @@ process GENERATE_REGISTRATION_QC {
     def nuclear_args = "--nuclear-markers ${MarkerUtils.markerList(params.nuclear_markers).join(' ')}"
     """
     # Log input sizes for tracing (sum of registered + reference, -L follows symlinks)
-    reg_bytes=\$(stat -L --printf="%s" ${registered} 2>/dev/null || echo 0)
-    ref_bytes=\$(stat -L --printf="%s" ${reference} 2>/dev/null || echo 0)
-    total_bytes=\$((reg_bytes + ref_bytes))
-    echo "${task.process},${meta.patient_id},${registered.name}+${reference.name},\${total_bytes}" > ${meta.patient_id}_${registered.simpleName}.GENERATE_REGISTRATION_QC.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, meta.patient_id, ["${registered}", "${reference}"], "${meta.patient_id}_${registered.simpleName}.GENERATE_REGISTRATION_QC.size.csv")}
 
     mkdir -p qc
 
@@ -49,7 +46,7 @@ process GENERATE_REGISTRATION_QC {
         ${nuclear_args} \\
         ${args}
 
-    ${ProcessEnvelope.versions(task.process, ['numpy', 'tifffile'])}
+    ${ProcessEnvelope.versions(task.process, ['numpy', 'tifffile'], task.container)}
     """
 
     stub:
@@ -57,8 +54,8 @@ process GENERATE_REGISTRATION_QC {
     mkdir -p qc
     touch qc/${registered.simpleName}_QC_RGB.png
     touch qc/${registered.simpleName}_QC_RGB_fullres.tif
-    echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${registered.simpleName}.GENERATE_REGISTRATION_QC.size.csv
+    ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${meta.patient_id}_${registered.simpleName}.GENERATE_REGISTRATION_QC.size.csv")}
 
-    ${ProcessEnvelope.versionsStub(task.process, ['numpy', 'tifffile'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['numpy', 'tifffile'], task.container)}
     """
 }

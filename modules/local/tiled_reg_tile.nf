@@ -54,7 +54,7 @@ process TILED_REG_TILE {
         --upsample ${upsample} \\
         --out ${prefix}_ctrl.json
 
-    ${ProcessEnvelope.versions(task.process, [])}
+    ${ProcessEnvelope.versions(task.process, [], task.container)}
     """
 
     stub:
@@ -65,6 +65,6 @@ process TILED_REG_TILE {
     def prefix = "${meta.patient_id}_${meta.channels.join('_')}_${row.ix}_${row.iy}"
     """
     echo '{"ix":${row.ix},"iy":${row.iy},"cx":${row.cx},"cy":${row.cy},"dx":0,"dy":0,"tre":0,"error":0.0,"ref_fg":0.1,"mov_fg":0.1}' > ${prefix}_ctrl.json
-    ${ProcessEnvelope.versionsStub(task.process, [])}
+    ${ProcessEnvelope.versionsStub(task.process, [], task.container)}
     """
 }

@@ -79,10 +79,7 @@ process REGISTER {
     def jvm_heap_gb = Math.min(heap_request, task.memory.toGiga() - 4)
 
     """
-    # === LOG INPUT SIZES ===
-    # Sum all input OME-TIFF file sizes for resource tracing
-    total_bytes=\$(find -L ref input_* -maxdepth 1 -type f \\( -name "*.ome.tif" -o -name "*.ome.tiff" \\) -exec stat -L --printf="%s\\n" {} + 2>/dev/null | awk '{sum+=\$1} END {print sum}')
-    echo "${task.process},${patient_id},inputs/,\${total_bytes:-0}" > ${patient_id}.REGISTER.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, patient_id, ['ref/*', 'input_*/*'], "${patient_id}.REGISTER.size.csv")}
 
     mkdir -p registered_slides preprocessed
 
@@ -192,7 +189,7 @@ ${valis_overrides}
     rm -rf preprocessed/deformation_fields preprocessed/masks preprocessed/overlaps \
            preprocessed/rigid_registration preprocessed/non_rigid_registration preprocessed/processed
 
-    ${ProcessEnvelope.versions(task.process, ['valis'])}
+    ${ProcessEnvelope.versions(task.process, ['valis'], task.container)}
     """
 
     stub:
@@ -221,9 +218,9 @@ ${valis_overrides}
     ${touch_commands}
     touch preprocessed/data/${patient_id}_registrar.pickle
     echo '${manifest_json}' > channels_manifest.json
-    echo "STUB,${patient_id},stub,0" > ${patient_id}.REGISTER.size.csv
+    ${ProcessEnvelope.sizeLogStub(task.process, patient_id, "${patient_id}.REGISTER.size.csv")}
     ${stub_ckpt}
 
-    ${ProcessEnvelope.versionsStub(task.process, ['valis'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['valis'], task.container)}
     """
 }
