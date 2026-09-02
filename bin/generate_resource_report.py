@@ -23,6 +23,7 @@ head-node script than one print.)
 import argparse
 import csv
 import html
+import math
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -469,6 +470,119 @@ def failure_cost_svg(roll, top=15):
         len(rows) * _ROW_H + 4,
         "".join(parts),
         "Reserved memory-hours lost to failed and retried tasks",
+    )
+
+
+# Deterministic, colour-blind-safe-ish series colours, assigned by first
+# appearance so the same run always paints the same process the same colour.
+_SERIES = (
+    "#2c3e50",
+    "#c0392b",
+    "#16a085",
+    "#8e44ad",
+    "#d35400",
+    "#2980b9",
+    "#7f8c8d",
+    "#27ae60",
+)
+
+
+def size_vs_runtime_svg(joined, top_processes=8):
+    """Input size against runtime, log-log, one series per process.
+
+    Reads join_size's output, i.e. the aggregated input-size log joined to the
+    trace by (process, tag). Answers the only question a resource report is
+    really asked: does this step's cost scale with the data, and where does it
+    stop being linear?
+
+    LOG-LOG, deliberately. One run spans megabytes to hundreds of gigabytes of
+    input and seconds to hours of runtime; on linear axes every point but the
+    largest collapses into the origin. The cost is that a log axis cannot place a
+    zero, so tasks with a zero input size or a zero runtime are dropped -- the
+    panel states how many rather than parking them at an arbitrary coordinate.
+    """
+    usable = [
+        j
+        for j in joined
+        if (j.get("input_bytes") or 0) > 0 and (j.get("realtime_s") or 0) > 0
+    ]
+    dropped = sum(
+        1
+        for j in joined
+        if j.get("input_bytes") is not None
+        and ((j.get("input_bytes") or 0) <= 0 or (j.get("realtime_s") or 0) <= 0)
+    )
+    if not usable:
+        return ""
+
+    pad_l, pad_b, pad_t, pad_r = 70, 40, 12, 200
+    w, h = _PANEL_W, 380
+    plot_w, plot_h = w - pad_l - pad_r, h - pad_t - pad_b
+
+    xs = [math.log10(j["input_bytes"]) for j in usable]
+    ys = [math.log10(j["realtime_s"]) for j in usable]
+    x0, x1 = min(xs), max(xs)
+    y0, y1 = min(ys), max(ys)
+    xr = (x1 - x0) or 1.0
+    yr = (y1 - y0) or 1.0
+
+    order = []
+    for j in usable:
+        if j["process"] not in order:
+            order.append(j["process"])
+    colour = {p: _SERIES[i % len(_SERIES)] for i, p in enumerate(order[:top_processes])}
+
+    parts = [
+        f"<rect x='{pad_l}' y='{pad_t}' width='{plot_w}' height='{plot_h}' "
+        f"fill='#fbfcfd' stroke='#e3e7ea'/>"
+    ]
+    for j, lx, ly in zip(usable, xs, ys):
+        cx = pad_l + plot_w * (lx - x0) / xr
+        cy = pad_t + plot_h * (1.0 - (ly - y0) / yr)
+        parts.append(
+            f"<circle cx='{cx:.1f}' cy='{cy:.1f}' r='4' fill-opacity='0.7' "
+            f"fill='{colour.get(j['process'], '#bdc3c7')}'>"
+            f"<title>{_esc(j['process'])} [{_esc(j.get('tag', ''))}]: "
+            f"{fmt_bytes(j['input_bytes'])} in {fmt_secs(j['realtime_s'])}"
+            f"</title></circle>"
+        )
+
+    parts.append(
+        f"<text x='{pad_l}' y='{h - 10}' font-size='11' fill='#666'>"
+        f"input {_esc(fmt_bytes(10**x0))}</text>"
+        f"<text x='{pad_l + plot_w}' y='{h - 10}' font-size='11' fill='#666' "
+        f"text-anchor='end'>{_esc(fmt_bytes(10**x1))}</text>"
+        f"<text x='{pad_l - 6}' y='{pad_t + 10}' font-size='11' fill='#666' "
+        f"text-anchor='end'>{_esc(fmt_secs(10**y1))}</text>"
+        f"<text x='{pad_l - 6}' y='{pad_t + plot_h}' font-size='11' fill='#666' "
+        f"text-anchor='end'>{_esc(fmt_secs(10**y0))}</text>"
+    )
+
+    for i, proc in enumerate(order[:top_processes]):
+        ly = pad_t + i * 18
+        parts.append(
+            f"<rect class='key' x='{pad_l + plot_w + 16}' y='{ly}' width='10' "
+            f"height='10' fill='{colour[proc]}'/>"
+            f"<text x='{pad_l + plot_w + 32}' y='{ly + 9}' font-size='11' "
+            f"fill='#333'>{_esc(short_process(proc))}</text>"
+        )
+
+    if dropped:
+        parts.append(
+            f"<text x='{pad_l}' y='{pad_t - 2}' font-size='11' fill='#888'>"
+            f"{dropped} task not shown (zero input size or runtime cannot be "
+            f"placed on a log axis)</text>"
+            if dropped == 1
+            else f"<text x='{pad_l}' y='{pad_t - 2}' font-size='11' fill='#888'>"
+            f"{dropped} tasks not shown (zero input size or runtime cannot be "
+            f"placed on a log axis)</text>"
+        )
+
+    return _svg(
+        w,
+        h,
+        "".join(parts),
+        "Input size against runtime, log-log, one series per process",
     )
 
 

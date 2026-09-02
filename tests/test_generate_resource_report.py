@@ -625,3 +625,70 @@ def test_failure_cost_is_empty_when_nothing_failed():
     grr = _load()
     assert grr.failure_cost_svg([_roll_row("A", 1.0)]) == ""
     assert grr.failure_cost_svg([]) == ""
+
+
+def _joined(proc, tag, size_b, rt_s):
+    return {
+        "process": proc,
+        "tag": tag,
+        "input_bytes": size_b,
+        "realtime_s": rt_s,
+        "peak_rss_b": None,
+        "exit": "0",
+        "status": "COMPLETED",
+    }
+
+
+def test_size_vs_runtime_plots_one_point_per_joinable_task():
+    grr = _load()
+    joined = [
+        _joined("MIRAGE:A:CONVERT", "P001", 1 * GB, 60.0),
+        _joined("MIRAGE:A:CONVERT", "P002", 8 * GB, 400.0),
+        _joined("MIRAGE:A:REGISTER", "P001", 4 * GB, 3600.0),
+    ]
+
+    svg = grr.size_vs_runtime_svg(joined)
+
+    assert svg.count("<circle") == 3
+    # One legend entry per distinct process, by leaf name.
+    assert svg.count("<rect class='key'") == 2
+    assert "CONVERT" in svg and "REGISTER" in svg
+
+
+def test_size_vs_runtime_drops_a_zero_byte_input_from_the_log_axis():
+    """A log axis cannot place zero. The table this panel replaces rendered a
+    zero-byte matched row with an empty ratio cell; the scatter drops it and says
+    so, rather than parking it at an arbitrary x."""
+    grr = _load()
+    joined = [
+        _joined("A", "P001", 0, 10.0),
+        _joined("A", "P002", 2 * GB, 10.0),
+    ]
+
+    svg = grr.size_vs_runtime_svg(joined)
+
+    assert svg.count("<circle") == 1
+    assert "1 task not shown" in svg
+
+
+def test_size_vs_runtime_ignores_unjoined_rows():
+    grr = _load()
+    joined = [
+        {
+            "process": "A",
+            "tag": "P1",
+            "input_bytes": None,
+            "realtime_s": 10.0,
+            "peak_rss_b": None,
+            "exit": "0",
+            "status": "COMPLETED",
+        },
+    ]
+    assert grr.size_vs_runtime_svg(joined) == ""
+
+
+def test_size_vs_runtime_escapes_a_hostile_process_name():
+    grr = _load()
+    svg = grr.size_vs_runtime_svg([_joined("<b>A</b>", "P1", 2 * GB, 10.0)])
+    assert "<b>A</b>" not in svg
+    assert "&lt;b&gt;A&lt;/b&gt;" in svg

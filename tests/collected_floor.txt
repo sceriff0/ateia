@@ -154,4 +154,17 @@
 # (test_failure_cost_draws_one_bar_per_failing_process,
 # test_failure_cost_reports_the_reserved_memory_hours_not_just_the_count,
 # test_failure_cost_is_empty_when_nothing_failed); no other test count moved.
-1353
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p10-resource-report, phase 10 task 8
+# (generate_resource_report.py: Panel 4, size_vs_runtime_svg): 1342 passed,
+# 13 skipped, 0 failed -- 1355 collected, up from the prior entry's 1351.
+# The increase is exactly the 4 new cases in
+# tests/test_generate_resource_report.py
+# (test_size_vs_runtime_plots_one_point_per_joinable_task,
+# test_size_vs_runtime_drops_a_zero_byte_input_from_the_log_axis,
+# test_size_vs_runtime_ignores_unjoined_rows,
+# test_size_vs_runtime_escapes_a_hostile_process_name); no other test count
+# moved.
+1357
