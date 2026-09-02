@@ -40,29 +40,27 @@ process PREFLIGHT_SCALE {
     script:
     def pixel_size = params.pixel_size
     """
-    # Log input size for tracing (-L follows symlinks). This task fans in over every
-    # slide in the run, so one aggregate line rather than one per file.
-    total_bytes=\$(find -L input_* -maxdepth 1 -type f -exec stat -L --printf="%s\\n" {} + 2>/dev/null | awk '{sum+=\$1} END {print sum+0}')
-    echo "${task.process},all,inputs/,\${total_bytes:-0}" > PREFLIGHT_SCALE.size.csv
+    # This task fans in over every slide in the run, so one aggregate row, sample id `all`.
+    ${ProcessEnvelope.sizeLog(task.process, 'all', ['input_*/*'], 'PREFLIGHT_SCALE.size.csv')}
 
     preflight_scale.py \\
         --images \$(find -L input_* -maxdepth 1 -type f | sort) \\
         --pixel-size ${pixel_size} \\
         --output preflight_scale_report.json
 
-    ${ProcessEnvelope.versions(task.process, ['tifffile'])}
+    ${ProcessEnvelope.versions(task.process, ['tifffile'], task.container)}
     """
 
     stub:
     def pixel_size = params.pixel_size
     """
-    echo "STUB,all,stub,0" > PREFLIGHT_SCALE.size.csv
+    ${ProcessEnvelope.sizeLogStub(task.process, 'all', 'PREFLIGHT_SCALE.size.csv')}
 
     preflight_scale.py \\
         --images \$(find -L input_* -maxdepth 1 -type f | sort) \\
         --pixel-size ${pixel_size} \\
         --output preflight_scale_report.json
 
-    ${ProcessEnvelope.versionsStub(task.process, ['tifffile'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['tifffile'], task.container)}
     """
 }

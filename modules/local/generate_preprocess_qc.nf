@@ -24,9 +24,7 @@ process GENERATE_PREPROCESS_QC {
     def scale_factor = params.preprocess_qc_scale_factor
     def channels = meta.channels.collect { "\"${it}\"" }.join(' ')
     """
-    # Log input size for tracing (-L follows symlinks)
-    input_bytes=\$(stat -L --printf="%s" ${preprocessed} 2>/dev/null || echo 0)
-    echo "${task.process},${meta.patient_id},${preprocessed.name},\${input_bytes}" > ${meta.patient_id}_${preprocessed.simpleName}.GENERATE_PREPROCESS_QC.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, meta.patient_id, ["${preprocessed}"], "${meta.patient_id}_${preprocessed.simpleName}.GENERATE_PREPROCESS_QC.size.csv")}
 
     mkdir -p qc
 
@@ -38,7 +36,7 @@ process GENERATE_PREPROCESS_QC {
         --prefix ${prefix} \\
         ${args}
 
-    ${ProcessEnvelope.versions(task.process, ['numpy', 'tifffile', 'skimage'])}
+    ${ProcessEnvelope.versions(task.process, ['numpy', 'tifffile', 'skimage'], task.container)}
     """
 
     stub:
@@ -47,8 +45,8 @@ process GENERATE_PREPROCESS_QC {
     mkdir -p qc
     touch qc/${prefix}_DAPI.png
     touch qc/${prefix}_channel1.png
-    echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${preprocessed.simpleName}.GENERATE_PREPROCESS_QC.size.csv
+    ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${meta.patient_id}_${preprocessed.simpleName}.GENERATE_PREPROCESS_QC.size.csv")}
 
-    ${ProcessEnvelope.versionsStub(task.process, ['numpy', 'tifffile', 'skimage'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['numpy', 'tifffile', 'skimage'], task.container)}
     """
 }
