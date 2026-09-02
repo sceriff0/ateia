@@ -500,7 +500,9 @@ def test_size_log_and_stub_write_the_same_outfile():
     for proc in LOCAL_PROCESSES:
         script_calls = [
             args
-            for method, args in _extract_size_log_calls(strip_comments(proc.script_body))
+            for method, args in _extract_size_log_calls(
+                strip_comments(proc.script_body)
+            )
             if method == "sizeLog"
         ]
         stub_calls = [
