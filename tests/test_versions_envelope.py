@@ -451,3 +451,93 @@ def test_every_size_log_module_uses_the_envelope():
         "size-log rows must be rendered by lib/ProcessEnvelope.groovy so the "
         "script: and stub: copies cannot disagree:\n  " + "\n  ".join(offenders)
     )
+
+
+SIZE_LOG_CALL_RE = re.compile(r"ProcessEnvelope\.(sizeLog|sizeLogStub)\s*\(")
+
+
+def _extract_size_log_calls(text):
+    """Every `ProcessEnvelope.sizeLog(...)` / `sizeLogStub(...)` call site in `text`,
+    as (method, args_string) pairs -- the sizeLog/sizeLogStub twin of `_extract_calls`
+    above, built on the same `_find_balanced_call_args` so a nested list argument
+    (`sizeLog(task.process, meta.patient_id, ["${a}", "${b}"], outFile)`) is not
+    truncated by a naive comma split.
+    """
+    calls = []
+    for m in SIZE_LOG_CALL_RE.finditer(text):
+        method = m.group(1)
+        args = _find_balanced_call_args(text, m.end() - 1)
+        calls.append((method, args))
+    return calls
+
+
+def test_size_log_and_stub_write_the_same_outfile():
+    """sizeLog(...)'s and sizeLogStub(...)'s outFile -- each call's LAST positional
+    argument -- must agree, call for call, between a module's script: and stub:
+    halves.
+
+    Nothing else enforces this: test_every_size_log_module_uses_the_envelope above
+    only checks that both halves call *some* ProcessEnvelope size-log method, and
+    test_script_and_stub_ask_for_the_same_tool_list is about the tools list argument
+    to versions()/versionsStub(), a completely different pair of methods. A module
+    whose script: writes `"${prefix}.FOO.size.csv"` and whose stub: writes
+    `"${prefix}.BAR.size.csv"` would pass every existing guard in this file while a
+    real run's size log and its stub-mode counterpart land at different filenames --
+    invisible to `-stub`, which never evaluates script: at all (see this file's
+    module docstring).
+
+    Read off the comment-stripped view (`strip_comments`), not the raw script:/stub:
+    text `Process.script_body`/`stub_body` carry -- a comment quoting a call with a
+    different outFile would otherwise satisfy this the same way CLAUDE.md's
+    "Verification reality" #7 describes for six other guards on 2026-09-01.
+
+    Non-vacuity: at least 20 processes are expected to have a sizeLog call (measured
+    21 on 2026-09-02) -- a collapse to a much smaller count would mean discovery
+    itself broke, not that most modules stopped emitting size logs.
+    """
+    offenders = []
+    compared = 0
+    for proc in LOCAL_PROCESSES:
+        script_calls = [
+            args
+            for method, args in _extract_size_log_calls(strip_comments(proc.script_body))
+            if method == "sizeLog"
+        ]
+        stub_calls = [
+            args
+            for method, args in _extract_size_log_calls(strip_comments(proc.stub_body))
+            if method == "sizeLogStub"
+        ]
+        if not script_calls and not stub_calls:
+            continue
+        compared += 1
+
+        if len(script_calls) != len(stub_calls):
+            offenders.append(
+                f"{proc.path.name}: {len(script_calls)} sizeLog() call(s) in script: "
+                f"vs {len(stub_calls)} sizeLogStub() call(s) in stub:"
+            )
+            continue
+
+        for i, (s_args, st_args) in enumerate(zip(script_calls, stub_calls), start=1):
+            if s_args is None or st_args is None:
+                offenders.append(
+                    f"{proc.path.name}: call #{i} has an unbalanced argument list"
+                )
+                continue
+            s_out = _split_top_level_commas(s_args)[-1]
+            st_out = _split_top_level_commas(st_args)[-1]
+            if _norm(s_out) != _norm(st_out):
+                offenders.append(
+                    f"{proc.path.name}: call #{i} outFile differs -- "
+                    f"sizeLog(..., {s_out}) vs sizeLogStub(..., {st_out})"
+                )
+
+    assert compared >= 20, (
+        f"only {compared} process(es) had a sizeLog/sizeLogStub call to compare -- "
+        "expected at least 20; discovery is likely broken"
+    )
+    assert not offenders, (
+        "sizeLog() and sizeLogStub() must write to the SAME outFile so a stub run's "
+        "size.csv can be compared against a real run's:\n  " + "\n  ".join(offenders)
+    )
