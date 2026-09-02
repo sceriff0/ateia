@@ -201,6 +201,90 @@ def checkProcessEnvelope() {
     ]
 }
 
+/**
+ * RegisteredMatch — pairing VALIS's outputs back to their slide metas.
+ *
+ * Lives outside `workflow { ... }` deliberately: see "THE WORKFLOW BLOCK HAS A HARD
+ * SIZE CEILING" above. Called once from the workflow block, before the final println.
+ */
+def checkRegisteredMatch() {
+    // ------------------------------------------------------------------ //
+    // RegisteredMatch — pairing VALIS's outputs back to their slide metas
+    // ------------------------------------------------------------------ //
+    // WHY BY CHANNEL SIGNATURE AND NOT BY FILENAME. VALIS renames its outputs; the
+    // only thing carried through registration that identifies a slide is its OME
+    // channel set, which bin/create_channels_manifest.py writes out as
+    // filename -> [channel names]. Getting this wrong does not fail -- it silently
+    // attaches the wrong patient's metadata to a registered image.
+    assert RegisteredMatch.signature(['PANCK', 'dapi', 'CD3']) == 'cd3|dapi|panck'
+    // Lower-case FIRST, then sort: 'CD3' and 'cd3' must land in the same place.
+    assert RegisteredMatch.signature(['cd3', 'DAPI']) == RegisteredMatch.signature(['CD3', 'dapi'])
+
+    // toSorted(), never sort(): meta.channels is a SHARED List reference across
+    // every meta built with `meta + [k: v]` (Map.plus is a SHALLOW clone), so an
+    // in-place sort here would silently reorder a sibling meta's channel list --
+    // and channel ORDER is what --dapi-channel and the pyramid writer index on.
+    def sharedChannels = ['PANCK', 'DAPI']
+    RegisteredMatch.signature(sharedChannels)
+    assert sharedChannels == ['PANCK', 'DAPI'] : 'RegisteredMatch.signature must not mutate its argument'
+
+    def refMeta = [patient_id: 'P1', id: 'P1_ref', channels: ['DAPI', 'PANCK', 'SMA']]
+    def movMeta = [patient_id: 'P1', id: 'P1_mov', channels: ['DAPI', 'CD3']]
+    def refFile = file('/tmp/P1_DAPI_PANCK_SMA_registered.ome.tiff')
+    def movFile = file('/tmp/P1_DAPI_CD3_registered.ome.tiff')
+    def manifest = [
+        'P1_DAPI_PANCK_SMA_registered.ome.tiff': ['DAPI', 'PANCK', 'SMA'],
+        'P1_DAPI_CD3_registered.ome.tiff'      : ['CD3', 'DAPI'],
+    ]
+
+    // Files deliberately in the OPPOSITE order to metas: the pairing is by
+    // signature, and the RESULT is in metas order.
+    def paired = RegisteredMatch.pair([refMeta, movMeta], [movFile, refFile], manifest)
+    assert paired.size() == 2
+    assert paired[0][0].id == 'P1_ref'
+    assert paired[0][1].name == 'P1_DAPI_PANCK_SMA_registered.ome.tiff'
+    assert paired[1][0].id == 'P1_mov'
+    assert paired[1][1].name == 'P1_DAPI_CD3_registered.ome.tiff'
+
+    // The manifest's channel ORDER is irrelevant -- it comes from OME-XML, the meta's
+    // comes from the samplesheet, and neither is authoritative over the other.
+    def reordered = RegisteredMatch.pair([movMeta], [movFile],
+                                         ['P1_DAPI_CD3_registered.ome.tiff': ['DAPI', 'CD3']])
+    assert reordered[0][1].name == 'P1_DAPI_CD3_registered.ome.tiff'
+
+    // Exception 1: count mismatch. VALIS returning fewer files than slides is a
+    // partial failure, and pairing what arrived would publish a short run as a
+    // complete one.
+    def countMismatch = ''
+    try { RegisteredMatch.pair([refMeta, movMeta], [refFile], manifest) }
+    catch (IllegalStateException e) { countMismatch = e.message }
+    assert countMismatch.startsWith('RegisteredMatch: count mismatch') : "got: ${countMismatch}"
+
+    // Exception 2: duplicate signature. Two slides with the same channel set are
+    // indistinguishable to this rule, and a map keyed on the signature would
+    // silently keep only the last one.
+    def dupMeta = [patient_id: 'P1', id: 'P1_dup', channels: ['PANCK', 'DAPI', 'SMA']]
+    def dupSig = ''
+    try { RegisteredMatch.pair([refMeta, dupMeta], [refFile, movFile], manifest) }
+    catch (IllegalStateException e) { dupSig = e.message }
+    assert dupSig.startsWith('RegisteredMatch: duplicate signature') : "got: ${dupSig}"
+
+    // Exception 3a: a registered file the manifest says nothing about.
+    def noManifestEntry = ''
+    try { RegisteredMatch.pair([refMeta], [refFile], [:]) }
+    catch (IllegalStateException e) { noManifestEntry = e.message }
+    assert noManifestEntry.startsWith('RegisteredMatch: unmatched') : "got: ${noManifestEntry}"
+
+    // Exception 3b: a meta whose channel set no registered file carries.
+    def noFileForMeta = ''
+    try {
+        RegisteredMatch.pair([refMeta], [refFile],
+                             ['P1_DAPI_PANCK_SMA_registered.ome.tiff': ['CD8', 'FOXP3']])
+    }
+    catch (IllegalStateException e) { noFileForMeta = e.message }
+    assert noFileForMeta.startsWith('RegisteredMatch: unmatched') : "got: ${noFileForMeta}"
+}
+
 workflow {
 
     // ------------------------------------------------------------------ //
@@ -1217,6 +1301,10 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     // See checkProcessEnvelope() above the workflow block, and the header
     // comment's "HARD SIZE CEILING" note for why it lives outside this block.
     checkProcessEnvelope()
+
+    // RegisteredMatch — pairing VALIS's outputs back to their slide metas.
+    // See checkRegisteredMatch() above the workflow block.
+    checkRegisteredMatch()
 
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info
