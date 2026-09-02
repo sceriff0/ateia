@@ -326,4 +326,18 @@
 # tests/test_generate_qc_report.py (test_finite_drops_infinities,
 # test_bin_counts_drops_infinities_rather_than_crashing); no other test count
 # moved.
-1407
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p09-qc-report, task 7 (replace the STARE
+# per-slide TRE table with per-stage plots -- _tiled_tre_tables ->
+# _tiled_tre_plots): 1337 passed, 13 skipped, 0 failed -- 1350 collected, up
+# from the prior entry's 1349. tests/test_generate_qc_report.py lost two
+# table-shaped tests (test_tiled_tre_table_renders_headline_numbers,
+# test_fanout_tre_without_post_refinement_shows_na) and gained three
+# plot-shaped ones (test_tiled_tre_plots_render_headline_numbers_and_two_stage_plots,
+# test_tiled_tre_plots_omit_the_refined_stage_when_it_was_not_measured,
+# test_tiled_tre_plots_exclude_rejected_tiles_from_the_distribution), net +1;
+# tests/test_tre_report_accepted.py swapped its two table-caption tests for
+# two plot-caption tests one-for-one, net 0. No other test count moved.
+1408

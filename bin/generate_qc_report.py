@@ -571,7 +571,7 @@ def registration_qc_section(reg_dir, valis_dir, seg_qc_dir=None):
             "<h3 style='margin:20px 0 8px;font-size:1rem;color:#444;'>Registration Accuracy "
             "(STARE Tiled TRE)</h3>"
         )
-        parts.append(_tiled_tre_tables(tiled_tre_jsons))
+        parts.append(_tiled_tre_plots(tiled_tre_jsons))
     if not valis_csvs and not tiled_tre_jsons:
         parts.append(
             '<p class="empty-notice" style="margin-top:12px;">No registration-accuracy summary found.</p>'
@@ -732,51 +732,71 @@ def _tiled_tre_heatmap_svg(info, cell=14):
     )
 
 
-def _tiled_tre_tables(tre_jsons):
-    """Per-slide STARE-TRE summary table + spatial heatmaps."""
-    headers = [
-        "Slide",
-        "Coarse TRE (px)",
-        "Rigid p50 / p90 (px)",
-        "Final p50 / p90 (px)",
-        "Refined",
-        "Tiles",
-    ]
-    rows, heatmaps, err_html = [], [], []
+def _tiled_tre_plots(tre_jsons):
+    """Per-slide STARE intrinsic TRE: headline caption, per-stage distributions, heatmap.
+
+    This replaced a per-slide summary TABLE (spec Phase 4). The numbers that table
+    carried — coarse TRE, rigid and final percentiles, whether the mesh was
+    refined, accepted/total tiles — are kept in the caption line above each
+    slide's plots: dropping a table is not licence to drop the numbers, and the
+    accepted/total ratio in particular is the reason a clean-looking distribution
+    can still describe a slide a third of which was never measured.
+
+    The distributions are built from ACCEPTED tiles only, the same rule
+    bin/utils/tre_report.py applies to its percentiles — a rejected tile's
+    ``tre_rigid`` is an artefact of correlating against background. The heatmap
+    below them still shows every tile, accepted or not, because *where* points
+    were dropped is exactly what it is for.
+    """
+    parts, errors = [], []
     for jp in sorted(tre_jsons):
         try:
             info = parse_tiled_tre_json(jp)
         except Exception as exc:  # noqa: BLE001 - report, never crash
-            err_html.append(
-                f"<tr><td>{html.escape(Path(jp).name)}</td>"
-                f"<td colspan='5'>Parse error: {html.escape(str(exc))}</td></tr>"
+            errors.append(
+                '<p class="empty-notice">Could not parse '
+                f"{html.escape(Path(jp).name)}: {html.escape(str(exc))}</p>"
             )
             continue
+        kept = [t for t in info["tiles"] if bool(t.get("accepted", True))]
+        tiles_txt = (
+            f"{info['n_accepted']} / {info['n_tiles']}"
+            if info["n_rejected"]
+            else str(info["n_tiles"])
+        )
         final = (
             f"{_fmt_px(info['final_p50'])} / {_fmt_px(info['final_p90'])}"
             if info["final_p50"] is not None
             else "n/a (fan-out — see benchmark)"
         )
-        rows.append(
-            [
-                info["moving"],
-                _fmt_px(info["coarse_tre_px"]),
-                f"{_fmt_px(info['rigid_p50'])} / {_fmt_px(info['rigid_p90'])}",
-                final,
-                "yes" if info["mesh_refined"] else "no",
-                # "400" hides that 60 of them never reached the mesh; show the ratio only
-                # when there is something to show.
-                f"{info['n_accepted']} / {info['n_tiles']}"
-                if info["n_rejected"]
-                else str(info["n_tiles"]),
-            ]
+        moving = str(info["moving"])
+        parts.append(
+            "<p style='font-size:0.85rem;color:#666;margin:14px 0 4px;'>"
+            f"<b>{html.escape(moving)}</b> — coarse TRE "
+            f"{_fmt_px(info['coarse_tre_px'])} px; rigid p50 / p90 "
+            f"{_fmt_px(info['rigid_p50'])} / {_fmt_px(info['rigid_p90'])} px; "
+            f"final p50 / p90 {final} px; mesh refined: "
+            f"{'yes' if info['mesh_refined'] else 'no'}; tiles {tiles_txt}</p>"
         )
-        hm = _tiled_tre_heatmap_svg(info)
-        if hm:
-            heatmaps.append(hm)
-    parts = [_html_table(headers, rows, "".join(err_html))]
-    parts.extend(heatmaps)
-    return "\n".join(parts)
+        parts.append('<div style="display:flex;flex-wrap:wrap;gap:12px;">')
+        parts.append(
+            _error_distribution_svg(
+                [t.get("tre_rigid") for t in kept],
+                title=f"{moving} — rigid stage, per-tile TRE (px)",
+            )
+        )
+        if kept and all("tre_after" in t for t in kept):
+            parts.append(
+                _error_distribution_svg(
+                    [t.get("tre_after") for t in kept],
+                    title=f"{moving} — post-refinement residual (px)",
+                )
+            )
+        parts.append("</div>")
+        heatmap = _tiled_tre_heatmap_svg(info)
+        if heatmap:
+            parts.append(heatmap)
+    return "\n".join(parts + errors)
 
 
 # ── (C) feature-TRE vs cell-displacement reconciliation ─────────────────────────

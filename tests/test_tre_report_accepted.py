@@ -384,8 +384,14 @@ def test_heatmap_unchanged_when_no_tile_carries_an_accepted_key(tmp_path):
     assert "rejected" not in svg
 
 
-def test_summary_table_tiles_column_shows_how_many_were_used(tmp_path):
-    """ "Tiles: 3" hides that only 2 of them built the mesh."""
+def test_plot_caption_shows_how_many_tiles_were_used(tmp_path):
+    """ "tiles 3" hides that only 2 of them built the mesh.
+
+    The per-slide summary TABLE became per-stage plots (spec Phase 4), but the
+    accepted/total ratio it carried is not table furniture -- it is the reason a
+    distribution can look clean while a third of the slide was never measured.
+    It moved to the caption line above each slide's plots.
+    """
     import generate_qc_report as gqr
 
     p = _write_tre(
@@ -421,13 +427,13 @@ def test_summary_table_tiles_column_shows_how_many_were_used(tmp_path):
         n_rejected=1,
     )
 
-    table = gqr._tiled_tre_tables([str(p)])
+    out = gqr._tiled_tre_plots([str(p)])
 
-    assert "2 / 3" in table
+    assert "tiles 2 / 3" in out
 
 
-def test_summary_table_tiles_column_is_a_plain_count_with_no_rejections(tmp_path):
-    """No rejections must not clutter the table with a ratio that never varies."""
+def test_plot_caption_is_a_plain_count_with_no_rejections(tmp_path):
+    """No rejections must not clutter the caption with a ratio that never varies."""
     import generate_qc_report as gqr
 
     p = _write_tre(
@@ -439,7 +445,7 @@ def test_summary_table_tiles_column_is_a_plain_count_with_no_rejections(tmp_path
         n_tiles=2,
     )
 
-    table = gqr._tiled_tre_tables([str(p)])
+    out = gqr._tiled_tre_plots([str(p)])
 
-    assert ">2<" in table
-    assert "2 / 2" not in table
+    assert "tiles 2</p>" in out
+    assert "2 / 2" not in out

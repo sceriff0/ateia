@@ -373,7 +373,7 @@ def _write_tre(dir_, name, coarse, rigid_p50, final_p50=None, tiles=None):
     return p
 
 
-def test_tiled_tre_table_renders_headline_numbers(tmp_path):
+def test_tiled_tre_plots_render_headline_numbers_and_two_stage_plots(tmp_path):
     gqr = _load()
     tiles = [
         {"ix": 0, "iy": 0, "cx": 8, "cy": 8, "tre_rigid": 4.0, "tre_after": 0.4},
@@ -382,15 +382,18 @@ def test_tiled_tre_table_renders_headline_numbers(tmp_path):
     jp = _write_tre(
         tmp_path, "P1_DAPI", coarse=2.5, rigid_p50=4.0, final_p50=0.4, tiles=tiles
     )
-    out = gqr._tiled_tre_tables([str(jp)])
+    out = gqr._tiled_tre_plots([str(jp)])
     assert "P1_DAPI" in out
-    assert "2.50" in out  # coarse TRE
-    assert "0.40" in out  # post-refinement final residual
-    assert "<svg" in out  # spatial heatmap present
-    assert "yes" in out  # mesh_refined
+    assert "2.50" in out  # coarse TRE, in the caption
+    assert "0.40" in out  # post-refinement final residual, in the caption
+    assert "mesh refined: yes" in out
+    # two stage distributions + the spatial heatmap = three <svg> elements
+    assert out.count("<svg") == 3
+    assert "rigid stage, per-tile TRE (px)" in out
+    assert "post-refinement residual (px)" in out
 
 
-def test_fanout_tre_without_post_refinement_shows_na(tmp_path):
+def test_tiled_tre_plots_omit_the_refined_stage_when_it_was_not_measured(tmp_path):
     gqr = _load()
     jp = _write_tre(
         tmp_path,
@@ -400,8 +403,43 @@ def test_fanout_tre_without_post_refinement_shows_na(tmp_path):
         final_p50=None,
         tiles=[{"ix": 0, "iy": 0, "cx": 8, "cy": 8, "tre_rigid": 3.0}],
     )
-    out = gqr._tiled_tre_tables([str(jp)])
-    assert "n/a (fan-out" in out  # no post-refinement -> honest n/a
+    out = gqr._tiled_tre_plots([str(jp)])
+    assert "n/a (fan-out" in out  # honest n/a, not a fabricated 0
+    assert "post-refinement residual" not in out
+    assert out.count("<svg") == 2  # rigid distribution + heatmap
+
+
+def test_tiled_tre_plots_exclude_rejected_tiles_from_the_distribution(tmp_path):
+    """A rejected tile's tre_rigid is an artefact of correlating against background.
+
+    Same rule bin/utils/tre_report.py applies to its own percentiles. Without it
+    one 131.5 px reject sets the histogram's range and squashes every real tile
+    into the first bin -- the exact failure the heatmap's colour scale already
+    guards against.
+    """
+    gqr = _load()
+    jp = _write_tre(
+        tmp_path,
+        "P1_DAPI",
+        coarse=1.0,
+        rigid_p50=2.0,
+        final_p50=None,
+        tiles=[
+            {"ix": 0, "iy": 0, "cx": 8, "cy": 8, "tre_rigid": 1.0, "accepted": True},
+            {"ix": 1, "iy": 0, "cx": 24, "cy": 8, "tre_rigid": 3.0, "accepted": True},
+            {
+                "ix": 2,
+                "iy": 0,
+                "cx": 40,
+                "cy": 8,
+                "tre_rigid": 131.5,
+                "accepted": False,
+            },
+        ],
+    )
+    out = gqr._tiled_tre_plots([str(jp)])
+    # the distribution saw 2 tiles, not 3
+    assert "rigid stage, per-tile TRE (px) (n=2)" in out
 
 
 def test_registration_section_renders_stare_tre_from_valis_dir(tmp_path):
@@ -420,6 +458,7 @@ def test_registration_section_renders_stare_tre_from_valis_dir(tmp_path):
     )
     html = gqr.registration_qc_section(tmp_path / "reg", str(valis))
     assert "STARE Tiled TRE" in html
+    assert "<svg" in html
     assert "No registration-accuracy summary found" not in html
 
 
