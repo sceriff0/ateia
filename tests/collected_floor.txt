@@ -185,4 +185,19 @@
 # test_size_vs_runtime_drops_and_counts_a_non_finite_input_bytes,
 # test_size_vs_runtime_drops_and_counts_a_non_finite_realtime); no other
 # test count moved.
-1380
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p10-resource-report, phase 10 task 9
+# (generate_resource_report.py: build_html renders the four panels instead of
+# six tables; Run Totals is the one surviving table and gains a peak %CPU
+# row; _html_table deleted): 1368 passed, 13 skipped, 0 failed -- 1381
+# collected, up from the prior entry's 1378. The increase is exactly the 3
+# new cases in tests/test_generate_resource_report.py
+# (test_the_report_is_plots_not_tables,
+# test_run_totals_survives_with_every_number_it_had,
+# test_a_panel_with_no_data_degrades_to_a_sentence_not_a_crash); four other
+# tests were rewritten in place (same names replaced 1:1, net zero) and one
+# (test_build_html_exit_dash_excluded_from_failures) was left unedited; no
+# other test count moved.
+1383

@@ -688,6 +688,8 @@ td{padding:7px 12px;border-bottom:1px solid #ecf0f1}
 tr:hover td{background:#f8f9fa}
 .empty{color:#888;font-style:italic}
 .fail{color:#c0392b;font-weight:600}
+svg{margin:4px 0}
+svg text{font-family:'Segoe UI',Arial,sans-serif}
 """
 
 
@@ -697,15 +699,6 @@ def _esc(v):
     than importing anything from generate_qc_report.py) so this script stays
     stdlib-only and self-contained; `html` is stdlib so this is allowed."""
     return html.escape(str(v))
-
-
-def _html_table(headers, rows):
-    """Build a complete ``<table>``, escaping every header and cell value."""
-    thead = "".join(f"<th>{_esc(h)}</th>" for h in headers)
-    body = "".join(
-        "<tr>" + "".join(f"<td>{_esc(v)}</td>" for v in row) + "</tr>" for row in rows
-    )
-    return f"<table><thead><tr>{thead}</tr></thead><tbody>{body}</tbody></table>"
 
 
 def _section(title, body):
@@ -752,120 +745,61 @@ def build_html(
         parts.append("</main></body></html>")
         return "".join(parts)
 
-    # Run totals
+    # Run totals -- the one table that survives. Everything below it is a panel.
     total_wall = _sumf([r.get("realtime_s") for r in trace_rows])
     n_fail = sum(1 for r in trace_rows if _is_failure(r))
     peak = _maxf([r.get("peak_rss_b") for r in trace_rows])
+    peak_cpu = _maxf([r.get("cpu_pct") for r in trace_rows])
     totals = (
         f"<table><tbody>"
         f"<tr><th>Total tasks</th><td>{len(trace_rows)}</td></tr>"
         f"<tr><th>Total CPU wall-time</th><td>{fmt_secs(total_wall)}</td></tr>"
         f"<tr><th>Failed/non-zero exit</th><td>{n_fail}</td></tr>"
         f"<tr><th>Peak single-task RSS</th><td>{fmt_bytes(peak)}</td></tr>"
+        f"<tr><th>Peak single-task %CPU</th>"
+        f"<td>{'N/A' if peak_cpu is None else f'{peak_cpu}%'}</td></tr>"
         f"</tbody></table>"
     )
     parts.append(_section("Run Totals", totals))
 
-    # Per-process rollup
     roll = rollup_by_process(trace_rows)
-    tbl = (
-        "<table><thead><tr><th>Process</th><th>Tasks</th><th>Total time</th>"
-        "<th>Mean time</th><th>Max %CPU</th><th>Max peak RSS</th>"
-        "<th>Max peak VMEM</th><th>Read</th><th>Write</th><th>Failed</th>"
-        "</tr></thead><tbody>"
-    )
-    for r in roll:
-        cpu_max = "" if r["cpu_max_pct"] is None else f"{r['cpu_max_pct']}%"
-        tbl += (
-            f"<tr><td>{_esc(r['process'])}</td><td>{r['n_tasks']}</td>"
-            f"<td>{fmt_secs(r['realtime_total_s'])}</td>"
-            f"<td>{fmt_secs(r['realtime_mean_s'])}</td>"
-            f"<td>{cpu_max}</td>"
-            f"<td>{fmt_bytes(r['peak_rss_max_b'])}</td>"
-            f"<td>{fmt_bytes(r['peak_vmem_max_b'])}</td>"
-            f"<td>{fmt_bytes(r['rchar_total_b'])}</td>"
-            f"<td>{fmt_bytes(r['wchar_total_b'])}</td>"
-            f"<td class='{'fail' if r['n_failed'] else ''}'>{r['n_failed']}</td></tr>"
-        )
-    tbl += "</tbody></table>"
-    parts.append(_section("Per-Process Resource Rollup", tbl))
 
-    # Resource vs input size
-    joined = join_size(trace_rows, size_map)
-    with_size = [j for j in joined if j.get("input_bytes") is not None]
-    if with_size:
-        tbl = (
-            "<table><thead><tr><th>Process</th><th>Sample (tag)</th>"
-            "<th>Input size</th><th>Peak RSS</th><th>Realtime</th>"
-            "<th>RSS / input GB</th></tr></thead><tbody>"
-        )
-        for j in sorted(with_size, key=lambda x: -(x.get("peak_rss_b") or 0)):
-            ratio = (
-                (j["peak_rss_b"] / j["input_bytes"])
-                if (j.get("peak_rss_b") is not None and j["input_bytes"])
-                else None
-            )
-            tbl += (
-                f"<tr><td>{_esc(j['process'])}</td><td>{_esc(j.get('tag', ''))}</td>"
-                f"<td>{fmt_bytes(j['input_bytes'])}</td>"
-                f"<td>{fmt_bytes(j.get('peak_rss_b'))}</td>"
-                f"<td>{fmt_secs(j.get('realtime_s'))}</td>"
-                f"<td>{'' if ratio is None else f'{ratio:.1f}x'}</td></tr>"
-            )
-        tbl += "</tbody></table>"
-        parts.append(_section("Resource vs Input Size", tbl))
-    else:
-        parts.append(
-            _section(
-                "Resource vs Input Size",
-                "<p class='empty'>No size logs matched trace tasks.</p>",
-            )
-        )
-
-    # Top-N heaviest / slowest
-    heaviest = sorted(
-        [r for r in trace_rows if r.get("peak_rss_b")], key=lambda x: -x["peak_rss_b"]
-    )[:10]
-    slowest = sorted(
-        [r for r in trace_rows if r.get("realtime_s")], key=lambda x: -x["realtime_s"]
-    )[:10]
-
-    def _top(rows, valf, fmt):
-        return _html_table(
-            ["Process", "Sample", "Value"],
-            [[r["process"], r.get("tag", ""), fmt(valf(r))] for r in rows],
-        )
-
+    # 1. Where the wall-time went.
     parts.append(
         _section(
-            "Top 10 by Peak RSS", _top(heaviest, lambda r: r["peak_rss_b"], fmt_bytes)
-        )
-    )
-    parts.append(
-        _section(
-            "Top 10 by Runtime", _top(slowest, lambda r: r["realtime_s"], fmt_secs)
+            "Wall-time by Process",
+            walltime_bars_svg(roll)
+            or "<p class='empty'>No task recorded a runtime.</p>",
         )
     )
 
-    # Retries & failures
-    fails = [r for r in trace_rows if _is_failure(r)]
-    if fails:
-        t = "<table><thead><tr><th>Process</th><th>Sample</th><th>Status</th><th>Exit</th></tr></thead><tbody>"
-        for r in fails:
-            t += (
-                f"<tr><td>{_esc(r['process'])}</td><td>{_esc(r.get('tag', ''))}</td>"
-                f"<td>{_esc(r.get('status', ''))}</td>"
-                f"<td class='fail'>{_esc(r.get('exit', ''))}</td></tr>"
-            )
-        t += "</tbody></table>"
-        parts.append(_section("Retries &amp; Failures", t))
-    else:
-        parts.append(
-            _section(
-                "Retries &amp; Failures",
-                "<p class='empty'>No failed or non-zero-exit tasks.</p>",
-            )
+    # 2. Requested vs observed memory -- where over-provisioning lives.
+    parts.append(
+        _section(
+            "Memory Headroom &mdash; Requested vs Observed",
+            memory_headroom_svg(roll)
+            or "<p class='empty'>No task recorded both a memory request and a "
+            "peak RSS, so there is no headroom to show.</p>",
         )
+    )
+
+    # 3. What failures and retries cost, in reserved memory-hours.
+    parts.append(
+        _section(
+            "Retries &amp; Failures",
+            failure_cost_svg(roll)
+            or "<p class='empty'>No failed or non-zero-exit tasks.</p>",
+        )
+    )
+
+    # 4. Does cost scale with the data?
+    parts.append(
+        _section(
+            "Input Size vs Runtime",
+            size_vs_runtime_svg(join_size(trace_rows, size_map))
+            or "<p class='empty'>No size logs matched trace tasks.</p>",
+        )
+    )
 
     # Pointers to native reports
     links = []

@@ -264,13 +264,18 @@ def test_cli_missing_inputs_is_graceful(tmp_path):
     assert "not available" in out.read_text().lower()
 
 
-def test_build_html_keeps_zero_byte_matched_input(tmp_path):
+def test_build_html_drops_a_zero_byte_matched_input_from_the_scatter():
+    """Behaviour change, recorded deliberately. The Resource-vs-Input-Size TABLE
+    showed a zero-byte matched row with an empty ratio cell; the scatter that
+    replaces it cannot place a zero on a log axis, so it drops the point and says
+    how many it dropped."""
     grr = _load()
     trace_rows = [
         {
             "process": "A",
             "tag": "P001",
             "exit": "0",
+            "status": "COMPLETED",
             "realtime_s": 1.0,
             "peak_rss_b": 100.0,
             "peak_vmem_b": None,
@@ -278,30 +283,22 @@ def test_build_html_keeps_zero_byte_matched_input(tmp_path):
             "wchar_b": None,
             "cpu_pct": None,
             "duration_s": None,
+            "memory_b": None,
+            "cpus": None,
         },
     ]
-    size_map = {("A", "P001"): 0}
+    html_out = grr.build_html(trace_rows, {("A", "P001"): 0}, "ts")
 
-    html = grr.build_html(trace_rows, size_map, "ts")
-
-    assert isinstance(html, str)
-
-    section_marker = "<h2>Resource vs Input Size</h2>"
-    assert section_marker in html
-    section = html[html.index(section_marker) :]
-    section = section[: section.index("</section>")]
-
-    # The zero-byte but matched row must still appear in the section (not
-    # dropped as "unmatched"), and the ratio cell must be empty (N/A), not a
-    # ZeroDivisionError or crash.
-    assert "A" in section
-    assert "P001" in section
-    assert "<td></td></tr>" in section
+    assert isinstance(html_out, str)
+    assert "not shown" in html_out or "class='empty'" in html_out
 
 
-def test_build_html_escapes_html_special_process_and_tag():
-    """An HTML-special process/tag value (e.g. from an attacker-influenced
-    CSV/trace field) must be escaped, never injected raw into the report."""
+def test_build_html_escapes_a_hostile_process_and_tag_in_the_panels():
+    """Unchanged in intent, changed in setup. The tag used to reach the report
+    through three tables and now reaches it only through the scatter's tooltip,
+    so the fixture needs a matching size-log entry -- without one the panel is
+    empty, the tag is rendered nowhere, and the escaping assertion would pass
+    vacuously."""
     grr = _load()
     trace_rows = [
         {
@@ -309,47 +306,61 @@ def test_build_html_escapes_html_special_process_and_tag():
             "tag": "<b>P001</b>",
             "status": "COMPLETED",
             "exit": "0",
-            "realtime_s": 1.0,
-            "peak_rss_b": 10.0,
+            "realtime_s": 60.0,
+            "peak_rss_b": 10.0 * GB,
             "peak_vmem_b": None,
             "rchar_b": None,
             "wchar_b": None,
             "cpu_pct": None,
             "duration_s": None,
+            "memory_b": 32.0 * GB,
+            "cpus": 8,
         },
     ]
-    html_out = grr.build_html(trace_rows, {}, "ts")
-    assert "<b>P001</b>" not in html_out
+    size_map = {("A & B", "<b>P001</b>"): 2 * GB}
+
+    html_out = grr.build_html(trace_rows, size_map, "ts")
+
+    # Both must actually be RENDERED before their escaping means anything.
     assert "&lt;b&gt;P001&lt;/b&gt;" in html_out
-    assert "A & B" not in html_out
     assert "A &amp; B" in html_out
+    assert "<b>P001</b>" not in html_out
+    assert "A & B" not in html_out
 
 
-def test_build_html_escapes_failing_task_status_and_exit():
+def test_build_html_escapes_a_hostile_process_name_in_the_failure_panel():
+    """The per-task Retries & Failures table is gone, so a raw status/exit string
+    is no longer rendered at all -- but the PROCESS name still reaches the
+    failure panel's labels and tooltips and must still be escaped there."""
     grr = _load()
     trace_rows = [
         {
-            "process": "A",
+            "process": "A & <b>B</b>",
             "tag": "P1",
             "status": "<i>FAILED</i>",
             "exit": "1 & 2",
             "realtime_s": 1.0,
-            "peak_rss_b": None,
+            "peak_rss_b": 1024.0,
             "peak_vmem_b": None,
             "rchar_b": None,
             "wchar_b": None,
             "cpu_pct": None,
             "duration_s": None,
+            "memory_b": None,
+            "cpus": None,
         },
     ]
     html_out = grr.build_html(trace_rows, {}, "ts")
+
+    assert "<b>B</b>" not in html_out
+    assert "&lt;b&gt;B&lt;/b&gt;" in html_out
     assert "<i>FAILED</i>" not in html_out
-    assert "&lt;i&gt;FAILED&lt;/i&gt;" in html_out
-    assert "1 & 2" not in html_out
-    assert "1 &amp; 2" in html_out
 
 
-def test_build_html_cpu_max_pct_has_percent_suffix():
+def test_run_totals_reports_the_peak_single_task_cpu():
+    """%CPU used to live in the per-process rollup table. That table is gone, and
+    the number is worth keeping, so it moved into Run Totals rather than being
+    dropped along with its container."""
     grr = _load()
     trace_rows = [
         {
@@ -364,11 +375,14 @@ def test_build_html_cpu_max_pct_has_percent_suffix():
             "wchar_b": None,
             "cpu_pct": 87.5,
             "duration_s": None,
+            "memory_b": None,
+            "cpus": None,
         },
     ]
     html_out = grr.build_html(trace_rows, {}, "ts")
-    section_marker = "<h2>Per-Process Resource Rollup</h2>"
-    section = html_out[html_out.index(section_marker) :]
+
+    marker = "<h2>Run Totals</h2>"
+    section = html_out[html_out.index(marker) :]
     section = section[: section.index("</section>")]
     assert "87.5%" in section
 
@@ -805,3 +819,78 @@ def test_size_vs_runtime_drops_and_counts_a_non_finite_realtime(bad):
     assert svg.count("<circle") == 1
     assert "1 task not shown" in svg
     assert "nan" not in svg and "inf" not in svg
+
+
+def _trace_row(proc, tag, rt, rss, mem, exit_code="0"):
+    return {
+        "process": proc,
+        "tag": tag,
+        "status": "COMPLETED",
+        "exit": exit_code,
+        "realtime_s": rt,
+        "duration_s": rt,
+        "cpu_pct": 100.0,
+        "peak_rss_b": rss,
+        "peak_vmem_b": None,
+        "rchar_b": None,
+        "wchar_b": None,
+        "memory_b": mem,
+        "cpus": 8,
+    }
+
+
+def test_the_report_is_plots_not_tables():
+    """The whole point of this phase. One table survives -- Run Totals -- and
+    every data table is replaced by a panel. A count is used rather than a
+    substring so that reintroducing any table fails here."""
+    grr = _load()
+    trace_rows = [
+        _trace_row("MIRAGE:A:CONVERT", "P001", 600.0, 3 * GB, 8 * GB),
+        _trace_row("MIRAGE:A:REGISTER", "P001", 3600.0, 90 * GB, 100 * GB, "137"),
+    ]
+    size_map = {("MIRAGE:A:CONVERT", "P001"): 2 * GB}
+
+    html_out = grr.build_html(trace_rows, size_map, "ts")
+
+    assert html_out.count("<table>") == 1, "only Run Totals may remain a table"
+    assert html_out.count("<svg ") == 4, "all four panels must render"
+    assert "Per-Process Resource Rollup" not in html_out
+    assert "Top 10 by" not in html_out
+
+
+def test_run_totals_survives_with_every_number_it_had():
+    grr = _load()
+    html_out = grr.build_html([_trace_row("A", "P1", 600.0, 3 * GB, 8 * GB)], {}, "ts")
+    for needle in (
+        "Total tasks",
+        "Total CPU wall-time",
+        "Failed/non-zero exit",
+        "Peak single-task RSS",
+    ):
+        assert needle in html_out
+
+
+def test_a_panel_with_no_data_degrades_to_a_sentence_not_a_crash():
+    """A run whose trace has no `memory` column at all (an older trace, or a
+    fields list edited down) must still produce a report."""
+    grr = _load()
+    rows = [
+        {
+            "process": "A",
+            "tag": "P1",
+            "status": "COMPLETED",
+            "exit": "0",
+            "realtime_s": 10.0,
+            "duration_s": 10.0,
+            "cpu_pct": None,
+            "peak_rss_b": None,
+            "peak_vmem_b": None,
+            "rchar_b": None,
+            "wchar_b": None,
+            "memory_b": None,
+            "cpus": None,
+        }
+    ]
+    html_out = grr.build_html(rows, {}, "ts")
+    assert "<html" in html_out and "</html>" in html_out
+    assert "class='empty'" in html_out
