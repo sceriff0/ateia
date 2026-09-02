@@ -1,16 +1,17 @@
 """The resource report runs on the head node, so it may import only the stdlib.
 
-``main.nf``'s ``generateResourceReport`` invokes this script as ``python3
-<path>`` from ``workflow.onComplete``. That runs on the **head node**, under
-whatever interpreter the operator has, OUTSIDE every container and with none of
-the pipeline's pinned dependencies available (design finding F6). A single
+The pipeline entry-point workflow's ``generateResourceReport`` invokes this
+script as ``python3 <path>`` from ``workflow.onComplete``. That runs on the
+**head node**, under whatever interpreter the operator has, OUTSIDE every
+container and with none of the pipeline's pinned dependencies available
+(design finding F6). A single
 ``import matplotlib`` makes the report silently unavailable on every deployment
 that does not happen to have it -- and the failure is quiet, because the handler
 downgrades every error to a warning so a report problem can never fail a run.
 
 No existing guard covers this file: ``tests/test_container_harmonisation.py``
-scans the scripts a ``modules/local/*.nf`` names, and this script is named by no
-module precisely because it is not a process.
+scans the scripts a process module names, and this script is named by no
+process module precisely because it is not a process.
 
 The stdlib set is taken from the interpreter (``sys.stdlib_module_names``) rather
 than hand-listed, because a hand-list reports stdlib modules as missing
@@ -55,8 +56,8 @@ def test_the_resource_report_imports_only_the_standard_library():
         f"bin/generate_resource_report.py imports {third_party}, which is not in "
         "the standard library. It runs on the head node outside every container "
         "(design finding F6), so a third-party import makes the report silently "
-        "unavailable wherever that package is absent -- and main.nf downgrades "
-        "the failure to a warning, so nobody finds out."
+        "unavailable wherever that package is absent -- and the entry-point "
+        "workflow downgrades the failure to a warning, so nobody finds out."
     )
 
 
