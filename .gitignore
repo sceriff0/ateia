@@ -100,17 +100,21 @@ docs/superpowers/
 # (re)writes these every run (CI regenerates before every test job — see
 # .github/workflows/ci.yml). Untracked so they don't show perpetual `M` churn
 # from embedded absolute paths / TIFF timestamps / RNG-seeded content that
-# differs by machine. Hand-authored fixtures the generator does NOT write
-# (P001_image.tiff, P001_merged_quant.csv, P001_nuclei_mask.tif,
-# P001_pyramid.ome.tiff, sample_size_log*.csv, sample_valis_summary.csv,
-# sample_versions.yml, sample_run_summary.json, sample_seg_qc.json) stay
-# tracked and are NOT listed here.
+# differs by machine. Hand-authored fixtures the generator does NOT write (sample_size_log*.csv,
+# sample_valis_summary.csv, sample_versions.yml, sample_run_summary.json,
+# sample_seg_qc.json, model_config_min.json, dummy_singularity.sif) stay tracked
+# and are NOT listed here. The four that USED to be on that list --
+# P001_image.tiff, P001_merged_quant.csv, P001_nuclei_mask.tif and
+# P001_pyramid.ome.tiff -- were tracked at ZERO BYTES, which is how
+# `nf-test --tag real` came to abort in EXTRACT_NUCLEI_PROPERTIES with
+# `tifffile.TiffFileError: not a TIFF file b''`. They are generated now.
 tests/testdata/P001_ref.ome.tiff
 tests/testdata/P001_mov1.ome.tiff
 tests/testdata/P001_mov2.ome.tiff
 tests/testdata/P002_ref.ome.tiff
 tests/testdata/P001_cell_mask.npy
 tests/testdata/P001_cell_mask.tif
+tests/testdata/P001_nuclei_mask.tif
 tests/testdata/P002_cell_mask.npy
 tests/testdata/P002_cell_mask.tif
 tests/testdata/valid_preprocessing.csv

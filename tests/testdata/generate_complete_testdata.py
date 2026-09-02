@@ -242,8 +242,41 @@ def create_segmentation_mask(filename, size=(128, 128), n_cells=15):
     return mask
 
 
-create_segmentation_mask(OUT_DIR / "P001_cell_mask.npy", n_cells=20)
+p001_cell_mask = create_segmentation_mask(OUT_DIR / "P001_cell_mask.npy", n_cells=20)
 create_segmentation_mask(OUT_DIR / "P002_cell_mask.npy", n_cells=15)
+
+
+def create_nuclei_mask(cell_mask, filename, shrink=0.6):
+    """Write a nuclei label mask NESTED inside ``cell_mask``'s labels.
+
+    Production nuclei masks come from SEGMENT as uint32 TIFFs whose label IDs are
+    the SAME IDs as the cell mask's -- EXTRACT_NUCLEI_PROPERTIES re-keys nucleus
+    contours onto the cell label and every downstream join is an identity on it.
+    So this derives the nuclei from the cell mask rather than drawing a second,
+    independent set of blobs: for each label, keep the pixels within
+    ``shrink`` x the label's equivalent radius of its centroid.
+
+    NO RANDOM DRAWS. Every other fixture in this file is seeded off the module-level
+    np.random stream (or one of the two dedicated Generators), and inserting a draw
+    here would shift every fixture written after it -- a whole-tree content change
+    for a file that only needed to exist. This function is pure geometry over an
+    array that has already been written.
+    """
+    nuclei = np.zeros(cell_mask.shape, dtype=np.uint32)
+    yy, xx = np.indices(cell_mask.shape)
+    for label in np.unique(cell_mask):
+        if label == 0:
+            continue
+        sel = cell_mask == label
+        cy, cx = yy[sel].mean(), xx[sel].mean()
+        radius = np.sqrt(sel.sum() / np.pi) * shrink
+        nuclei[sel & (((yy - cy) ** 2 + (xx - cx) ** 2) <= radius**2)] = label
+    tifffile.imwrite(filename, nuclei, compression="zlib")
+    print(f"  Created {Path(filename).name} - {len(np.unique(nuclei)) - 1} nuclei")
+    return nuclei
+
+
+create_nuclei_mask(p001_cell_mask, OUT_DIR / "P001_nuclei_mask.tif")
 
 # =============================================================================
 # 3. Generate valid input CSVs for each pipeline entry point
