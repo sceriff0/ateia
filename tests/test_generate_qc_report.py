@@ -1,3 +1,4 @@
+import ast
 import importlib.util
 import json
 import re
@@ -1006,3 +1007,33 @@ def test_seg_residuals_section_unparseable_count_matches_the_plotted_n(tmp_path)
     out = gqr.seg_residuals_section(str(d))
     assert "(2 unparseable)" in out
     assert "(n=1)" in out
+
+
+def test_generate_qc_report_imports_only_the_standard_library():
+    """The report script runs INSIDE bolt3x/mirage-preprocess and is also run by
+    hand against a finished --outdir on a login node. A third-party import is a
+    latent ImportError in the second case and a silent new pin in the first, and
+    neither shows up until someone needs the report. The plots are hand-rolled
+    SVG for exactly this reason.
+    """
+    tree = ast.parse(SCRIPT.read_text())
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                imported.add(alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            imported.add(node.module.split(".")[0])
+    # bin/utils/*.py is staged next to the script by Nextflow and by the
+    # sys.path.insert at the top of it; those are ours, not third-party.
+    local = {p.stem for p in (REPO / "bin" / "utils").glob("*.py")}
+    assert len(imported) >= 10, (
+        f"only {len(imported)} imports found -- the ast walk stopped matching and "
+        "this guard would pass on an empty set"
+    )
+    offenders = sorted(imported - set(sys.stdlib_module_names) - local)
+    assert not offenders, (
+        "bin/generate_qc_report.py must stay stdlib-only; it imports "
+        f"{offenders}. Hand-roll it, or move the work into a process that runs "
+        "inside a container that has the dependency."
+    )

@@ -408,4 +408,13 @@
 # test_read_residual_column_counts_non_finite_values_as_unparseable,
 # test_seg_residuals_section_unparseable_count_matches_the_plotted_n); no
 # deletions, no other test count moved.
-1425
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p09-qc-report, task 11 (stdlib-only guard
+# for generate_qc_report.py): 1355 passed, 13 skipped, 0 failed -- 1368
+# collected, up from the prior entry's 1367. One new case in
+# tests/test_generate_qc_report.py
+# (test_generate_qc_report_imports_only_the_standard_library); no deletions, no
+# other test count moved.
+1426
