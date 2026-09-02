@@ -22,21 +22,97 @@
 # -----------------------------------------------------------------------------
 # THIS MOVE IS A DEFERRAL, NOT A FIX. READ THIS BEFORE ASSUMING IT WAS GREEN.
 # -----------------------------------------------------------------------------
-# `nf-test (real)` was RED at the moment it was moved here. It has been red for a
-# while and it is still red. The failures, pulled from the run on main@84cc53f
-# (2026-09-01) rather than inferred:
+# `nf-test (real)` was RED at the moment it was moved here and it is still not
+# green. What follows is the CURRENT list, re-measured on a real dispatch rather
+# than carried over: run 33633986188 (2026-09-02) against release/p01-suite-truth,
+# https://github.com/sceriff0/mirage/actions/runs/33633986188 --
+# `FAILURE: Executed 28 tests in 1226.191s (14 failed)`.
 #
-#   1. `tests/testdata/P001_nuclei_mask.tif` is EMPTY on the runner, so
-#      `MIRAGE:READ_SEGMENTED_CHECKPOINT:EXTRACT_NUCLEI_PROPERTIES (P001)` aborts
-#      with `tifffile.TiffFileError: not a TIFF file b''`.
-#   2. Downstream of (1), the exported GeoJSON carries 0 features against 20 rows
-#      in the quantification CSV.
-#   3. Separately from (1) and (2): the preprocessed and registered `.ome.tif`
-#      outputs never appear at all.
+# FIXED 2026-09-02 (release 1.0.0, plan 01 -- suite truth):
 #
-# A fourth, older cause is recorded in the job's own comment below (StarDist's
-# 2D_versatile_fluo finds no nuclei in smooth synthetic blobs). Do not assume the
-# list above replaces it; assume both until someone re-measures.
+#   1. `tests/testdata/P001_nuclei_mask.tif` was EMPTY on the runner, so
+#      `MIRAGE:READ_SEGMENTED_CHECKPOINT:EXTRACT_NUCLEI_PROPERTIES (P001)` aborted
+#      with `tifffile.TiffFileError: not a TIFF file b''`. It was one of five
+#      fixtures TRACKED AT ZERO BYTES; all five are generated now, and
+#      tests/test_fixtures_have_a_producer.py no longer accepts a fixture that
+#      exists but cannot be opened. The string `not a TIFF file` appears ZERO
+#      times in the run above, and EXTRACT_NUCLEI_PROPERTIES completes for both
+#      patients in every pipeline-level test in it.
+#   2. The exported GeoJSON carried 0 features against 20 rows in the
+#      quantification CSV. This was NOT downstream of (1), as this header used to
+#      say: the failing case is tests/modules/export_geojson.nf.test's real test,
+#      whose only inputs are sample_merged_quant.csv and sample_contours.json.
+#      Two fixture defects -- a quantification CSV with `centroid_x`/`centroid_y`
+#      where every producer writes `x`/`y`, and a contours JSON that wrapped each
+#      ring in a `coordinates` key. Both fixed in the generator; reproduced and
+#      re-verified locally in a second by
+#      tests/test_export_geojson_fixture_contract.py, which runs in the BLOCKING
+#      suite because `--tag real` runs on the schedule against the default branch
+#      only, i.e. nowhere at all on dev. Both real export_geojson cases PASSED in
+#      the run above.
+#
+# STILL RED: 14 of 28 in `real`, in five distinct families, all measured on run
+# 33633986188. NONE of the five is a fixture defect, so none is fixed here; each
+# names what would fix it.
+#
+#   3. WAS "the preprocessed and registered `.ome.tif` outputs never appear at
+#      all". They DO appear -- in the work directory -- and are never PUBLISHED.
+#      Two tests, both in tests/integration/full_pipeline.nf.test:
+#        java.lang.AssertionError: Preprocessed image should exist:
+#          .../output/P001/preprocessed/P001_mov1_DAPI_CD3_CD8_corrected.ome.tif
+#        java.lang.AssertionError: Registered image should exist:
+#          .../output/P001/registered/registered_slides/P001_mov1_registered.ome.tiff
+#      Those name exactly the two publishDir entries in conf/modules.config that
+#      carry `enabled: params.cleanup_level == 'none'` (APPLY_PROFILES, REGISTER).
+#      A plain boolean there is evaluated EAGERLY, where it appears, and that is
+#      before `profiles {}` runs -- so a profile pin never reaches it, and
+#      nf-test's own `-profile test,docker` is a profile. Measured statically in a
+#      second, no CI needed: `nextflow config -profile test,docker` reports
+#      `cleanup_level = 'none'` and STILL renders 15 gates as `enabled:false`,
+#      those two among them; the same command with the value passed on the command
+#      line renders 0. The workflow-side half of the same decision,
+#      Checkpoint.writesAtLevel, reads params at RUN time, where the profile HAS
+#      applied -- so csv/preprocessed.csv is written, naming files that were never
+#      published. That dangling manifest is the exact outcome the filter in
+#      subworkflows/local/preprocess.nf exists to prevent. Owned by whichever
+#      change settles what conf/test.config's pin can actually reach; CLAUDE.md
+#      records the same measurement and why it was left alone (changing what
+#      `-profile test` effectively pins risks the 78-stub-test snapshot failure).
+#   4. EIGHT of the fourteen are assertions that treat an nf-test output path as a
+#      File. `process.out.<x>.get(0).get(1)` is a String, so `.size()` returns the
+#      LENGTH OF THE PATH and `.name` / `.toFile()` do not exist:
+#        assert it.size() > 1000  ->  161, for a 161-character path
+#        groovy.lang.MissingMethodException: No signature of method:
+#          java.lang.String.toFile()
+#        groovy.lang.MissingPropertyException: No such property: name for class:
+#          java.lang.String
+#      Affected: convert_image, generate_preprocess_qc, generate_registration_qc,
+#      merge_and_pyramid, split_channels (x2), and the preprocessing and
+#      registration subworkflow tests. These CANNOT pass whatever the pipeline
+#      does; the stub-tagged cases in the same files wrap with `file(...)` and are
+#      green. A test-code repair, not a pipeline one.
+#   5. One stale assertion against a default that moved. tests/modules/quantify
+#      asserts 11 columns "(label + marker + 3 statistics x 3 compartments)" and
+#      gets 5: [label, DAPI, DAPI: Nucleus: Median, DAPI: Cytoplasm: Median,
+#      DAPI: Cell: Median]. `expanded_quantification` ships false, so Median alone
+#      is computed. The pipeline is right and the test was never updated.
+#   6. One pipeline-facing defect -- the only one of the fourteen. The postprocess
+#      subworkflow's real test leaves pixel_size unset, it reaches the process as
+#      the literal string `null`, and EXPORT_GEOJSON (P001) exits 1 with
+#      `pixel_size.PixelSizeError: --pixel_size 'null' is neither a number nor
+#      'auto'` (bin/utils/pixel_size.py:295).
+#   7. The synthetic-data segmentation wall, RE-MEASURED and still holding -- this
+#      header used to say it had not been re-measured. SEGMENT's regression case
+#      gets a 145-byte cell mask and a 147-byte nuclei mask (an all-zero label
+#      image), and MERGE_AND_PYRAMID's gets a 135-byte pyramid. See the job's own
+#      comment below for the diagnosis (StarDist's 2D_versatile_fluo finds no
+#      nuclei in smooth synthetic blobs) and the two candidate fixes.
+#
+# `nf-test (integration)` CONTRIBUTES NO INDEPENDENT FAILURE. It ran 5 tests and
+# failed 2, and those 2 are test ids 1387f758 and 47ddb28b -- the same two cases
+# as (3) above, in the same file. tests/integration/full_pipeline.nf.test carries
+# a file-level `tag "integration"` and a per-test `tag "real"`, so four of its five
+# cases are collected by BOTH legs. Fixing (3) turns both jobs green together.
 #
 # A job moved to a nightly workflow with no note reads as "this always passed
 # somewhere else", which is false here. When these are fixed, the job goes back
@@ -143,10 +219,11 @@ jobs:
     # because it is in a workflow no merge is gated on -- and it still reports its
     # true colour, which is the whole trade.
     #
-    # The older recorded cause, kept because it is a different one from the three
-    # in the header: registration, segmentation model-loading and most
-    # test-staging bugs are fixed (the suite went 26 -> ~20 failing); what remains
-    # of THAT round is the synthetic-data segmentation wall -- StarDist's built-in
+    # The diagnosis behind the header's cause (7), kept here because it is older
+    # than the rest and was measured in a different round: registration,
+    # segmentation model-loading and most test-staging bugs are fixed (the suite
+    # went 26 -> ~20 failing, and is 14 of 28 on run 33633986188); what remains of
+    # THAT round is the synthetic-data segmentation wall -- StarDist's built-in
     # 2D_versatile_fluo detects 0 nuclei in the smooth synthetic test blobs even at
     # a low prob_thresh, so cell/quant/geojson assertions cannot pass on this
     # fixture data. The fix is to bundle a tiny real nuclei crop, or to weaken
