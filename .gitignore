@@ -61,6 +61,7 @@ bench_runs/
 benchmarks/paper_data/
 benchmarks/analysis/figures/
 illum_bench/
+challenge/
 
 # macOS
 *.DS_Store
@@ -188,6 +189,7 @@ tests/testdata/shipped_defaults_input.csv
 # Enumerated rather than a `*.html` glob so a future INTENDED root-level HTML is not
 # swallowed silently.
 /architecture-review-2026-08-24.html
+/architecture-review-2026-09-02.html
 /artifact-imageio-review.html
 /artifact-pipeline-review.html
 /dataflow-architecture-review.html
