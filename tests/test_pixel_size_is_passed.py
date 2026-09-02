@@ -31,7 +31,7 @@ PASSED_RE = re.compile(r"--pixel[-_]size\s+\$\{([^}]+)\}")
 # Scripts that are operator tools rather than pipeline processes: no module invokes
 # them, so there is no call site to check. Each must stay unreferenced by modules/ for
 # this exemption to remain honest, which is asserted below.
-STANDALONE = {"join_flowpath.py", "registration_benchmark.py"}
+STANDALONE = {"join_flowpath.py"}
 
 
 def _scripts_accepting_a_scale() -> dict[str, str]:

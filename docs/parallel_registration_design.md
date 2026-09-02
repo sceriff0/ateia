@@ -379,10 +379,13 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   (STARE Tiled TRE)" subsection — a per-slide table (coarse / rigid p50-p90 / post-refinement final
   p50-p90 / refined / tiles) plus a **per-tile SVG heatmap** of the spatial TRE, sitting alongside
   the VALIS rTRE, feature-distance, and seg-QC tables. Unit-tested.
-- **Accuracy harness (done):** `bin/utils/reg_benchmark.py` + `bin/registration_benchmark.py` —
-  a ground-truth-free residual-TRE + correlation metric that runs on any method's output, so
-  VALIS vs tiled is a direct number-to-number comparison on the same slide. Validated on synthetic
-  ground truth (STARE drops the residual TRE below 2 px; a pure 11.66 px shift is fully removed).
+- **Accuracy harness (done):** `bin/utils/reg_benchmark.py` — a ground-truth-free residual-TRE +
+  correlation metric that runs on any method's output, so VALIS vs tiled is a direct
+  number-to-number comparison on the same slide. Validated on synthetic ground truth (STARE drops
+  the residual TRE below 2 px; a pure 11.66 px shift is fully removed). The CLI that wrapped it,
+  `bin/registration_benchmark.py`, lives on the `benchmarking` branch with the sweep that drives
+  it; on this branch the library is exercised by `tests/test_reg_benchmark.py` and
+  `tests/test_tiled_fanout.py` and is allowlisted in `tests/test_no_dead_bin_modules.py`.
 - **Per-tile Nextflow fan-out (done, and now the only shape):** the adapter runs
   `TILED_COARSE → TILED_REG_TILE (one task per tile) → TILED_SOLVE → TILED_STITCH` — the
   little-process-per-tile design, all JVM-free. `warp_image` gained an `out_origin` so each tile

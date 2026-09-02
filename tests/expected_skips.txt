@@ -57,6 +57,16 @@ tests/test_ci_stack_pinned.py::test_image_installing_a_constrained_package_reads
 # --- a pointer to a decision recorded elsewhere, not a second decision.
 tests/test_no_dead_bin_modules.py::test_bin_utils_module_has_a_real_importer[tiled_pipeline.py]
 
+# --- bin/utils/reg_benchmark.py lost its only production importer,
+# --- bin/registration_benchmark.py, deleted from this branch for release 1.0
+# --- (it survives on `benchmarking`, alongside the sweep that drives it). The
+# --- library stays: it is a deliberate accuracy-measurement oracle kept
+# --- independent of the pipeline's own DISK/LightGlue front-end, imported by
+# --- tests/test_reg_benchmark.py and tests/test_tiled_fanout.py. The skip
+# --- comes from that file's own permanent allowlist, so this entry is a
+# --- pointer to a decision recorded elsewhere, not a second decision.
+tests/test_no_dead_bin_modules.py::test_bin_utils_module_has_a_real_importer[reg_benchmark.py]
+
 # --- DEBT, not an exemption. Read this one before adding anything like it.
 # ---
 # --- This case skips when stardist/csbdeep are not importable. The pytest job

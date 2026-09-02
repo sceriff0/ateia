@@ -32,6 +32,10 @@ ALLOW_FILES = {
     "bin/utils/reg_benchmark.py",
     "tests/test_reg_benchmark.py",
     "tests/test_no_legacy_frontends.py",
+    # Its ALLOWLIST reason for reg_benchmark (dead-module guard, phase 02 task 5)
+    # repeats the same ORB-as-accuracy-oracle explanation as the entries above --
+    # same tool, same reason, different guard.
+    "tests/test_no_dead_bin_modules.py",
     # The COMPANION guard. test_the_deleted_frontends_are_really_gone names all eight
     # deleted symbols (`_frontend_orb`, `normalize_for_orb`, ...) in a hasattr sweep --
     # naming them is the whole point of it. It was passing the ORIGINAL \b pattern only

@@ -105,6 +105,21 @@ ALLOWLIST: dict[str, dict[str, str]] = {
             "a production script."
         ),
     },
+    "reg_benchmark": {
+        "status": "permanent",
+        "reason": (
+            "No production importer since bin/registration_benchmark.py -- its only "
+            "one -- was deleted from this branch for release 1.0. The CLI was a "
+            "hand-run harness no module or conf/ file ever invoked, and it survives "
+            "on the `benchmarking` branch alongside the sweep that drives it. The "
+            "library it wrapped stays here because it is a deliberate ACCURACY "
+            "ORACLE: tests/test_reg_benchmark.py and tests/test_tiled_fanout.py "
+            "both import it, and it keeps skimage's ORB as an oracle independent "
+            "of the DISK/LightGlue front-end the pipeline itself uses (see "
+            "tests/test_no_legacy_frontends.py's exemption for the same reason). "
+            "Not dead code -- a test/benchmark oracle, like tiled_pipeline above."
+        ),
+    },
 }
 
 
