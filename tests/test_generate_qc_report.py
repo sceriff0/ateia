@@ -16,37 +16,6 @@ def _load():
     return mod
 
 
-def test_parse_versions_yml_two_level(tmp_path):
-    gqr = _load()
-    p = tmp_path / "collated_versions.yml"
-    p.write_text(
-        '"MIRAGE:PREPROCESSING:CONVERT_IMAGE":\n'
-        "    python: 3.10.0\n"
-        '"MIRAGE:REGISTRATION:REGISTER":\n'
-        "    python: 3.10.0\n"
-        "    valis: 1.0.0\n"
-    )
-    out = gqr.parse_versions_yml(p)
-    assert out["MIRAGE:PREPROCESSING:CONVERT_IMAGE"]["python"] == "3.10.0"
-    assert out["MIRAGE:REGISTRATION:REGISTER"]["valis"] == "1.0.0"
-
-
-def test_versions_section_renders_table(tmp_path):
-    gqr = _load()
-    p = tmp_path / "v.yml"
-    p.write_text('"A:B":\n    tool: 1.2.3\n')
-    html = gqr.versions_section(p)
-    assert "Software Versions" in html
-    assert "tool" in html and "1.2.3" in html
-
-
-def test_versions_section_missing_file_is_graceful(tmp_path):
-    gqr = _load()
-    html = gqr.versions_section(tmp_path / "nope.yml")
-    assert "Software Versions" in html
-    assert "not available" in html.lower() or "no " in html.lower()
-
-
 def _summary(tmp_path):
     p = tmp_path / "run_summary.json"
     p.write_text(
@@ -226,7 +195,6 @@ def test_end_to_end_cli_smoke(tmp_path):
         "Registration QC",
         "Segmentation Overlays",
         "Postprocessing QC",
-        "Software Versions",
     ]:
         assert header in html, f"missing section: {header}"
 
@@ -298,7 +266,6 @@ def test_report_section_headings_are_exactly_these(tmp_path):
         "Per-Cell Registration Residuals",
         "Segmentation Overlays",
         "Postprocessing QC",
-        "Software Versions",
     ]
 
 

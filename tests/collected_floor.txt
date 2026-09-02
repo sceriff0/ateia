@@ -256,4 +256,15 @@
 # from the prior entry's 1336. The increase is exactly one test,
 # test_report_section_headings_are_exactly_these, added to
 # tests/test_generate_qc_report.py; no other test count moved.
-1395
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p09-qc-report, task 2 (cut versions_section
+# and parse_versions_yml): 1321 passed, 13 skipped, 0 failed -- 1334 collected,
+# DOWN from the prior entry's 1337. The Software Versions section's rendering is
+# deliberately deleted, and with it its three tests
+# (test_parse_versions_yml_two_level, test_versions_section_renders_table,
+# test_versions_section_missing_file_is_graceful); no other test count moved.
+# Lowering the floor here is the documented escape hatch for a deliberate
+# removal, not drift.
+1392

@@ -53,7 +53,16 @@ def parse_args():
         default="postprocess_qc/",
         help="Directory of postprocessing QC PNGs",
     )
-    p.add_argument("--versions", default=None, help="Path to collated versions.yml")
+    p.add_argument(
+        "--versions",
+        default=None,
+        help=(
+            "Path to the collated versions.yml. NOT rendered in the report: it is "
+            "copied verbatim into --data-dir as collated_versions.yml, which is "
+            "where a machine-readable version record belongs. A per-process "
+            "software table is 200 rows nobody reads and a parser nobody trusts."
+        ),
+    )
     p.add_argument("--run-summary", default=None, help="Path to run_summary.json")
     p.add_argument(
         "--seg-qc",
@@ -141,56 +150,6 @@ def parse_csv_table_head(csv_path, limit):
         ]
         total = len(rows) + sum(1 for _ in reader)
     return headers, rows, total
-
-
-def parse_versions_yml(path):
-    """
-    Minimal two-level YAML parser for a collated versions.yml.
-
-    Structure (concatenated per-process blocks):
-        "PROCESS:NAME":
-            tool: version
-    Returns {process: {tool: version}}. Stdlib-only (no PyYAML) to keep the
-    report self-contained. Repeated process keys are merged.
-    """
-    result = {}
-    current = None
-    if not path or not Path(path).exists():
-        return result
-    with open(path, encoding="utf-8") as fh:
-        for raw in fh:
-            line = raw.rstrip("\n")
-            if not line.strip():
-                continue
-            if not line.startswith((" ", "\t")):
-                # top-level "PROCESS": key
-                key = line.strip().rstrip(":").strip().strip('"')
-                current = key
-                result.setdefault(current, {})
-            elif current is not None and ":" in line:
-                tool, _, ver = line.strip().partition(":")
-                result[current][tool.strip().strip('"')] = ver.strip().strip('"')
-    return result
-
-
-def versions_section(versions_path):
-    """Render the collated versions.yml as a per-process software table."""
-    versions = parse_versions_yml(versions_path) if versions_path else {}
-    if not versions:
-        body = '<p class="empty-notice">Version information not available.</p>'
-        return section("Software Versions", body)
-    tbl = "<table><thead><tr><th>Process</th><th>Tool</th><th>Version</th></tr></thead><tbody>"
-    for proc in sorted(versions):
-        tools = versions[proc]
-        proc_esc = html.escape(str(proc))
-        for i, tool in enumerate(sorted(tools)):
-            proc_cell = f"<td rowspan='{len(tools)}'>{proc_esc}</td>" if i == 0 else ""
-            tbl += (
-                f"<tr>{proc_cell}<td>{html.escape(str(tool))}</td>"
-                f"<td>{html.escape(str(tools[tool]))}</td></tr>"
-            )
-    tbl += "</tbody></table>"
-    return section("Software Versions", tbl)
 
 
 def parse_run_summary_json(path):
@@ -977,7 +936,6 @@ def main():
     html_parts.append(seg_residuals_section(args.seg_residuals))
     html_parts.append(seg_overlay_section(args.postprocess_qc))
     html_parts.append(postprocess_qc_section(args.postprocess_qc))
-    html_parts.append(versions_section(args.versions))
     html_parts.append(html_footer())
 
     out_path = Path(args.output)

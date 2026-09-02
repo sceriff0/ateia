@@ -43,9 +43,12 @@ class ProcessEnvelope {
      * name differs from their reported name need an entry; everything else reports under
      * its own name.
      *
-     * bin/generate_qc_report.py's parse_versions_yml is a hand-rolled two-level parser
-     * keyed on these strings, and the report renders them verbatim in its Process | Tool |
-     * Version table. Changing a value here changes a published report.
+     * These strings are the KEYS of every published versions.yml, collated into the
+     * report's mirage_qc_data_<run-id> bundle as collated_versions.yml. The HTML QC
+     * report no longer renders them as a table (it never read them well: the parser
+     * was hand-rolled and two-level), so changing a value here changes a published
+     * DATA file rather than a published rendering — which is the harder break,
+     * because the consumer is a script.
      */
     private static final Map<String, String> YAML_KEY = [
         'skimage'   : 'scikit-image',
