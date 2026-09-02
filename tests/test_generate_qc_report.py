@@ -512,3 +512,43 @@ def test_reconcile_rows_merges_valis_csv_and_stare_json_rather_than_shadowing(tm
     # Both slides are present: the CSV reader did not shadow the JSON reader, or vice versa.
     assert rows[("mov_valis", "rigid")]["feature_tre_um"] == 2.0
     assert rows[("mov_stare", "rigid")]["feature_tre_um"] == 1.5
+
+
+# ── inline-SVG plotting: the pure-math seams ───────────────────────────────────
+def test_finite_drops_none_nan_bool_and_strings():
+    gqr = _load()
+    assert gqr._finite([1, 2.5, None, float("nan"), "3", True, -4]) == [1.0, 2.5, -4.0]
+
+
+def test_percentile_is_nearest_rank_and_none_on_empty():
+    gqr = _load()
+    vals = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]
+    assert gqr._percentile(vals, 50) == 5.0
+    assert gqr._percentile(vals, 90) == 9.0
+    assert gqr._percentile(vals, 100) == 10.0
+    assert gqr._percentile([], 50) is None
+    assert gqr._percentile([None, float("nan")], 50) is None
+
+
+def test_bin_counts_puts_the_maximum_in_the_last_bin():
+    """The naive int((v-lo)/span*bins) sends v == hi to index `bins`, one past the end."""
+    gqr = _load()
+    counts, lo, hi = gqr._bin_counts([0.0, 0.5, 1.0], 2)
+    assert (lo, hi) == (0.0, 1.0)
+    assert counts == [1, 2]
+    assert sum(counts) == 3
+
+
+def test_bin_counts_widens_a_degenerate_range_so_the_single_bar_is_drawable():
+    gqr = _load()
+    counts, lo, hi = gqr._bin_counts([4.0, 4.0, 4.0], 5)
+    assert (lo, hi) == (4.0, 5.0)
+    assert sum(counts) == 3
+    assert counts[0] == 3
+
+
+def test_bin_counts_on_nothing_finite_is_empty_not_an_exception():
+    gqr = _load()
+    assert gqr._bin_counts([], 10) == ([], 0.0, 0.0)
+    assert gqr._bin_counts([None, float("nan")], 10) == ([], 0.0, 0.0)
+    assert gqr._bin_counts([1.0, 2.0], 0) == ([], 0.0, 0.0)

@@ -12,6 +12,7 @@ import html
 import itertools
 import json
 import logging
+import math
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -334,6 +335,75 @@ def _html_table(headers, rows, extra_body_html=""):
     )
     body += extra_body_html
     return f"<table><thead><tr>{thead}</tr></thead><tbody>{body}</tbody></table>"
+
+
+# ── inline SVG plotting ─────────────────────────────────────────────────────────
+# Hand-rolled and stdlib-only, following this file's existing
+# `_tiled_tre_heatmap_svg()` precedent. bin/generate_resource_report.py hand-rolls
+# its own SVG for the same reason, and the two deliberately do NOT share a module:
+# that script runs on the head node OUTSIDE every container, this one runs inside
+# bolt3x/mirage-preprocess, so a shared bin/utils module would have to be staged
+# into both and would couple two independently released surfaces. Sixty duplicated
+# lines are cheaper than that.
+
+SVG_W = 380  # plot box width, px
+SVG_H = 170  # plot box height, px
+SVG_PAD_L = 46  # left gutter: y-axis (count) labels
+SVG_PAD_R = 12
+SVG_PAD_T = 22  # top gutter: the plot's own title
+SVG_PAD_B = 32  # bottom gutter: x-axis labels
+
+
+def _finite(values):
+    """Keep only real, non-NaN numbers from ``values``.
+
+    ``bool`` is excluded on purpose: it is an ``int`` subclass, so a stray
+    ``True`` in a metrics dict would otherwise be plotted as 1.0.
+    """
+    out = []
+    for v in values:
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            continue
+        if v != v:  # NaN
+            continue
+        out.append(float(v))
+    return out
+
+
+def _percentile(values, q):
+    """Nearest-rank percentile (``q`` in 0..100) of the finite part of ``values``.
+
+    Nearest-rank rather than interpolated: every number this plots is an error
+    measured in pixels or µm, and an interpolated p90 invents a value no tile and
+    no cell ever had. ``None`` when nothing is finite.
+    """
+    vals = sorted(_finite(values))
+    if not vals:
+        return None
+    k = max(1, min(len(vals), int(math.ceil(q / 100.0 * len(vals)))))
+    return vals[k - 1]
+
+
+def _bin_counts(values, bins):
+    """Bin the finite part of ``values`` into ``bins`` equal-width buckets.
+
+    Returns ``(counts, lo, hi)``, or ``([], 0.0, 0.0)`` when there is nothing to
+    bin. Two edge cases are handled here rather than in every caller: the maximum
+    value lands in the LAST bin (``int((hi - lo) / span * bins)`` is ``bins``,
+    one past the end), and an all-identical input widens to ``lo + 1.0`` so the
+    single bar has a width to be drawn in instead of dividing by zero.
+    """
+    vals = _finite(values)
+    if not vals or bins < 1:
+        return [], 0.0, 0.0
+    lo, hi = min(vals), max(vals)
+    if hi <= lo:
+        hi = lo + 1.0
+    counts = [0] * bins
+    span = hi - lo
+    for v in vals:
+        counts[min(int((v - lo) / span * bins), bins - 1)] += 1
+    return counts, lo, hi
 
 
 def img_grid(png_files, wide=False):

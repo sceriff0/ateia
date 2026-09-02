@@ -276,4 +276,17 @@
 # deleted, and with it its two tests (test_manifest_section,
 # test_manifest_section_escapes_html_special_patient_id); no other test count
 # moved. Same documented escape hatch as task 2.
-1390
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p09-qc-report, task 4 (the pure-math
+# plotting seams: _finite / _percentile / _bin_counts): 1324 passed, 13
+# skipped, 0 failed -- 1337 collected, up from the prior entry's 1332. The
+# increase is exactly the five new cases in tests/test_generate_qc_report.py
+# (test_finite_drops_none_nan_bool_and_strings,
+# test_percentile_is_nearest_rank_and_none_on_empty,
+# test_bin_counts_puts_the_maximum_in_the_last_bin,
+# test_bin_counts_widens_a_degenerate_range_so_the_single_bar_is_drawable,
+# test_bin_counts_on_nothing_finite_is_empty_not_an_exception); no other test
+# count moved.
+1395
