@@ -19,6 +19,31 @@ exclude_docs: |
   parallel_registration_research.md
 
 # ---------------------------------------------------------------------------
+# Link and navigation validation
+# ---------------------------------------------------------------------------
+# mkdocs 1.6 has no `error` level -- `mkdocs/config/defaults.py`'s _LogLevel accepts
+# exactly warn / info / ignore. Raising these categories from their default `info`
+# to `warn` is what makes `mkdocs build --strict` abort on them, which is how the
+# docs job in .github/workflows/_test-suite.yml turns a dangling anchor into a
+# failed build instead of a line nobody reads.
+#
+# `nav.omitted_files: warn` is the orphan-page rule: a Markdown file in docs/ that
+# no nav entry points at is unreachable from the site. Two exist today
+# (nextflow-26-bump.md, perf/2026-08-26-rss.md) and are dealt with in the docs
+# phase -- either navigated or added to `exclude_docs` above.
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+  nav:
+    omitted_files: warn
+    not_found: warn
+  links:
+    not_found: warn
+    anchors: warn
+
+# ---------------------------------------------------------------------------
 # Theme
 # ---------------------------------------------------------------------------
 theme:

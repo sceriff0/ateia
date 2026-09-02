@@ -803,12 +803,20 @@ def test_the_shared_test_suite_gate_covers_every_job_in_it():
     )
     gate_id = aggregators[0]
     covered = set(needs_of(jobs[gate_id]))
-    uncovered = sorted(set(jobs) - covered - {gate_id})
+    # The SAME allowlist test_every_job_is_connected_to_its_workflows_gate uses, not a
+    # second one: an exemption must be a single fact, so that deleting it re-arms both
+    # checks at once and test_the_gate_disconnected_allowlist_has_no_dead_entries can
+    # force the deletion the moment the job is wired in.
+    exempt = {job_id for (file_name, job_id) in GATE_DISCONNECTED_JOBS if file_name == suite.name}
+    uncovered = sorted(set(jobs) - covered - {gate_id} - exempt)
     assert not uncovered, (
         f"{suite.name}: job(s) {uncovered} are not in `{gate_id}`'s `needs:`, so a skip "
         "or a removal there is invisible to both gates. Add them, and see "
         "test_every_gate_aggregator_reads_every_result_it_needs for the other half: "
-        "being in `needs:` is not the same as being CHECKED."
+        "being in `needs:` is not the same as being CHECKED. If a job is deliberately "
+        "outside the gate, put it in GATE_DISCONNECTED_JOBS with a reason -- that is "
+        "the ONE allowlist, shared with "
+        "test_every_job_is_connected_to_its_workflows_gate."
     )
 
 
@@ -1201,7 +1209,19 @@ def test_no_workflow_branches_on_the_workflow_call_event_name():
 # Every job in every gated workflow is now wired to its gate. Leave this dict empty
 # if you can: an entry here is a job that cannot fail the MERGE and can still fail
 # the RUN, which is how a green gate comes to report a red commit.
-GATE_DISCONNECTED_JOBS: dict[tuple[str, str], str] = {}
+GATE_DISCONNECTED_JOBS: dict[tuple[str, str], str] = {
+    ("_test-suite.yml", "docs"): (
+        "Added 2026-09-02. `mkdocs build --strict` is RED on arrival: 2 orphan pages "
+        "(nextflow-26-bump.md, perf/2026-08-26-rss.md) and 3 dangling anchors, "
+        "measured, reported as 4 warnings. The check is landed now so the fix has "
+        "something to turn green; putting it in suite-gate's `needs:` today would "
+        "block every merge in the 1.0.0 release on a documentation defect no other "
+        "phase owns. The docs phase fixes those, adds `docs` to suite-gate's "
+        "`needs:` and to GATE_MEMBERSHIP, and DELETES this entry -- which "
+        "test_the_gate_disconnected_allowlist_has_no_dead_entries then requires, so "
+        "the move cannot be left half-done."
+    ),
+}
 
 # The advisory nf-test suites, keyed on the COMMAND, never on a job or file name.
 # Naming the job would let a rename hide a deletion, and naming the file would go
