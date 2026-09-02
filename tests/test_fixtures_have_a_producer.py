@@ -140,9 +140,12 @@ def test_every_referenced_fixture_is_non_empty_and_openable():
     """`.exists()` is satisfied by a 0-byte file, and five of them were tracked.
 
     tests/testdata/{P001_image.tiff, P001_merged_quant.csv, P001_nuclei_mask.tif,
-    P001_pyramid.ome.tiff} were committed at zero bytes and passed the existence
-    check above for months. The cost was not hypothetical: `nf-test --tag real`
-    aborted in EXTRACT_NUCLEI_PROPERTIES with
+    P001_pyramid.ome.tiff, dummy_singularity.sif} were committed at zero bytes and
+    passed the existence check above for months. The first four have producers now;
+    the fifth is a genuine sentinel -- nothing opens it, and it is allowlisted in
+    EMPTY_ON_PURPOSE above with the reason -- which is why this test skips that one
+    rather than the count dropping to four. The cost was not hypothetical:
+    `nf-test --tag real` aborted in EXTRACT_NUCLEI_PROPERTIES with
     `tifffile.TiffFileError: not a TIFF file b''` and the failure was recorded in
     .github/workflows/nightly.yml's header as a property of the SUITE rather than
     of a fixture.
