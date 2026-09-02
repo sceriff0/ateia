@@ -9,7 +9,6 @@ import argparse
 import base64
 import csv
 import html
-import itertools
 import json
 import logging
 import math
@@ -129,28 +128,6 @@ def parse_csv_table(csv_path):
         for row in reader:
             rows.append([row.get(h, "") for h in display_headers])
     return display_headers, rows
-
-
-def parse_csv_table_head(csv_path, limit):
-    """Parse only the first ``limit`` rows, and count the rest without building them.
-
-    Returns ``(headers, rows, total)``. The per-cell residual CSVs are one row per cell, and the
-    QC report shows 500 of them -- materialising the other few hundred thousand to compute a
-    length is the whole cost. Measured 2.53x / -248 MB (PERF-PLAN C16).
-
-    ``itertools.islice``, NOT ``zip(reader, range(limit))``: zip pulls one item from the reader
-    that it never yields, so the tail count comes out one short. Measured on a 400 000-row file,
-    the zip form reported 399 999. Pinned by the boundary case in
-    tests/test_no_full_mask_unique.py.
-    """
-    with open(csv_path, newline="") as fh:
-        reader = csv.DictReader(fh)
-        headers = reader.fieldnames or []
-        rows = [
-            [row.get(h, "") for h in headers] for row in itertools.islice(reader, limit)
-        ]
-        total = len(rows) + sum(1 for _ in reader)
-    return headers, rows, total
 
 
 def parse_run_summary_json(path):
@@ -1088,43 +1065,72 @@ def reconciliation_section(tre_dir, seg_qc_dir):
     )
 
 
-# bin/warp_seg_qc.py's write_per_cell_csv writes one row per matched cell pair,
-# uncapped -- a real slide can be 10^4-10^6 rows. Every OTHER CSV/JSON table in this
-# report is per-slide or per-stage (a few dozen rows at most); inlining every residual
-# row into one HTML file would produce a browser-killing document the 535-byte stub
-# fixtures never surface. Cap what is rendered and say so, rather than either silently
-# truncating or dumping the whole thing.
-SEG_RESIDUALS_MAX_ROWS = 500
+def _read_residual_column(csv_path):
+    """Stream a ``*_reg_residuals.csv`` into ``(values, stage_label, n_rows)``.
+
+    bin/warp_seg_qc.py's write_per_cell_csv writes one row per matched cell pair,
+    uncapped — a real slide is 10^4-10^6 rows — with columns
+    ``moving,ref_x,ref_y,residual_px,stage``. One pass, one column: nothing but
+    the numeric residual is materialised, so the report's cost is a list of floats
+    rather than a dict per row. ``n_rows`` counts EVERY data row, including one
+    whose residual could not be parsed, so the plot's n and the file's length can
+    be compared.
+    """
+    values, stages, n_rows = [], [], 0
+    with open(csv_path, newline="") as fh:
+        # No islice/limit here, deliberately: the histogram needs every row.
+        # The function this replaced sliced the head and counted the tail, and
+        # the slice had to be itertools.islice -- zip(reader, range(limit))
+        # pulls one item it never yields, so the tail count came out one short
+        # (measured 399 999 on a 400 000-row file). Nothing here can make that
+        # mistake because nothing here has a limit.
+        for row in csv.DictReader(fh):
+            n_rows += 1
+            v = _to_float(row.get("residual_px"))
+            if v is not None:
+                values.append(v)
+            stage = row.get("stage")
+            if stage and stage not in stages:
+                stages.append(stage)
+    return values, "/".join(stages), n_rows
 
 
 def seg_residuals_section(seg_residuals_dir):
-    """Render per-cell registration-residual CSVs (one table per file, row-capped)."""
+    """Per-cell registration residuals as one error distribution per slide CSV.
+
+    This replaced a 500-row head-of-CSV table (spec Phase 4). Five hundred rows out
+    of a possible million answered no question a reader had; the distribution of all
+    of them, with p50 and p90 marked, answers the one they did. The CSVs themselves
+    are published unchanged into the report's ``seg_residuals/`` data folder and are
+    joined onto cell labels by the SpatialData export, so nothing is lost.
+    """
     csvs = list_files(seg_residuals_dir, "*.csv")
     if not csvs:
-        body = '<p class="empty-notice">No per-cell registration residuals found.</p>'
-        return section("Per-Cell Registration Residuals", body)
-    parts = []
-    for csv_path in csvs:
-        parts.append(
-            "<p style='font-size:0.85rem;color:#666;margin:8px 0 4px;'>"
-            f"{html.escape(Path(csv_path).name)}</p>"
+        return section(
+            "Per-Cell Registration Residuals",
+            '<p class="empty-notice">No per-cell registration residuals found.</p>',
         )
+    parts = ['<div style="display:flex;flex-wrap:wrap;gap:12px;">']
+    for csv_path in csvs:
+        name = Path(csv_path).name
         try:
-            headers, shown, total = parse_csv_table_head(
-                csv_path, SEG_RESIDUALS_MAX_ROWS
-            )
-        except Exception as exc:  # noqa: BLE001 - report, never crash
+            values, stage, n_rows = _read_residual_column(csv_path)
+        except (OSError, csv.Error) as exc:
             parts.append(
                 '<p class="empty-notice">Could not parse '
-                f"{html.escape(Path(csv_path).name)}: {html.escape(str(exc))}</p>"
+                f"{html.escape(name)}: {html.escape(str(exc))}</p>"
             )
             continue
-        if total > len(shown):
-            parts.append(
-                "<p style='font-size:0.8rem;color:#888;margin:0 0 6px;'>"
-                f"Showing {len(shown)} of {total} rows.</p>"
-            )
-        parts.append(_html_table(headers, shown))
+        label = f"{name} — {stage} stage" if stage else name
+        if n_rows != len(values):
+            label += f" ({n_rows - len(values)} unparseable)"
+        parts.append(_error_distribution_svg(values, title=label, bins=30))
+    parts.append("</div>")
+    parts.append(
+        "<p style='font-size:0.8rem;color:#888;margin-top:6px;'>"
+        "The full per-cell CSVs are published unchanged under "
+        "<code>seg_residuals/</code> in this report's data folder.</p>"
+    )
     return section("Per-Cell Registration Residuals", "\n".join(parts))
 
 

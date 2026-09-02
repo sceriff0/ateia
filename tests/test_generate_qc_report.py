@@ -804,3 +804,63 @@ def test_error_distribution_svg_drops_missing_values_before_binning():
     gqr = _load()
     svg = gqr._error_distribution_svg([1.0, None, float("nan"), 3.0], title="t")
     assert "(n=2)" in svg
+
+
+# ── per-cell registration residuals: histogram, not a row dump ──────────────────
+def _residuals_csv(tmp_path, n=40, stage="micro"):
+    d = tmp_path / "seg_residuals"
+    d.mkdir(exist_ok=True)
+    p = d / "P001_mov1_reg_residuals.csv"
+    lines = ["moving,ref_x,ref_y,residual_px,stage"]
+    for i in range(n):
+        lines.append(f"P001_mov1,{i}.0,{i}.0,{0.1 * (i % 10):.6f},{stage}")
+    p.write_text("\n".join(lines) + "\n")
+    return d
+
+
+def test_read_residual_column_streams_values_stage_and_row_count(tmp_path):
+    gqr = _load()
+    d = _residuals_csv(tmp_path, n=40)
+    values, stage, n_rows = gqr._read_residual_column(d / "P001_mov1_reg_residuals.csv")
+    assert n_rows == 40
+    assert len(values) == 40
+    assert stage == "micro"
+    assert max(values) == 0.9
+
+
+def test_read_residual_column_skips_an_unparseable_value_but_counts_the_row(tmp_path):
+    gqr = _load()
+    d = tmp_path / "seg_residuals"
+    d.mkdir()
+    p = d / "x_reg_residuals.csv"
+    p.write_text(
+        "moving,ref_x,ref_y,residual_px,stage\n"
+        "m,1,1,0.5,micro\n"
+        "m,2,2,,micro\n"
+        "m,3,3,nan,micro\n"
+    )
+    values, stage, n_rows = gqr._read_residual_column(p)
+    assert n_rows == 3
+    assert values == [0.5]
+    assert stage == "micro"
+
+
+def test_seg_residuals_section_is_a_histogram_not_a_row_dump(tmp_path):
+    gqr = _load()
+    out = gqr.seg_residuals_section(str(_residuals_csv(tmp_path, n=40)))
+    assert "Per-Cell Registration Residuals" in out
+    assert "<svg" in out
+    assert "<table" not in out
+    assert "P001_mov1_reg_residuals.csv" in out
+    assert "micro stage" in out
+    assert "(n=40)" in out
+
+
+def test_seg_residuals_section_with_no_csvs_is_a_notice(tmp_path):
+    gqr = _load()
+    d = tmp_path / "seg_residuals"
+    d.mkdir()
+    out = gqr.seg_residuals_section(str(d))
+    assert "Per-Cell Registration Residuals" in out
+    assert "<svg" not in out
+    assert "No per-cell registration residuals found" in out

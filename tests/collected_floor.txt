@@ -369,4 +369,22 @@
 # test_reconciliation_scatter_on_no_plottable_points_is_a_notice,
 # test_reconciliation_section_renders_a_scatter_not_a_table); the two retained
 # reconciliation tests are unchanged. No other test count moved.
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p09-qc-report, task 10 (per-cell residuals
+# become a histogram -- parse_csv_table_head/SEG_RESIDUALS_MAX_ROWS/itertools
+# deleted, _read_residual_column added): 1346 passed, 13 skipped, 0 failed --
+# 1359 collected, UNCHANGED from the prior entry. tests/test_no_full_mask_unique.py
+# lost its four parse_csv_table_head tests
+# (test_head_parse_matches_a_full_parse_on_headers_and_rows,
+# test_head_parse_counts_every_row_without_building_them,
+# test_head_parse_is_not_off_by_one_at_the_boundary,
+# test_head_parse_handles_a_header_only_file) and
+# tests/test_generate_qc_report.py gained four histogram-shaped ones
+# (test_read_residual_column_streams_values_stage_and_row_count,
+# test_read_residual_column_skips_an_unparseable_value_but_counts_the_row,
+# test_seg_residuals_section_is_a_histogram_not_a_row_dump,
+# test_seg_residuals_section_with_no_csvs_is_a_notice), net 0. No other test
+# count moved.
 1417
