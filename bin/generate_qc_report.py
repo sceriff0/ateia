@@ -406,6 +406,84 @@ def _bin_counts(values, bins):
     return counts, lo, hi
 
 
+def _histogram_svg(values, *, title, x_label, bins=20, rules=()):
+    """One binned distribution as an inline ``<svg>`` bar chart.
+
+    ``rules`` is an iterable of ``(value, label)`` drawn as dashed vertical
+    markers carrying ``class="rule"`` — the p50/p90 lines the error-distribution
+    view adds. A rule whose value is missing or outside the data range is
+    skipped, never crashed on: these plots render whatever a partially-failed run
+    produced.
+
+    Returns the shared ``empty-notice`` paragraph when nothing is finite, so
+    every caller gets the same "no data" affordance without repeating the check.
+    """
+    counts, lo, hi = _bin_counts(values, bins)
+    if not counts:
+        return (
+            f'<p class="empty-notice">{html.escape(str(title))}: no values to plot.</p>'
+        )
+    n = sum(counts)
+    cmax = max(counts) or 1
+    pw = SVG_W - SVG_PAD_L - SVG_PAD_R
+    ph = SVG_H - SVG_PAD_T - SVG_PAD_B
+    bw = pw / float(bins)
+    base = SVG_PAD_T + ph
+    parts = [
+        f'<svg width="{SVG_W}" height="{SVG_H}" role="img" '
+        f'aria-label="{html.escape(str(title))}" style="border:1px solid #eee;">',
+        f'<text x="{SVG_PAD_L}" y="14" font-size="11" fill="#444">'
+        f"{html.escape(str(title))} (n={n})</text>",
+    ]
+    for i, c in enumerate(counts):
+        if not c:
+            continue
+        bh = ph * c / cmax
+        edge_lo = lo + (hi - lo) * i / bins
+        edge_hi = lo + (hi - lo) * (i + 1) / bins
+        parts.append(
+            f'<rect x="{SVG_PAD_L + i * bw:.2f}" y="{base - bh:.2f}" '
+            f'width="{max(bw - 1.0, 0.5):.2f}" height="{bh:.2f}" fill="#4a7fb5">'
+            f"<title>{edge_lo:.3g}–{edge_hi:.3g}: {c}</title></rect>"
+        )
+    for value, label in rules:
+        v = _finite([value])
+        if not v or not (lo <= v[0] <= hi):
+            continue
+        x = SVG_PAD_L + pw * (v[0] - lo) / (hi - lo)
+        parts.append(
+            f'<line class="rule" x1="{x:.2f}" y1="{SVG_PAD_T}" x2="{x:.2f}" '
+            f'y2="{base}" stroke="#c0392b" stroke-width="1" stroke-dasharray="3,2">'
+            f"<title>{html.escape(str(label))}: {v[0]:.3g}</title></line>"
+        )
+    parts.append(
+        f'<line x1="{SVG_PAD_L}" y1="{base}" x2="{SVG_PAD_L + pw}" y2="{base}" '
+        'stroke="#999"/>'
+    )
+    parts.append(
+        f'<line x1="{SVG_PAD_L}" y1="{SVG_PAD_T}" x2="{SVG_PAD_L}" y2="{base}" '
+        'stroke="#999"/>'
+    )
+    parts.append(
+        f'<text x="{SVG_PAD_L}" y="{SVG_H - 18}" font-size="9" fill="#666">'
+        f"{lo:.3g}</text>"
+    )
+    parts.append(
+        f'<text x="{SVG_PAD_L + pw}" y="{SVG_H - 18}" font-size="9" fill="#666" '
+        f'text-anchor="end">{hi:.3g}</text>'
+    )
+    parts.append(
+        f'<text x="{SVG_PAD_L + pw / 2:.0f}" y="{SVG_H - 5}" font-size="10" '
+        f'fill="#444" text-anchor="middle">{html.escape(str(x_label))}</text>'
+    )
+    parts.append(
+        f'<text x="10" y="{SVG_PAD_T + 8}" font-size="9" fill="#666">{cmax}</text>'
+    )
+    parts.append(f'<text x="10" y="{base}" font-size="9" fill="#666">0</text>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
 def img_grid(png_files, wide=False):
     """Render a list of PNG files as a grid of base64-embedded image cards."""
     if not png_files:

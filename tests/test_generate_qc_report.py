@@ -552,3 +552,57 @@ def test_bin_counts_on_nothing_finite_is_empty_not_an_exception():
     assert gqr._bin_counts([], 10) == ([], 0.0, 0.0)
     assert gqr._bin_counts([None, float("nan")], 10) == ([], 0.0, 0.0)
     assert gqr._bin_counts([1.0, 2.0], 0) == ([], 0.0, 0.0)
+
+
+def test_histogram_svg_draws_one_rect_per_non_empty_bin():
+    gqr = _load()
+    values = [0.0, 0.1, 0.2, 5.0]  # bins 0 and 9 of 10 -> two bars, eight empty
+    svg = gqr._histogram_svg(values, title="t", x_label="error", bins=10)
+    counts, _lo, _hi = gqr._bin_counts(values, 10)
+    assert svg.count("<rect") == sum(1 for c in counts if c) == 2
+    assert svg.startswith("<svg") and svg.endswith("</svg>")
+
+
+def test_histogram_svg_labels_the_axes_and_states_n():
+    gqr = _load()
+    svg = gqr._histogram_svg([1.0, 2.0, 3.0], title="rigid TRE (px)", x_label="error")
+    assert "rigid TRE (px)" in svg
+    assert "(n=3)" in svg
+    assert ">error<" in svg  # x-axis label
+    assert ">1<" in svg and ">3<" in svg  # the lo/hi tick labels
+
+
+def test_histogram_svg_draws_one_dashed_rule_per_marker():
+    gqr = _load()
+    svg = gqr._histogram_svg(
+        [1.0, 2.0, 3.0, 4.0],
+        title="t",
+        x_label="error",
+        rules=[(2.0, "p50"), (4.0, "p90")],
+    )
+    assert svg.count('class="rule"') == 2
+    assert "p50" in svg and "p90" in svg
+
+
+def test_histogram_svg_ignores_an_unplottable_rule_rather_than_crashing():
+    gqr = _load()
+    svg = gqr._histogram_svg(
+        [1.0, 2.0], title="t", x_label="error", rules=[(None, "p50"), (2.0, "p90")]
+    )
+    assert svg.count('class="rule"') == 1
+    assert "p90" in svg
+
+
+def test_histogram_svg_on_empty_input_is_a_notice_not_an_svg():
+    gqr = _load()
+    out = gqr._histogram_svg([], title="rigid TRE", x_label="error")
+    assert "<svg" not in out
+    assert 'class="empty-notice"' in out
+    assert "rigid TRE" in out
+
+
+def test_histogram_svg_escapes_its_title_and_axis_label():
+    gqr = _load()
+    svg = gqr._histogram_svg([1.0], title="<b>t</b>", x_label="<i>x</i>")
+    assert "<b>t</b>" not in svg and "&lt;b&gt;t&lt;/b&gt;" in svg
+    assert "<i>x</i>" not in svg and "&lt;i&gt;x&lt;/i&gt;" in svg

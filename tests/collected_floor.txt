@@ -289,4 +289,18 @@
 # test_bin_counts_widens_a_degenerate_range_so_the_single_bar_is_drawable,
 # test_bin_counts_on_nothing_finite_is_empty_not_an_exception); no other test
 # count moved.
-1395
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p09-qc-report, task 5 (_histogram_svg, the
+# bar-chart rendering primitive): 1330 passed, 13 skipped, 0 failed -- 1343
+# collected, up from the prior entry's 1337. The increase is exactly the six
+# new cases in tests/test_generate_qc_report.py
+# (test_histogram_svg_draws_one_rect_per_non_empty_bin,
+# test_histogram_svg_labels_the_axes_and_states_n,
+# test_histogram_svg_draws_one_dashed_rule_per_marker,
+# test_histogram_svg_ignores_an_unplottable_rule_rather_than_crashing,
+# test_histogram_svg_on_empty_input_is_a_notice_not_an_svg,
+# test_histogram_svg_escapes_its_title_and_axis_label); no other test count
+# moved.
+1401
