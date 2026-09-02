@@ -336,6 +336,87 @@ nextflow_process {
         }
     }
 
+    test("Should render the envelope's size-log row and container line - rendered command") {
+
+        // `stub` tag but NO `options "-stub"`: -stub never evaluates a script: block,
+        // so a stub run cannot see either line this case exists to pin. Same shape and
+        // same reason as the two rendered-command cases above.
+        //
+        // The blocking gate runs `--profile test` (no docker), so register.py executes
+        // on the bare host and is not expected to succeed. That is fine -- the
+        // assertions read .command.sh, not the outcome. task.container is non-null even
+        // with no container engine enabled (measured 2026-09-02 on 25.04.7), which is
+        // why the container line is assertable here at all.
+        tag "stub"
+
+        when {
+            process {
+                """
+                input[0] = [
+                    [patient_id: 'P001'],
+                    'P001',
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    [
+                        file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)
+                    ],
+                    [
+                        [patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                        [patient_id: 'P001', is_reference: false, channels: ['DAPI', 'CD3']]
+                    ]
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('P001.REGISTER.size.csv')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered REGISTER .command.sh found under the task work dir" },
+                // The envelope's one-stat form, over REGISTER's two staged globs. Split
+                // into two shorter needles rather than one long literal: the whole line
+                // is quoting-dense (an awk program inside a command substitution) and a
+                // single mistyped character in the test reads as a product failure.
+                { assert rendered.every { it.contains('stat -L --printf="%s\\n" ref/* input_*/*') },
+                    "rendered command: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('awk \'{s+=$1} END {print s+0}\'') },
+                    "rendered command: " + rendered.join(' --- ') },
+                // The row itself, with `inputs/` for a multi-path measurement. The process
+                // name is asserted by SUFFIX, because nf-test wraps a directly-tested
+                // process in its own generated workflow and the fully-qualified name it
+                // renders is not the one a pipeline run produces.
+                { assert rendered.every { it.contains('REGISTER,P001,inputs/,${size_bytes}" > P001.REGISTER.size.csv') },
+                    "rendered command: " + rendered.join(' --- ') },
+                // ...and it is a real name, not the literal STUB the stub blocks used to write.
+                { assert rendered.every { !it.contains('"STUB,') },
+                    "rendered command: " + rendered.join(' --- ') },
+                // Against the pre-refactor module the size-log preamble reads
+                // `total_bytes=$(find -L ref input_* -maxdepth 1 -type f (...) -exec stat -L
+                // --printf="%s\n" {} + ...)` and every assertion above fails. Against a module
+                // that lost the envelope call entirely, `rendered` is empty and the first
+                // assertion fails. The needle is scoped to `-exec stat -L --printf`, the part
+                // unique to that removed find -- REGISTER's script: ALSO runs an unrelated,
+                // still-legitimate `find -L ref input_* -maxdepth 1 ...` to stage input files
+                // for copying (modules/local/register.nf, the "STAGE INPUT FILES" section), so
+                // a bare `find -L ref input_*` needle would false-positive against that line on
+                // every render, migrated or not.
+                { assert rendered.every { !it.contains('-exec stat -L --printf') },
+                    "rendered command still uses the hand-written find: " + rendered.join(' --- ') },
+                // Ruling R6: the image is recorded by the run itself, not only by the trace.
+                { assert rendered.every { it.contains('    container: cdgatenbee/valis-wsi:1.0.0') },
+                    "rendered command: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('valis: $(python -c "import valis;') },
+                    "rendered command: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
     test("Should run VALIS batch registration - real") {
 
         tag "real"

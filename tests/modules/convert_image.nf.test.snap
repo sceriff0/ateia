@@ -2,13 +2,13 @@
     "Should emit versions.yml with tifffile/aicsimageio - stub": {
         "content": [
             [
-                "versions.yml:md5,4829a64cdc046d10c9c22d8ff72aef5a"
+                "versions.yml:md5,6cb3955b628812701e088df552c90c8f"
             ]
         ],
+        "timestamp": "2026-09-02T21:33:38.544175",
         "meta": {
-            "nf-test": "0.9.0",
+            "nf-test": "0.9.5",
             "nextflow": "25.04.7"
-        },
-        "timestamp": "2026-06-13T21:49:40.857158"
+        }
     }
 }

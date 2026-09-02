@@ -914,7 +914,17 @@ nextflow_pipeline {
                     it.name.startsWith('MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS') }.size() == 1 },
                 { assert path("$outputDir/qc").list().any {
                     it.toString().contains('mirage_qc_report_') } },
-                { assert path("$outputDir/size_logs/input_sizes.csv").exists() }
+                { assert path("$outputDir/size_logs/input_sizes.csv").exists() },
+                // The aggregated stub CSV is now a real artifact, not a bare header.
+                // Before this phase: AGGREGATE_SIZE_LOGS' stub block wrote the header
+                // and discarded its inputs, and every row it discarded said `STUB` as
+                // its process name anyway -- so a stub run proved nothing at all about
+                // the size-log path. Both halves are fixed, so assert both.
+                { def sizes = new File("$outputDir/size_logs/input_sizes.csv").readLines()
+                  assert sizes[0] == 'process,sample_id,filename,bytes'
+                  assert sizes.size() > 1
+                  assert sizes.drop(1).every { !it.startsWith('STUB,') }
+                  assert sizes.any { it.contains('CONVERT_IMAGE,') } }
             )
         }
     }
