@@ -474,62 +474,6 @@ _CONSTRUCTS_NF_PATH_RE = re.compile(
 _GLOBS_NF_RE = re.compile(r"r?glob\(\s*[\"'][^\"']*\.(?:nf|groovy)")
 
 
-_PROSE_ONLY_REASON = (
-    "mentions a .nf/.groovy filename only in prose -- the caller it documents, or another "
-    "guard's target pattern, quoted for context -- and never constructs a path to one or "
-    "globs for one; the file it actually .read_text()s is a Python script, not Nextflow "
-    "source"
-)
-
-# A fourth kind of exemption, added 2026-09-02 by the resource-report phase. Discovered by
-# the same over-inclusive heuristic that catches WORKFLOW_YAML_GUARDS's files: it trips on
-# ANY mention of the substring ".nf" anywhere in a test file's own source, including its own
-# docstring naming `main.nf` as the caller it documents. tests/test_resource_report_is_stdlib_only.py
-# never reads Nextflow/Groovy source at all -- its one `.read_text()` call parses
-# `bin/generate_resource_report.py`, a Python script, with `ast`. The mechanically-checked
-# property that proves it is the same one WORKFLOW_YAML_GUARDS already uses below: it never
-# constructs or globs a path to a `.nf`/`.groovy` file.
-PROSE_ONLY_NF_MENTIONS = {
-    "tests/test_resource_report_is_stdlib_only.py": _PROSE_ONLY_REASON,
-}
-
-
-def test_prose_only_nf_mentions_never_construct_a_path():
-    """Each PROSE_ONLY_NF_MENTIONS entry must exist, still be discovered (otherwise the
-    exemption is dead weight and must be removed), and never construct or glob a path to a
-    .nf/.groovy source file -- the same mechanically-checked property
-    test_workflow_yaml_guards_really_only_parse_workflow_yaml uses just below."""
-    discovered = {
-        p.relative_to(REPO_ROOT).as_posix() for p in _discover_nf_source_readers()
-    }
-    problems = []
-    for rel in PROSE_ONLY_NF_MENTIONS:
-        path = REPO_ROOT / rel
-        if not path.is_file():
-            problems.append(
-                f"{rel}: no longer exists -- remove it from PROSE_ONLY_NF_MENTIONS"
-            )
-            continue
-        if rel not in discovered:
-            problems.append(
-                f"{rel}: no longer trips the nf-source-reader heuristic -- remove it from "
-                "PROSE_ONLY_NF_MENTIONS"
-            )
-            continue
-        text = path.read_text()
-        for regex, what in (
-            (_CONSTRUCTS_NF_PATH_RE, "constructs a path to a .nf/.groovy source file"),
-            (_GLOBS_NF_RE, "globs .nf/.groovy source files"),
-        ):
-            m = regex.search(text)
-            if m:
-                problems.append(
-                    f"{rel}: {what} ({m.group(0).strip()!r}) -- it reads Nextflow source "
-                    "after all, so it belongs in the model, not in PROSE_ONLY_NF_MENTIONS"
-                )
-    assert not problems, "\n".join(problems)
-
-
 def test_workflow_yaml_guards_really_only_parse_workflow_yaml():
     """Each WORKFLOW_YAML_GUARDS entry must exist, still be discovered (otherwise
     the exemption is dead weight and must be removed), actually parse YAML, and
@@ -668,12 +612,11 @@ def test_no_guard_parses_nextflow_source_privately():
             and rel not in UNREPOINTED_NF_SOURCE_READERS
             and rel not in FLAT_TREE_SCANNERS
             and rel not in WORKFLOW_YAML_GUARDS
-            and rel not in PROSE_ONLY_NF_MENTIONS
         ):
             offenders.append(
                 f"{rel}: parses Nextflow source without the model, and is on none of the "
-                "UNREPOINTED_NF_SOURCE_READERS debt allowlist, FLAT_TREE_SCANNERS, "
-                "WORKFLOW_YAML_GUARDS or PROSE_ONLY_NF_MENTIONS"
+                "UNREPOINTED_NF_SOURCE_READERS debt allowlist, FLAT_TREE_SCANNERS or "
+                "WORKFLOW_YAML_GUARDS"
             )
         if private.search(text):
             offenders.append(f"{rel}: hand-rolled block-comment regex")
