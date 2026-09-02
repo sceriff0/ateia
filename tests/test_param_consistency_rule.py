@@ -16,6 +16,7 @@ name doesn't match `test_*.py`, and a test placed there would silently never
 run (the exact "guard that cannot fail" defect this remediation phase exists
 to eliminate).
 """
+
 import importlib.util
 from pathlib import Path
 

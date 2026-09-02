@@ -360,7 +360,9 @@ def valis_registration(
                 | set(glob.glob(os.path.join(input_dir, "*.ome.tiff")))
             )
             if not files:
-                raise FileNotFoundError(f"No .ome.tif or .ome.tiff files in {input_dir}")
+                raise FileNotFoundError(
+                    f"No .ome.tif or .ome.tiff files in {input_dir}"
+                )
             ref_image = os.path.basename(files[0])
 
     logger.info(f"Using reference image: {ref_image}")
@@ -772,9 +774,7 @@ def valis_registration(
             )
             logger.error("we cannot warp the slides without JVM for BioFormats I/O.")
             logger.error("\nSuggested workarounds:")
-            logger.error(
-                "  1. Try --micro-reg 0 (micro passes may be killing JVM)"
-            )
+            logger.error("  1. Try --micro-reg 0 (micro passes may be killing JVM)")
             logger.error("  2. Reduce --max-image-dim to lower memory usage")
             logger.error(
                 "  3. Check logs above for specific errors that triggered JVM kill"

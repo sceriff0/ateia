@@ -435,7 +435,9 @@ def test_reconcile_rows_from_stare_tre_json_are_nonempty(tmp_path):
     d.mkdir()
     _write_tre(d, "mov", coarse=2.0, rigid_p50=3.0, final_p50=0.5)
     seg_qc = _seg_qc_json(tmp_path)  # slide "mov", matches _write_tre's moving field
-    rows = {(r["slide"], r["stage"]): r for r in gqr.reconcile_rows(str(d), str(seg_qc))}
+    rows = {
+        (r["slide"], r["stage"]): r for r in gqr.reconcile_rows(str(d), str(seg_qc))
+    }
     assert rows  # non-empty: the JSON-only input still reconciles
     assert rows[("mov", "rigid")]["feature_tre_um"] == 2.0  # coarse_tre_px
     # No premicro summary for STARE -> non_rigid falls back to final's non_rigid_D (0.5),
@@ -444,7 +446,9 @@ def test_reconcile_rows_from_stare_tre_json_are_nonempty(tmp_path):
     assert rows[("mov", "micro")]["feature_tre_um"] == 0.5
 
 
-def test_reconciliation_section_neither_format_is_method_neutral_and_does_not_raise(tmp_path):
+def test_reconciliation_section_neither_format_is_method_neutral_and_does_not_raise(
+    tmp_path,
+):
     gqr = _load()
     empty_tre = tmp_path / "registration_tre"
     empty_tre.mkdir()
@@ -452,7 +456,9 @@ def test_reconciliation_section_neither_format_is_method_neutral_and_does_not_ra
     empty_seg_qc.mkdir()
     html = gqr.reconciliation_section(str(empty_tre), str(empty_seg_qc))
     assert "Reconciliation" in html
-    assert "VALIS" not in html  # a tiled-only run must not see a VALIS-flavoured message
+    assert (
+        "VALIS" not in html
+    )  # a tiled-only run must not see a VALIS-flavoured message
     assert "found to reconcile" in html
 
 
@@ -484,7 +490,9 @@ def test_reconcile_rows_merges_valis_csv_and_stare_json_rather_than_shadowing(tm
         )
     )
 
-    rows = {(r["slide"], r["stage"]): r for r in gqr.reconcile_rows(str(d), str(seg_qc))}
+    rows = {
+        (r["slide"], r["stage"]): r for r in gqr.reconcile_rows(str(d), str(seg_qc))
+    }
     # Both slides are present: the CSV reader did not shadow the JSON reader, or vice versa.
     assert rows[("mov_valis", "rigid")]["feature_tre_um"] == 2.0
     assert rows[("mov_stare", "rigid")]["feature_tre_um"] == 1.5

@@ -91,14 +91,19 @@ def find_module_label_sites() -> list[tuple[Path, int, str, list[str]]]:
     for path in sorted(MODULES_DIR.glob("*.nf")):
         for line_no, line in enumerate(path.read_text().splitlines(), start=1):
             if LABEL_LINE_RE.match(line):
-                sites.append((path, line_no, line.strip(), extract_labels_from_line(line)))
+                sites.append(
+                    (path, line_no, line.strip(), extract_labels_from_line(line))
+                )
     return sites
 
 
 def find_defined_labels() -> set[str]:
     """Return the set of labels with a `withLabel:` selector in conf/modules.config."""
     text = MODULES_CONFIG.read_text()
-    return {m.group(1) if m.group(1) is not None else m.group(2) for m in WITH_LABEL_RE.finditer(text)}
+    return {
+        m.group(1) if m.group(1) is not None else m.group(2)
+        for m in WITH_LABEL_RE.finditer(text)
+    }
 
 
 def test_extract_labels_handles_ternary_expression():
@@ -110,7 +115,10 @@ def test_extract_labels_handles_ternary_expression():
     caused the export_spatialdata.nf defect, defeating the guard below.
     """
     ternary_line = "    label params.spatialdata_include_image ? 'process_high_memory' : 'process_medium'"
-    assert extract_labels_from_line(ternary_line) == ["process_high_memory", "process_medium"]
+    assert extract_labels_from_line(ternary_line) == [
+        "process_high_memory",
+        "process_medium",
+    ]
 
     literal_line = "    label 'process_high'"
     assert extract_labels_from_line(literal_line) == ["process_high"]
@@ -127,9 +135,15 @@ def test_extract_labels_ignores_commented_out_labels():
     went green while the process asked for 8 cpu / 300 GB against a doc
     promising 2 cpu / 32 GB.
     """
-    assert extract_labels_from_line("    label 'process_high'  // was 'process_low'") == ["process_high"]
-    assert extract_labels_from_line("    label /* 'process_low' */ 'process_high'") == ["process_high"]
-    assert extract_labels_from_line("    label 'process_medium' // bumped, see #123") == ["process_medium"]
+    assert extract_labels_from_line(
+        "    label 'process_high'  // was 'process_low'"
+    ) == ["process_high"]
+    assert extract_labels_from_line("    label /* 'process_low' */ 'process_high'") == [
+        "process_high"
+    ]
+    assert extract_labels_from_line(
+        "    label 'process_medium' // bumped, see #123"
+    ) == ["process_medium"]
 
 
 def test_every_module_label_resolves_to_a_conf_modules_config_selector():
@@ -144,8 +158,12 @@ def test_every_module_label_resolves_to_a_conf_modules_config_selector():
     defined = find_defined_labels()
     sites = find_module_label_sites()
 
-    assert sites, "No `label` lines found under modules/local/*.nf -- scan pattern may be stale."
-    assert defined, "No `withLabel:` selectors found in conf/modules.config -- scan pattern may be stale."
+    assert sites, (
+        "No `label` lines found under modules/local/*.nf -- scan pattern may be stale."
+    )
+    assert defined, (
+        "No `withLabel:` selectors found in conf/modules.config -- scan pattern may be stale."
+    )
 
     offending = []
     for path, line_no, line_text, labels in sites:
@@ -278,7 +296,9 @@ def test_exactly_one_resource_owner_per_process():
     labelled = find_labelled_processes()
     withname_fields = find_withname_resource_fields()
 
-    assert processes, "No `process NAME {` declarations found under modules/local/*.nf -- scan pattern may be stale."
+    assert processes, (
+        "No `process NAME {` declarations found under modules/local/*.nf -- scan pattern may be stale."
+    )
 
     both_owners = []
     no_owner = []
@@ -499,9 +519,8 @@ def derived_memory_sources(expr: str) -> set[str]:
     param-derived at all. A non-empty result grants the exemption: the numeric
     comparison is skipped and the doc cell is required to name every source
     instead."""
-    return {
-        m.group(1) or m.group(2) for m in DERIVED_HELPER_RE.finditer(expr)
-    }
+    return {m.group(1) or m.group(2) for m in DERIVED_HELPER_RE.finditer(expr)}
+
 
 # One rung of a size-tier ladder, CONFIG side: `file_gb < 10 ? 32.GB`. Threshold
 # and magnitude are captured TOGETHER, in one match, so the pair cannot come
@@ -665,7 +684,11 @@ def _eval_arithmetic(expr: str) -> float | None:
             return node.value
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
             operand = walk(node.operand)
-            return None if operand is None else (operand if isinstance(node.op, ast.UAdd) else -operand)
+            return (
+                None
+                if operand is None
+                else (operand if isinstance(node.op, ast.UAdd) else -operand)
+            )
         if isinstance(node, ast.BinOp):
             left, right = walk(node.left), walk(node.right)
             if left is None or right is None:
@@ -746,7 +769,9 @@ def _config_ladder(expr: str):
     `N.GB` literals outside the ladder -- CONVERT_IMAGE's `+ 24.GB *
     task.attempt` per-attempt base is the only one today.
     """
-    rungs = [(float(m.group(1)), float(m.group(2))) for m in CONFIG_TIER_RE.finditer(expr)]
+    rungs = [
+        (float(m.group(1)), float(m.group(2))) for m in CONFIG_TIER_RE.finditer(expr)
+    ]
     if not rungs:
         return None
     last = list(CONFIG_TIER_RE.finditer(expr))[-1]
@@ -776,7 +801,11 @@ def _config_size_linear(expr: str):
     if not match:
         return None
     coefficient, addend = float(match.group(1)), float(match.group(2))
-    return coefficient, addend, _gb_literal_counts(expr) - Counter([coefficient, addend])
+    return (
+        coefficient,
+        addend,
+        _gb_literal_counts(expr) - Counter([coefficient, addend]),
+    )
 
 
 def _doc_size_linear(cell: str):
@@ -845,12 +874,13 @@ def memory_cell_mismatch(expr: str, cell: str) -> str | None:
                 for th, gb in doc_rungs
                 if (th, gb) not in config_rungs
             ]
-            return (
-                f"tiers as {doc_rungs} but `{expr}` tiers as {config_rungs}"
-                + (f" -- mispaired: {mispaired}" if mispaired else "")
+            return f"tiers as {doc_rungs} but `{expr}` tiers as {config_rungs}" + (
+                f" -- mispaired: {mispaired}" if mispaired else ""
             )
         if doc_else != config_else:
-            return f"gives the else branch {doc_else} GB but `{expr}` gives {config_else}"
+            return (
+                f"gives the else branch {doc_else} GB but `{expr}` gives {config_else}"
+            )
         if doc_extra != config_extra:
             return (
                 f"states {sorted(doc_extra.elements())} GB outside the tier ladder "
@@ -910,7 +940,8 @@ def parse_doc_process_table() -> dict[str, dict[str, str]]:
         if set(stripped) <= set("|- "):  # the `|---|---|` separator row
             continue
         normalised = [
-            (c.replace("`", "").replace("*", "").split() or [""])[0].lower() for c in cells
+            (c.replace("`", "").replace("*", "").split() or [""])[0].lower()
+            for c in cells
         ]
         if normalised and normalised[0] == "process":
             headers = normalised
@@ -968,7 +999,9 @@ def test_strip_comments_removes_numbers_a_maintainer_would_annotate_with():
     annotated = "32.GB * task.attempt   // was 64.GB before the bounding-box rewrite"
     assert _strip_comments(annotated).strip() == "32.GB * task.attempt"
     assert 64.0 not in _numbers(_strip_comments(annotated))
-    assert _strip_comments("1.GB /* 4.GB was 120x the observed peak */ * task.attempt").split() == [
+    assert _strip_comments(
+        "1.GB /* 4.GB was 120x the observed peak */ * task.attempt"
+    ).split() == [
         "1.GB",
         "*",
         "task.attempt",
@@ -985,8 +1018,12 @@ def test_doc_table_parser_finds_the_per_process_rows_only():
     and one that mis-indexed columns would compare cpus against memory.
     """
     rows = parse_doc_process_table()
-    assert "SEGMENT" in rows, "per-process tables not parsed -- scan pattern may be stale"
-    assert "process_single" not in rows, "the `Label` table must not be read as processes"
+    assert "SEGMENT" in rows, (
+        "per-process tables not parsed -- scan pattern may be stale"
+    )
+    assert "process_single" not in rows, (
+        "the `Label` table must not be read as processes"
+    )
     assert rows["SEGMENT"]["cpus"] == "`8`"
     assert rows["SEGMENT"]["time"] == "`4.h × attempt`"
     assert rows["SEGMENT"]["owner"] == "`withName`"
@@ -1005,15 +1042,35 @@ def test_expr_values_per_attempt_handles_the_shapes_in_modules_config():
     a partial number that would then be compared as if it were the whole rule.
     """
     assert expr_values_per_attempt("12.GB * task.attempt") == [12, 24, 36, 48]
-    assert expr_values_per_attempt("100.GB + 100.GB * task.attempt") == [200, 300, 400, 500]
-    assert expr_values_per_attempt("32.GB * (2 ** (task.attempt - 1))") == [32, 64, 128, 256]
+    assert expr_values_per_attempt("100.GB + 100.GB * task.attempt") == [
+        200,
+        300,
+        400,
+        500,
+    ]
+    assert expr_values_per_attempt("32.GB * (2 ** (task.attempt - 1))") == [
+        32,
+        64,
+        128,
+        256,
+    ]
     assert expr_values_per_attempt("8") == [8, 8, 8, 8]
-    assert expr_values_per_attempt("(Math.ceil(tiledRegTileGb(params)) as int).GB * task.attempt") is None
-    assert expr_values_per_attempt("(file_gb < 10 ? 32.GB : 64.GB) * task.attempt") is None
-    assert expr_values_per_attempt(
-        "def win = ((params.reg_tiled_out_tile as int) as long)\n"
-        "(Math.ceil(Math.max(4d, (0.6d + 0.17d * mpx) * 2d)) as int).GB * task.attempt"
-    ) is None
+    assert (
+        expr_values_per_attempt(
+            "(Math.ceil(tiledRegTileGb(params)) as int).GB * task.attempt"
+        )
+        is None
+    )
+    assert (
+        expr_values_per_attempt("(file_gb < 10 ? 32.GB : 64.GB) * task.attempt") is None
+    )
+    assert (
+        expr_values_per_attempt(
+            "def win = ((params.reg_tiled_out_tile as int) as long)\n"
+            "(Math.ceil(Math.max(4d, (0.6d + 0.17d * mpx) * 2d)) as int).GB * task.attempt"
+        )
+        is None
+    )
 
 
 def test_derived_memory_detects_both_forms():
@@ -1134,14 +1191,21 @@ def test_memory_cell_mismatch_compares_pairs_not_pooled_numbers():
     # Legitimate shapes a pairing comparison could wrongly reject:
     # two tiers sharing one magnitude, and two tiers sharing one threshold.
     same_gb = "(file_gb < 10 ? 32.GB : file_gb < 30 ? 32.GB : 128.GB) * task.attempt"
-    assert memory_cell_mismatch(
-        same_gb, "tier: `f<10` \u2192 32, `f<30` \u2192 32, else 128 GB, `\u00d7 attempt`"
-    ) is None
+    assert (
+        memory_cell_mismatch(
+            same_gb,
+            "tier: `f<10` \u2192 32, `f<30` \u2192 32, else 128 GB, `\u00d7 attempt`",
+        )
+        is None
+    )
     same_threshold = "(a < 10 ? 32.GB : b < 10 ? 64.GB : 128.GB) * task.attempt"
-    assert memory_cell_mismatch(
-        same_threshold,
-        "tier: `f<10` \u2192 32, `f<10` \u2192 64, else 128 GB, `\u00d7 attempt`",
-    ) is None
+    assert (
+        memory_cell_mismatch(
+            same_threshold,
+            "tier: `f<10` \u2192 32, `f<10` \u2192 64, else 128 GB, `\u00d7 attempt`",
+        )
+        is None
+    )
 
 
 def test_every_documented_process_matches_conf_modules_config():
@@ -1156,7 +1220,9 @@ def test_every_documented_process_matches_conf_modules_config():
     """
     doc_rows = parse_doc_process_table()
     processes = find_module_processes()
-    assert doc_rows, "No per-process rows parsed from docs/resources.md -- pattern may be stale."
+    assert doc_rows, (
+        "No per-process rows parsed from docs/resources.md -- pattern may be stale."
+    )
 
     problems: list[str] = []
     for name in sorted(doc_rows):
@@ -1180,7 +1246,10 @@ def test_every_documented_process_matches_conf_modules_config():
         # signature defect -- a guard that passes because it stopped looking.
         for field, documented in (
             ("cpus", _numbers(row.get("cpus", ""))),
-            ("time", {float(m.group(1)) for m in HOURS_RE.finditer(row.get("time", ""))}),
+            (
+                "time",
+                {float(m.group(1)) for m in HOURS_RE.finditer(row.get("time", ""))},
+            ),
         ):
             exprs = effective_exprs(name, field)
             if not exprs:

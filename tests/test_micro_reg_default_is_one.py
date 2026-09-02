@@ -200,7 +200,9 @@ def _parse_top_level_params_block(config_text: str) -> dict[str, str]:
 
 def test_nextflow_config_default_is_one():
     declared = _parse_top_level_params_block(_read(NEXTFLOW_CONFIG))
-    assert "reg_micro_reg" in declared, "reg_micro_reg not declared in nextflow.config's params {}"
+    assert "reg_micro_reg" in declared, (
+        "reg_micro_reg not declared in nextflow.config's params {}"
+    )
     assert declared["reg_micro_reg"] == "1", (
         f"nextflow.config's reg_micro_reg default is {declared['reg_micro_reg']!r}, expected '1'"
     )
@@ -291,7 +293,9 @@ def test_registration_schematic_value_is_one():
     match = re.search(
         r'<td class="k">reg_micro_reg</td><td class="val">(\S+?)</td>', text
     )
-    assert match, "reg_micro_reg row not found in docs/figures/registration-schematic.html"
+    assert match, (
+        "reg_micro_reg row not found in docs/figures/registration-schematic.html"
+    )
     assert match.group(1) == "1", (
         f"registration-schematic.html's reg_micro_reg value is {match.group(1)!r}, expected '1'"
     )
@@ -299,7 +303,9 @@ def test_registration_schematic_value_is_one():
 
 def test_full_pipeline_params_default_is_one():
     params = json.loads(_read(FULL_PIPELINE_PARAMS))
-    assert "reg_micro_reg" in params, "reg_micro_reg not present in params/full_pipeline.json"
+    assert "reg_micro_reg" in params, (
+        "reg_micro_reg not present in params/full_pipeline.json"
+    )
     assert params["reg_micro_reg"] == 1, (
         f"params/full_pipeline.json's reg_micro_reg is {params['reg_micro_reg']!r}, expected 1"
     )
@@ -358,9 +364,7 @@ def test_register_py_argparse_default_is_one():
     the flag silently gets whatever this says, independent of the pipeline
     (which always passes --micro-reg explicitly: register.nf)."""
     text = _read(REGISTER_PY)
-    match = re.search(
-        r'"--micro-reg",\s*\n\s*type=int,\s*\n\s*default=(\S+?),', text
-    )
+    match = re.search(r'"--micro-reg",\s*\n\s*type=int,\s*\n\s*default=(\S+?),', text)
     assert match, "--micro-reg argparse block not found in bin/register.py"
     assert match.group(1) == "1", (
         f"bin/register.py's --micro-reg argparse default is {match.group(1)!r}, expected '1'"
@@ -396,7 +400,9 @@ def test_conf_test_config_pin_is_untouched():
     not one of the nine homes -- Phase 0c pinned it to 0 because micro-
     registration OOMed the JVM on a 15.6 GiB CI runner. It must stay 0."""
     declared = _parse_top_level_params_block(_read(TEST_CONFIG))
-    assert "reg_micro_reg" in declared, "reg_micro_reg not declared in conf/test.config's params {}"
+    assert "reg_micro_reg" in declared, (
+        "reg_micro_reg not declared in conf/test.config's params {}"
+    )
     assert declared["reg_micro_reg"] == "0", (
         f"conf/test.config's reg_micro_reg pin is {declared['reg_micro_reg']!r}, expected '0' "
         "(this file is deliberately NOT one of the nine homes -- see module docstring)"

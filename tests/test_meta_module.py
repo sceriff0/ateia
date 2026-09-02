@@ -15,6 +15,7 @@ the two conversions were still outstanding); Task 4.3 removed the marker as
 its completion signal, once the guard genuinely passed rather than being
 deleted.
 """
+
 import re
 
 from tests.nfmodel import REPO_ROOT, nf_files, strip_comments_and_strings
@@ -54,14 +55,20 @@ def test_only_meta_groovy_constructs_a_meta_map():
         for m in _META_LITERAL.finditer(clean):
             line = clean.count("\n", 0, m.start()) + 1
             offenders.append(f"{rel}:{line}")
-    assert not offenders, (
-        "meta maps built outside lib/Meta.groovy:\n  " + "\n  ".join(offenders)
+    assert not offenders, "meta maps built outside lib/Meta.groovy:\n  " + "\n  ".join(
+        offenders
     )
 
 
 def test_meta_declares_its_required_keys():
     src = (REPO_ROOT / "lib" / "Meta.groovy").read_text()
     assert "REQUIRED_KEYS" in src
-    for key in ("patient_id", "id", "is_reference", "channels",
-                "keep_channels", "channels_count"):
+    for key in (
+        "patient_id",
+        "id",
+        "is_reference",
+        "channels",
+        "keep_channels",
+        "channels_count",
+    ):
         assert f"'{key}'" in src, f"{key} is not declared in REQUIRED_KEYS"

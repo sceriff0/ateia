@@ -77,7 +77,7 @@ def _median_per_label_from_sorted(vals_sorted, labs_sorted, valid_labels):
     s = start[present]
     c = count[present]
     lo = s + (c - 1) // 2
-    hi = s + c // 2                      # == lo when c is odd
+    hi = s + c // 2  # == lo when c is odd
     out[present] = 0.5 * (vals_sorted[lo] + vals_sorted[hi])
     return out
 
@@ -252,7 +252,9 @@ def compute_compartment_intensities(
         labs_sorted = flat_cell[order]
         vals_sorted = flat_val[order]
         medians = {
-            "Cell": _median_per_label_from_sorted(vals_sorted, labs_sorted, valid_labels)
+            "Cell": _median_per_label_from_sorted(
+                vals_sorted, labs_sorted, valid_labels
+            )
         }
         if has_nuclei:
             nuc_fg_sorted = nuc_fg[order]
@@ -281,9 +283,9 @@ def compute_compartment_intensities(
 
     if expanded:
         for comp in compartments:
-            out[f"{channel_name}: {comp}: Mean"] = _safe_mean(
-                sums[comp], counts[comp]
-            )[valid_labels]
+            out[f"{channel_name}: {comp}: Mean"] = _safe_mean(sums[comp], counts[comp])[
+                valid_labels
+            ]
         for comp in compartments:
             out[f"{channel_name}: {comp}: Sum"] = sums[comp][valid_labels]
 

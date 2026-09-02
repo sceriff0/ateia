@@ -49,17 +49,29 @@ REPO = Path(__file__).resolve().parent.parent
 # (see tests/test_compartment_mode_routing.py's re-pinning history), while a count still fails
 # the moment a writer is added or removed.
 PIXEL_WRITERS = {
-    "bin/apply_basic_profiles.py": (1, "the illumination-corrected multi-channel slide"),
+    "bin/apply_basic_profiles.py": (
+        1,
+        "the illumination-corrected multi-channel slide",
+    ),
     "bin/convert_image.py": (1, "the converted multi-channel slide"),
-    "bin/extract_mask_series.py": (1, "cell/nuclei masks recovered from a prior pyramid"),
+    "bin/extract_mask_series.py": (
+        1,
+        "cell/nuclei masks recovered from a prior pyramid",
+    ),
     "bin/merge_channels_pyramid.py": (1, "the published QuPath pyramid"),
     "bin/segment.py": (2, "StarDist cell + nuclei masks"),
     "bin/segment_cellsam.py": (2, "CellSAM cell + nuclei masks"),
     "bin/segment_instantseg.py": (2, "InstanSeg cell + nuclei masks"),
     "bin/split_multichannel.py": (1, "one single-channel plane per marker"),
-    "bin/tile_for_basic.py": (1, "the multi-site CZYX pseudo-FOV stack BASICPY fits on"),
+    "bin/tile_for_basic.py": (
+        1,
+        "the multi-site CZYX pseudo-FOV stack BASICPY fits on",
+    ),
     "bin/tiled_stitch.py": (1, "the STARE registered slide"),
-    "bin/utils/image_utils.py": (1, "generic helper; the caller supplies the decisions"),
+    "bin/utils/image_utils.py": (
+        1,
+        "generic helper; the caller supplies the decisions",
+    ),
     "bin/utils/qc.py": (2, "QC raster output, not a pipeline artifact"),
 }
 
@@ -132,7 +144,7 @@ def test_every_multi_channel_writer_sets_photometric_minisblack(rel):
     text = (REPO / rel).read_text()
 
     assert 'photometric="minisblack"' in text, (
-        f"{rel} writes a multi-channel stack without photometric=\"minisblack\". tifffile will "
+        f'{rel} writes a multi-channel stack without photometric="minisblack". tifffile will '
         "store it as one page with C samples and pages[i] will raise IndexError."
     )
 
@@ -154,14 +166,16 @@ def test_minisblack_really_is_what_makes_pages_addressable(tmp_path):
     tifffile.imwrite(str(without_flag), data)
 
     with tifffile.TiffFile(str(with_flag)) as tif:
-        assert len(tif.series[0].pages) == 3, "one page per channel is the property we rely on"
+        assert len(tif.series[0].pages) == 3, (
+            "one page per channel is the property we rely on"
+        )
         assert tif.series[0].pages[2].asarray().shape == (32, 32)
 
     with tifffile.TiffFile(str(without_flag)) as tif:
         n_pages = len(tif.series[0].pages)
 
     assert n_pages != 3, (
-        "writing without photometric=\"minisblack\" produced one page per channel anyway on this "
+        'writing without photometric="minisblack" produced one page per channel anyway on this '
         "tifffile version, so this test no longer demonstrates why the rule exists. Re-check "
         "against the pinned container version before relaxing anything."
     )
@@ -255,27 +269,39 @@ def _tiled_writes_with_a_generator():
             first = node.args[0]
             if isinstance(first, ast.Call):
                 callee = first.func
-                out.append((rel, node.lineno,
-                            callee.attr if isinstance(callee, ast.Attribute)
-                            else getattr(callee, "id", "<expr>")))
+                out.append(
+                    (
+                        rel,
+                        node.lineno,
+                        callee.attr
+                        if isinstance(callee, ast.Attribute)
+                        else getattr(callee, "id", "<expr>"),
+                    )
+                )
     return out
 
 
 def test_every_generator_fed_to_a_tiled_write_yields_tiles():
     """A tiled write fed a PLANE generator fails only on an image bigger than one
     tile -- i.e. never in this suite, and always in production."""
-    undeclared = [(f, ln, c) for f, ln, c in _tiled_writes_with_a_generator()
-                  if c not in TILE_FED_GENERATORS]
+    undeclared = [
+        (f, ln, c)
+        for f, ln, c in _tiled_writes_with_a_generator()
+        if c not in TILE_FED_GENERATORS
+    ]
     assert not undeclared, (
         "tiled write fed an undeclared generator: "
         + ", ".join(f"{f}:{ln} -> {c}()" for f, ln, c in undeclared)
         + ". tifffile requires TILES here, not planes; a plane generator raises "
-          "'tile is too large' on any image larger than one tile. Declare it in "
-          "TILE_FED_GENERATORS once you have checked what it yields.")
+        "'tile is too large' on any image larger than one tile. Declare it in "
+        "TILE_FED_GENERATORS once you have checked what it yields."
+    )
 
 
 def test_the_declaration_is_not_carrying_dead_entries():
     """A name here that no tiled write uses is an excuse for a call that is gone."""
     live = {c for _, _, c in _tiled_writes_with_a_generator()}
     stale = sorted(set(TILE_FED_GENERATORS) - live)
-    assert not stale, f"TILE_FED_GENERATORS names generators no tiled write feeds: {stale}"
+    assert not stale, (
+        f"TILE_FED_GENERATORS names generators no tiled write feeds: {stale}"
+    )

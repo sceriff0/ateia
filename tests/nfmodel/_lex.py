@@ -7,9 +7,15 @@ specific constructs -- a `stageAs: 'ref/*'` glob that a naive `/\\*.*?\\*/`
 regex reads as an open block comment, a `{` inside a comment mis-balancing a
 naive brace count -- that defeated the private regex parses this replaces.
 """
+
 import re
 
-__all__ = ["block_extent", "skip_non_code", "strip_comments", "strip_comments_and_strings"]
+__all__ = [
+    "block_extent",
+    "skip_non_code",
+    "strip_comments",
+    "strip_comments_and_strings",
+]
 
 
 def skip_non_code(text: str, i: int) -> int:

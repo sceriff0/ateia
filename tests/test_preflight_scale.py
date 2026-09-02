@@ -76,8 +76,13 @@ def test_auto_with_metadata_resolves_and_reports_source_metadata(tmp_path):
 
 # ── auto + no metadata: fail naming EVERY offender ──────────────────────────────
 def test_auto_with_no_metadata_fails_and_names_every_offender(tmp_path):
-    a, b = _write_no_scale(tmp_path, "a.ome.tiff"), _write_no_scale(tmp_path, "b.ome.tiff")
-    rc, out, output = _run(["--images", str(a), str(b), "--pixel-size", "auto"], tmp_path)
+    a, b = (
+        _write_no_scale(tmp_path, "a.ome.tiff"),
+        _write_no_scale(tmp_path, "b.ome.tiff"),
+    )
+    rc, out, output = _run(
+        ["--images", str(a), str(b), "--pixel-size", "auto"], tmp_path
+    )
     assert rc == 1
     assert "a.ome.tiff" in out and "b.ome.tiff" in out, (
         "the failure must name EVERY unresolvable slide, not just the first"
@@ -95,7 +100,9 @@ def test_auto_mixed_metadata_still_names_only_the_offender(tmp_path):
         ["--images", str(good), str(bad), "--pixel-size", "auto"], tmp_path
     )
     assert rc == 1
-    error_line = next(line for line in out.splitlines() if "carry no usable OME" in line)
+    error_line = next(
+        line for line in out.splitlines() if "carry no usable OME" in line
+    )
     assert "bad.ome.tiff" in error_line
     assert "good.ome.tiff" not in error_line
 
@@ -114,8 +121,13 @@ def test_number_disagreeing_with_metadata_warns_but_succeeds(tmp_path):
 
 # ── number + no metadata: warn "unconfirmed", exit 0 ────────────────────────────
 def test_number_with_no_metadata_warns_unconfirmed_but_succeeds(tmp_path):
-    a, b = _write_no_scale(tmp_path, "a.ome.tiff"), _write_no_scale(tmp_path, "b.ome.tiff")
-    rc, out, output = _run(["--images", str(a), str(b), "--pixel-size", "0.325"], tmp_path)
+    a, b = (
+        _write_no_scale(tmp_path, "a.ome.tiff"),
+        _write_no_scale(tmp_path, "b.ome.tiff"),
+    )
+    rc, out, output = _run(
+        ["--images", str(a), str(b), "--pixel-size", "0.325"], tmp_path
+    )
     assert rc == 0, out
     assert "could not be verified" in out
     assert "a.ome.tiff" in out and "b.ome.tiff" in out
@@ -139,7 +151,9 @@ def test_number_agreeing_with_metadata_is_silent(tmp_path):
 def test_auto_heterogeneous_scales_warns_but_succeeds(tmp_path):
     a = _write_with_scale(tmp_path, "a.ome.tiff", 0.325)
     b = _write_with_scale(tmp_path, "b.ome.tiff", 0.65)
-    rc, out, output = _run(["--images", str(a), str(b), "--pixel-size", "auto"], tmp_path)
+    rc, out, output = _run(
+        ["--images", str(a), str(b), "--pixel-size", "auto"], tmp_path
+    )
     assert rc == 0, out
     assert "SCALE HETEROGENEITY" in out
     assert "0.325" in out and "0.65" in out
@@ -152,13 +166,17 @@ def test_auto_heterogeneous_scales_warns_but_succeeds(tmp_path):
 def test_auto_matching_scales_does_not_warn(tmp_path):
     a = _write_with_scale(tmp_path, "a.ome.tiff", 0.325)
     b = _write_with_scale(tmp_path, "b.ome.tiff", 0.325)
-    rc, out, _output = _run(["--images", str(a), str(b), "--pixel-size", "auto"], tmp_path)
+    rc, out, _output = _run(
+        ["--images", str(a), str(b), "--pixel-size", "auto"], tmp_path
+    )
     assert rc == 0, out
     assert "SCALE HETEROGENEITY" not in out
 
 
 def test_invalid_pixel_size_is_rejected(tmp_path):
     a = _write_no_scale(tmp_path, "a.ome.tiff")
-    rc, out, output = _run(["--images", str(a), "--pixel-size", "not-a-number"], tmp_path)
+    rc, out, output = _run(
+        ["--images", str(a), "--pixel-size", "not-a-number"], tmp_path
+    )
     assert rc == 1
     assert not output.exists()

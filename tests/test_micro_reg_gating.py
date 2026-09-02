@@ -10,6 +10,7 @@ valis is not installed in CI, so the valis modules ``bin/utils/valis_config.py``
 in ``sys.modules`` before importing it (same approach as ``test_jvm_cache_guard.py``). The
 register.py level-2 gate is asserted at the source level (no valis import needed).
 """
+
 import sys
 import types
 from pathlib import Path
@@ -79,7 +80,9 @@ def test_register_py_gates_register_micro_at_level_2():
     checkpoint flag must stay gated at micro_reg >= 2. Fails loudly if the gate is removed."""
     src = REGISTER_PY.read_text()
     assert "register_micro" in src
-    assert "micro_reg < 2" in src, "register_micro() must stay gated (skipped at micro_reg < 2)"
+    assert "micro_reg < 2" in src, (
+        "register_micro() must stay gated (skipped at micro_reg < 2)"
+    )
     assert "micro_registration=(micro_reg >= 2)" in src, (
         "stage checkpoint must record the honest micro flag (micro_reg >= 2)"
     )

@@ -105,7 +105,9 @@ def scanned_files() -> list[Path]:
 
 
 def container_dirs() -> list[str]:
-    dirs = sorted(p.name for p in CONTAINERS_DIR.iterdir() if (p / "Dockerfile").is_file())
+    dirs = sorted(
+        p.name for p in CONTAINERS_DIR.iterdir() if (p / "Dockerfile").is_file()
+    )
     assert dirs, f"no Dockerfiles found under {CONTAINERS_DIR.relative_to(ROOT)}"
     return dirs
 
@@ -128,7 +130,9 @@ _PIP_INSTALL_RE = re.compile(
 # `pip install "scipy >= 0, < 99"` at the ` < `, hiding a real quoted pin -- `<` is a
 # redirect only when the shell sees it UNQUOTED, which is exactly the distinction shlex
 # makes and a regex over the raw text cannot.
-_SHELL_OPERATORS = frozenset({"&&", "||", ";", "|", "&", ">", ">>", "<", "<<", "2>", "2>&1"})
+_SHELL_OPERATORS = frozenset(
+    {"&&", "||", ";", "|", "&", ">", ">>", "<", "<<", "2>", "2>&1"}
+)
 
 # Bootstrap tooling pip installs of itself. These may appear without `-r`/`-c` because there
 # is nothing to pin them to and no image ships a version of them that CI must match. They
@@ -214,7 +218,7 @@ def option_targets(args: str, opts) -> list[str]:
             continue
         for o in opts:
             if tok.startswith(o + "="):
-                out.append(tok[len(o) + 1:])
+                out.append(tok[len(o) + 1 :])
     return out
 
 
@@ -238,8 +242,10 @@ def goes_through_a_requirements_file(args: str) -> bool:
         ("pip3 install 'dask[array]==2026.7.1'", ["dask[array]==2026.7.1"]),
         ("python -m pip install anndata<0.12", ["anndata<0.12"]),
         ("uv pip install --system tifffile==2025.5.10", ["tifffile==2025.5.10"]),
-        ("pip install torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu",
-         ["torch==2.3.1"]),
+        (
+            "pip install torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu",
+            ["torch==2.3.1"],
+        ),
         # A QUOTED requirement containing spaces. Legal pip, legal PEP 508, and invisible
         # to `str.split` -- which returned ["'numpy", "==", "1.0.0'"], none of which parse
         # as a requirement, so it was reported by NEITHER half of assertion 1. This case is
@@ -424,7 +430,9 @@ def test_no_workflow_pins_a_package_version():
     for path in scanned_files():
         for args in pip_invocations(path.read_text()):
             for tok in pinned_tokens(args):
-                offenders.append(f"{path.relative_to(ROOT).as_posix()}: `pip install ... {tok}`")
+                offenders.append(
+                    f"{path.relative_to(ROOT).as_posix()}: `pip install ... {tok}`"
+                )
     assert not offenders, (
         "workflow or composite-action YAML names a package version. Every version string belongs in "
         "requirements/ -- constraints.txt for anything a container image also installs, "
@@ -447,8 +455,11 @@ def test_every_workflow_install_goes_through_a_requirements_file():
         for args in pip_invocations(path.read_text()):
             if goes_through_a_requirements_file(args):
                 continue
-            named = {Requirement(t).name.lower() for t in requirement_tokens(args)
-                     if _parses(t)}
+            named = {
+                Requirement(t).name.lower()
+                for t in requirement_tokens(args)
+                if _parses(t)
+            }
             extra = sorted(named - _BOOTSTRAP_ONLY)
             if extra:
                 offenders.append(
@@ -457,7 +468,8 @@ def test_every_workflow_install_goes_through_a_requirements_file():
                 )
     assert not offenders, (
         "workflow or composite-action YAML installs packages without reading a requirements/ file, so those "
-        "packages are unpinned and invisible to Dependabot:\n  " + "\n  ".join(offenders)
+        "packages are unpinned and invisible to Dependabot:\n  "
+        + "\n  ".join(offenders)
     )
 
 
@@ -505,6 +517,7 @@ def _parses(token: str) -> bool:
 # step) from counting, which would let a job satisfy the scope with the proof step alone.
 _RUNS_THE_PYTEST_SUITE_RE = re.compile(r"pytest\b[^\n]*\btests/(?=\s|$)")
 
+
 def jobs_running_the_pytest_suite() -> list[tuple[Path, str, dict]]:
     """(workflow, job id, the job) for every JOB that runs the whole suite.
 
@@ -534,9 +547,13 @@ def jobs_running_the_pytest_suite() -> list[tuple[Path, str, dict]]:
     # helper does not look, e.g. a composite action it could not resolve), and every
     # per-job assertion below silently stops covering that file. The text side reads the
     # comment-stripped view, so a comment quoting the command cannot manufacture a hit.
-    text_hits = {wf for wf in workflow_files()
-                 if _RUNS_THE_PYTEST_SUITE_RE.search(
-                     ci_actions.strip_comment_lines(wf.read_text()))}
+    text_hits = {
+        wf
+        for wf in workflow_files()
+        if _RUNS_THE_PYTEST_SUITE_RE.search(
+            ci_actions.strip_comment_lines(wf.read_text())
+        )
+    }
     lost = sorted(str(wf.relative_to(ROOT)) for wf in text_hits - files_with_a_hit)
     assert not lost, (
         f"these workflows contain a `pytest ... tests/` invocation in their raw text but "
@@ -574,7 +591,11 @@ def _declared_packages(path: Path, seen: set[Path] | None = None) -> set[str]:
         if not line:
             continue
         if line.startswith(("-r", "--requirement")):
-            target = line.split(None, 1)[1].strip() if " " in line else line.split("=", 1)[-1]
+            target = (
+                line.split(None, 1)[1].strip()
+                if " " in line
+                else line.split("=", 1)[-1]
+            )
             nested = REQUIREMENTS_DIR / Path(target).name
             if nested.is_file():
                 names |= _declared_packages(nested, seen)
@@ -635,7 +656,9 @@ def module_scope_importorskips() -> dict[str, list[str]]:
         except SyntaxError:  # pragma: no cover - a broken test file fails elsewhere
             continue
         for node in tree.body:  # MODULE scope only: tree.body, never ast.walk
-            for call in ast.walk(node) if isinstance(node, (ast.Assign, ast.Expr)) else ():
+            for call in (
+                ast.walk(node) if isinstance(node, (ast.Assign, ast.Expr)) else ()
+            ):
                 if (
                     isinstance(call, ast.Call)
                     and isinstance(call.func, ast.Attribute)
@@ -714,10 +737,13 @@ def test_every_workflow_pip_invocation_is_shell_parseable():
             try:
                 shlex.split(args)
             except ValueError as exc:
-                bad.append(f"{wf.relative_to(ROOT).as_posix()}: `pip install{args}` -- {exc}")
+                bad.append(
+                    f"{wf.relative_to(ROOT).as_posix()}: `pip install{args}` -- {exc}"
+                )
     assert not bad, (
         "pip invocation(s) are not shell-parseable, so split_args falls back to a naive "
-        "split and a quoted pin becomes invisible to assertion 1:\n  " + "\n  ".join(bad)
+        "split and a quoted pin becomes invisible to assertion 1:\n  "
+        + "\n  ".join(bad)
     )
 
 

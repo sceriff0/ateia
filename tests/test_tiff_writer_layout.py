@@ -197,7 +197,10 @@ def _write_like(path, array, tile):
 # ---------------------------------------------------------------------------
 
 
-_ALL_WRITER_TILES = [*_TILE_BY_WRITER.items(), ("extract_mask_series", ems.MASK_TIFF_TILE)]
+_ALL_WRITER_TILES = [
+    *_TILE_BY_WRITER.items(),
+    ("extract_mask_series", ems.MASK_TIFF_TILE),
+]
 
 
 @pytest.mark.parametrize("writer, tile", _ALL_WRITER_TILES)
@@ -300,7 +303,9 @@ def test_a_striped_write_of_the_same_array_fails_the_chunk_geometry_assertion(tm
 # ---------------------------------------------------------------------------
 
 
-def test_extract_mask_series_writes_tiled_masks_through_its_own_code_path(tmp_path, monkeypatch):
+def test_extract_mask_series_writes_tiled_masks_through_its_own_code_path(
+    tmp_path, monkeypatch
+):
     """No heavy ML deps -- unlike the three backends above, drive the real ``main()``.
 
     Mirrors ``tests/test_mask_series_write_contract.py``'s fixture: a two-series OME-TIFF

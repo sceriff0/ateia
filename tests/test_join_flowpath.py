@@ -191,9 +191,7 @@ def test_join_by_centroid_inverts_mirage_convention(tmp_path, stub_table_model):
     # The assertion that actually pins the convention. A generous radius pairs
     # the cells correctly even with a half-pixel bias (0.707 px < 2 px), so it
     # is the TIGHT radius that distinguishes "exact" from "close enough".
-    idx_exact, stats_exact = jf.join_by_centroid(
-        df, centroids, PX, max_dist_px=0.001
-    )
+    idx_exact, stats_exact = jf.join_by_centroid(df, centroids, PX, max_dist_px=0.001)
     assert idx_exact.tolist() == [0, 1, 2], (
         "the centroid inverse does not land exactly on obsm['spatial']: it is "
         f"off by a constant ({stats_exact['matched']}/3 matched within 0.001 px). "

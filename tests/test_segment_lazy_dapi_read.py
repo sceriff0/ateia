@@ -67,8 +67,16 @@ from validation import clip_negative_values  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-def _write_3d_stack(tmp_path, n_channels=3, h=48, w=40, dtype=np.uint16,
-                     compression=None, seed=11, name="stack.ome.tiff"):
+def _write_3d_stack(
+    tmp_path,
+    n_channels=3,
+    h=48,
+    w=40,
+    dtype=np.uint16,
+    compression=None,
+    seed=11,
+    name="stack.ome.tiff",
+):
     rng = np.random.default_rng(seed)
     if np.issubdtype(dtype, np.integer):
         info = np.iinfo(dtype)
@@ -84,13 +92,17 @@ def _write_3d_stack(tmp_path, n_channels=3, h=48, w=40, dtype=np.uint16,
         ome=True,
         photometric="minisblack",
         compression=compression,
-        metadata={"axes": "CYX", "Channel": {"Name": [f"C{i}" for i in range(n_channels)]}},
+        metadata={
+            "axes": "CYX",
+            "Channel": {"Name": [f"C{i}" for i in range(n_channels)]},
+        },
     )
     return path, stack
 
 
-def _write_2d_plane(tmp_path, h=48, w=40, dtype=np.uint16, compression=None,
-                     seed=13, name="plane.tif"):
+def _write_2d_plane(
+    tmp_path, h=48, w=40, dtype=np.uint16, compression=None, seed=13, name="plane.tif"
+):
     rng = np.random.default_rng(seed)
     if np.issubdtype(dtype, np.integer):
         info = np.iinfo(dtype)
@@ -100,7 +112,9 @@ def _write_2d_plane(tmp_path, h=48, w=40, dtype=np.uint16, compression=None,
         plane = (rng.random(size=(h, w)).astype(dtype)) * 1000.0
 
     path = tmp_path / name
-    tifffile.imwrite(str(path), plane, photometric="minisblack", compression=compression)
+    tifffile.imwrite(
+        str(path), plane, photometric="minisblack", compression=compression
+    )
     return path, plane
 
 
@@ -137,7 +151,9 @@ def _old_segment_extract_dapi_channel(multichannel_image_path, dapi_channel_inde
 
         if image_memmap.ndim == 2:
             dapi_image = np.array(image_memmap, copy=True)
-            dapi_image = clip_negative_values(dapi_image, logger, stage_name="extract_dapi")
+            dapi_image = clip_negative_values(
+                dapi_image, logger, stage_name="extract_dapi"
+            )
         elif image_memmap.ndim == 3:
             n_channels = image_memmap.shape[0]
             if dapi_channel_index >= n_channels:
@@ -146,7 +162,9 @@ def _old_segment_extract_dapi_channel(multichannel_image_path, dapi_channel_inde
                     f"for image with {n_channels} channels"
                 )
             dapi_image = np.array(image_memmap[dapi_channel_index, :, :], copy=True)
-            dapi_image = clip_negative_values(dapi_image, logger, stage_name="extract_dapi")
+            dapi_image = clip_negative_values(
+                dapi_image, logger, stage_name="extract_dapi"
+            )
         else:
             raise ValueError(
                 f"Unexpected image dimensions: {image_shape}. "
@@ -156,7 +174,9 @@ def _old_segment_extract_dapi_channel(multichannel_image_path, dapi_channel_inde
     return dapi_image, metadata
 
 
-def _old_segment_cellsam_extract_dapi_channel(multichannel_image_path, dapi_channel_index=0):
+def _old_segment_cellsam_extract_dapi_channel(
+    multichannel_image_path, dapi_channel_index=0
+):
     """Frozen copy of pre-change bin/segment_cellsam.py:extract_dapi_channel."""
     logger = logging.getLogger("old_segment_cellsam")
 
@@ -189,7 +209,9 @@ def _old_segment_cellsam_extract_dapi_channel(multichannel_image_path, dapi_chan
 
 
 @pytest.mark.parametrize("compression", [None, "zlib"])
-def test_extract_dapi_channel_never_calls_asarray_out_memmap(tmp_path, monkeypatch, compression):
+def test_extract_dapi_channel_never_calls_asarray_out_memmap(
+    tmp_path, monkeypatch, compression
+):
     """segment_io must never call tif.asarray(out="memmap") -- that call is
     what decodes the whole image into a full-size temp file (see module
     docstring), for EITHER a compressed or uncompressed source.
@@ -423,7 +445,7 @@ def test_segment_py_delegates_to_segment_io_and_drops_memmap():
 @pytest.mark.skipif(
     not _segment_py_is_importable(),
     reason="stardist/csbdeep not importable here; the structural test above is the "
-           "environment-independent check and always runs",
+    "environment-independent check and always runs",
 )
 def test_segment_py_delegation_is_live_when_importable():
     """The stronger form of the check above, where the environment permits it.

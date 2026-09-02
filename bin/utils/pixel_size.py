@@ -285,8 +285,12 @@ def resolve_pixel_size(
                 f"'{AUTO}' for this input."
             )
         if logger is not None:
-            logger.info("  %s: resolved --pixel_size %s to %g µm/px from OME metadata.",
-                        label, AUTO, detected)
+            logger.info(
+                "  %s: resolved --pixel_size %s to %g µm/px from OME metadata.",
+                label,
+                AUTO,
+                detected,
+            )
         return float(detected)
 
     try:

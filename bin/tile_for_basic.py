@@ -97,7 +97,9 @@ def _channel_axis_length(image_path, channel_names):
                 "slide has not been through them."
             )
         return shape[0], shape[1], shape[2], dtype
-    raise ValueError(f"{image_path}: expected a 2-D or 3-D (C, Y, X) image, got {shape}")
+    raise ValueError(
+        f"{image_path}: expected a 2-D or 3-D (C, Y, X) image, got {shape}"
+    )
 
 
 def _resolve_channel_names(channel_names, n_channels):
@@ -179,6 +181,7 @@ def tile_for_basic(
 
     arr, _dtype, close = open_lazy(image_path)
     try:
+
         def _read_region(source_index):
             """Lazy region reader bound to one source channel.
 

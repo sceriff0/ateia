@@ -68,7 +68,9 @@ def _config_offenders() -> list[str]:
             continue
         for name in block.names:
             if name not in SAFE_PIXEL_SIZE_CONSUMERS:
-                offenders.append(f"conf/modules.config withName: '{block.selector}' (as '{name}')")
+                offenders.append(
+                    f"conf/modules.config withName: '{block.selector}' (as '{name}')"
+                )
     return offenders
 
 
@@ -80,7 +82,9 @@ def test_the_safelist_still_names_real_processes():
     for block in with_name_blocks():
         known.update(block.names)
     missing = SAFE_PIXEL_SIZE_CONSUMERS - known
-    assert not missing, f"SAFE_PIXEL_SIZE_CONSUMERS names process(es) that do not exist: {missing}"
+    assert not missing, (
+        f"SAFE_PIXEL_SIZE_CONSUMERS names process(es) that do not exist: {missing}"
+    )
 
 
 def test_no_process_renders_params_pixel_size_directly_unless_safelisted():

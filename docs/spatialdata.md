@@ -157,6 +157,7 @@ nuclear = adata[:, adata.var.compartment == "Nucleus"]
 
 # drop cells with poor registration in any cycle
 import numpy as np
+
 keep = adata.obs["qc_reg_matched"] & (adata.obs["qc_reg_residual_max_px"] < 5)
 
 # the segmentation quality score, with the factor it depends on

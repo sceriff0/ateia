@@ -25,7 +25,9 @@ def load_channels(path):
 def nuclear_channel(arr_chw, index):
     """Return the ``index`` channel of a ``(C, H, W)`` array as float32."""
     if not 0 <= index < arr_chw.shape[0]:
-        raise ValueError(f"--nuclear-index {index} out of range for C={arr_chw.shape[0]}")
+        raise ValueError(
+            f"--nuclear-index {index} out of range for C={arr_chw.shape[0]}"
+        )
     return arr_chw[index].astype(np.float32)
 
 
@@ -116,7 +118,9 @@ def band_rows_for(width, factor, band_bytes=DEFAULT_BAND_BYTES):
     aligned) and never below ``factor``.
     """
     factor = max(1, int(factor))
-    per_row = max(1, int(width)) * 4  # budgeted as float32; see DEFAULT_BAND_BYTES's comment
+    per_row = (
+        max(1, int(width)) * 4
+    )  # budgeted as float32; see DEFAULT_BAND_BYTES's comment
     rows = max(factor, int(band_bytes) // per_row)
     return max(factor, (rows // factor) * factor)
 
@@ -176,14 +180,18 @@ def read_decimated(src, index, factor, band_bytes=DEFAULT_BAND_BYTES):
     factor = max(1, int(factor))
     band = band_rows_for(w, factor, band_bytes)
 
-    out_h = -(-h // factor)  # ceil division: number of sampled rows 0, factor, 2*factor, ...
+    out_h = -(
+        -h // factor
+    )  # ceil division: number of sampled rows 0, factor, 2*factor, ...
     out_w = -(-w // factor)
     dest = _np.empty((out_h, out_w), dtype=_np.float32)
 
     out_row = 0
     for y0 in range(0, h, band):
         y1 = min(y0 + band, h)
-        band_arr = _np.asarray(src[index, slice(y0, y1), slice(0, w)])[::factor, ::factor]
+        band_arr = _np.asarray(src[index, slice(y0, y1), slice(0, w)])[
+            ::factor, ::factor
+        ]
         n_rows = band_arr.shape[0]
         dest[out_row : out_row + n_rows] = band_arr
         out_row += n_rows

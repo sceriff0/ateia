@@ -84,7 +84,10 @@ def _write_slide(path, stack, channel_names):
 
 def _write_profile(path, planes):
     tifffile.imwrite(
-        str(path), np.asarray(planes, dtype=np.float32), photometric="minisblack", ome=True
+        str(path),
+        np.asarray(planes, dtype=np.float32),
+        photometric="minisblack",
+        ome=True,
     )
 
 
@@ -227,7 +230,9 @@ def test_tile_for_basic_reads_one_fov_at_a_time(tmp_path, monkeypatch):
     )
 
     assert str(slide) in spies, "the slide never went through open_lazy"
-    assert not eager, f"the slide was eagerly decoded in full via tifffile.imread: {eager}"
+    assert not eager, (
+        f"the slide was eagerly decoded in full via tifffile.imread: {eager}"
+    )
     n_tiles = manifest["n_fovs_y"] * manifest["n_fovs_x"]
     th, tw = manifest["tile_shape"]
     _assert_region_reads(
@@ -239,7 +244,9 @@ def test_tile_for_basic_reads_one_fov_at_a_time(tmp_path, monkeypatch):
     )
 
 
-def test_tile_for_basic_peak_read_is_independent_of_channel_count(tmp_path, monkeypatch):
+def test_tile_for_basic_peak_read_is_independent_of_channel_count(
+    tmp_path, monkeypatch
+):
     """The largest single materialisation is one FOV at 2 channels and at 6 -- O(1), not
     O(C). A whole-stack read passes the shape assertions of a sloppier test but triples
     here."""
@@ -329,7 +336,9 @@ def test_apply_basic_profiles_reads_one_write_tile_at_a_time(tmp_path, monkeypat
     )
 
     assert str(slide) in spies, "the slide never went through open_lazy"
-    assert not eager, f"the slide was eagerly decoded in full via tifffile.imread: {eager}"
+    assert not eager, (
+        f"the slide was eagerly decoded in full via tifffile.imread: {eager}"
+    )
     spy = spies[str(slide)]
     n_channels, h, w = stack.shape
     tiles_per_channel = -(-h // 64) * -(-w // 64)
@@ -428,10 +437,16 @@ def test_apply_basic_profiles_streams_its_write(tmp_path, monkeypatch):
 
     slide, sidecar, ffp, dfp, names, stack, manifest = _tiled(tmp_path, 3)
     apply_basic_profiles.apply_basic_profiles(
-        str(slide), str(sidecar), str(ffp), str(dfp), str(tmp_path / "out_corrected.ome.tif")
+        str(slide),
+        str(sidecar),
+        str(ffp),
+        str(dfp),
+        str(tmp_path / "out_corrected.ome.tif"),
     )
 
-    assert seen, "TiffWriter.write was never called -- the output was written some other way"
+    assert seen, (
+        "TiffWriter.write was never called -- the output was written some other way"
+    )
     assert not seen["is_ndarray"], (
         f"the whole image was handed to tifffile as a {seen['type']}; the write must be "
         "fed by an iterator of tiles, or the assembled slide is resident again"
@@ -450,7 +465,11 @@ def test_apply_basic_profiles_does_not_return_the_assembled_slide(tmp_path):
     """
     slide, sidecar, ffp, dfp, names, stack, manifest = _tiled(tmp_path, 3)
     result = apply_basic_profiles.apply_basic_profiles(
-        str(slide), str(sidecar), str(ffp), str(dfp), str(tmp_path / "r_corrected.ome.tif")
+        str(slide),
+        str(sidecar),
+        str(ffp),
+        str(dfp),
+        str(tmp_path / "r_corrected.ome.tif"),
     )
     assert not isinstance(result, np.ndarray), (
         "apply_basic_profiles returned an ndarray -- the assembled slide is resident again"

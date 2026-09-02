@@ -117,7 +117,11 @@ def test_multiple_labels_varying_size():
     ref = _reference_median_per_label(cell_mask, channel, labels)
     np.testing.assert_allclose(df["CD8: Cell: Median"].values, ref, rtol=0, atol=0)
     # Sanity on the expected values themselves.
-    expected = {1: np.median([10, 20, 30, 40, 50]), 2: np.median([1, 2, 3, 4, 5]), 3: np.median([60, 70, 80])}
+    expected = {
+        1: np.median([10, 20, 30, 40, 50]),
+        2: np.median([1, 2, 3, 4, 5]),
+        3: np.median([60, 70, 80]),
+    }
     for lab, val in zip(labels, df["CD8: Cell: Median"].values):
         assert val == expected[lab]
 
@@ -212,7 +216,9 @@ def test_golden_old_vs_new_random_images_with_nuclei():
         channel = rng.random((h, w)) * 1000.0
 
         new_df = compute_compartment_intensities(cell_mask, nuclei_mask, channel, "CD8")
-        old = _old_compute_compartment_intensities(cell_mask, nuclei_mask, channel, "CD8")
+        old = _old_compute_compartment_intensities(
+            cell_mask, nuclei_mask, channel, "CD8"
+        )
 
         if len(old) == 0:
             assert new_df.empty
@@ -221,9 +227,7 @@ def test_golden_old_vs_new_random_images_with_nuclei():
         np.testing.assert_array_equal(new_df["label"].values, old["label"])
         for comp in ("Cell", "Nucleus", "Cytoplasm"):
             key = f"CD8: {comp}: Median"
-            np.testing.assert_allclose(
-                new_df[key].values, old[key], rtol=0, atol=0
-            )
+            np.testing.assert_allclose(new_df[key].values, old[key], rtol=0, atol=0)
 
 
 def test_no_per_pixel_dataframe_in_source():
@@ -297,7 +301,9 @@ def test_golden_old_vs_new_random_uint16_full_range():
         nuclei_mask = (rng.random((h, w)) > 0.5).astype(np.int32)
 
         new_df = compute_compartment_intensities(cell_mask, nuclei_mask, channel, "CD8")
-        old = _old_compute_compartment_intensities(cell_mask, nuclei_mask, channel, "CD8")
+        old = _old_compute_compartment_intensities(
+            cell_mask, nuclei_mask, channel, "CD8"
+        )
 
         if len(old) == 0:
             assert new_df.empty
@@ -332,7 +338,9 @@ def test_golden_old_vs_new_random_uint16_full_range():
                 # ...and to an independent reference computed fresh from the raw pixels.
                 assert new_vals[i] == np.median(flat_val[sel])
 
-    assert saw_no_overlap, "no trial produced an empty compartment (NaN branch unexercised)"
+    assert saw_no_overlap, (
+        "no trial produced an empty compartment (NaN branch unexercised)"
+    )
     assert saw_odd, "no trial produced an odd-count label (single middle element)"
     assert saw_even, "no trial produced an even-count label (tie-break averaging)"
 
@@ -349,7 +357,9 @@ def test_non_uint16_fallback_matches_fast_path():
     nuclei_mask = (rng.random((20, 25)) > 0.5).astype(np.int32)
     channel_uint16 = rng.integers(0, 65536, size=(20, 25), dtype=np.uint16)
 
-    fast_df = compute_compartment_intensities(cell_mask, nuclei_mask, channel_uint16, "CD8")
+    fast_df = compute_compartment_intensities(
+        cell_mask, nuclei_mask, channel_uint16, "CD8"
+    )
 
     # Every dtype below carries the exact same integer values as channel_uint16, just
     # widened/retyped, so `compute_compartment_intensities` routes to the labeled_comprehension
@@ -359,9 +369,15 @@ def test_non_uint16_fallback_matches_fast_path():
         fallback_df = compute_compartment_intensities(
             cell_mask, nuclei_mask, channel_other, "CD8"
         )
-        np.testing.assert_array_equal(fallback_df["label"].values, fast_df["label"].values)
+        np.testing.assert_array_equal(
+            fallback_df["label"].values, fast_df["label"].values
+        )
         for comp in ("Cell", "Nucleus", "Cytoplasm"):
             key = f"CD8: {comp}: Median"
             np.testing.assert_allclose(
-                fallback_df[key].values, fast_df[key].values, rtol=0, atol=0, equal_nan=True
+                fallback_df[key].values,
+                fast_df[key].values,
+                rtol=0,
+                atol=0,
+                equal_nan=True,
             )

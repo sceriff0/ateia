@@ -150,7 +150,9 @@ def test_qc_overlay_pixels_match_the_old_whole_stack_read(tmp_path):
     reg_channels = extract_channel_names_from_ome(reg_path)
     ref_idx = pick_nuclear_index(ref_channels, None)
     reg_idx = pick_nuclear_index(reg_channels, None)
-    assert ref_idx == 1 and reg_idx == 1, "fixture must exercise a non-zero nuclear index"
+    assert ref_idx == 1 and reg_idx == 1, (
+        "fixture must exercise a non-zero nuclear index"
+    )
 
     # HAZARD: raw-uint16 (float64 path) vs. production's float32 path -- green here only
     # because _write_pair avoids the adversarial triple; see
@@ -384,9 +386,13 @@ def test_qc_output_is_exact_at_the_known_adversarial_pixel_triple(tmp_path):
     # value is the historical/G1 baseline (float32 -> 204) versus which would be a silent
     # regression if a narrow read were ever reintroduced without a widen-back).
     naive_narrow = qc.autoscale_for_display(dapi, method="minmax")
-    historical_float32 = qc.autoscale_for_display(dapi.astype(np.float32), method="minmax")
+    historical_float32 = qc.autoscale_for_display(
+        dapi.astype(np.float32), method="minmax"
+    )
     assert naive_narrow[1, 0] == 203, "a bare uint16 read would land on the lower value"
-    assert historical_float32[1, 0] == 204, "the float32 path is what qc.py has always emitted"
+    assert historical_float32[1, 0] == 204, (
+        "the float32 path is what qc.py has always emitted"
+    )
     assert naive_narrow[1, 0] != historical_float32[1, 0], (
         "fixture must reproduce the known uint16-vs-float32 divergence to be meaningful"
     )
@@ -407,7 +413,9 @@ def test_qc_output_is_exact_at_the_known_adversarial_pixel_triple(tmp_path):
         old_ref_nuc, old_reg_nuc, scale_factor=1.0
     )
     ref_scaled = qc.autoscale_for_display(old_ref_nuc, method="minmax")
-    assert ref_scaled[1, 0] == 204, "the G1 baseline itself must be the historical float32 value"
+    assert ref_scaled[1, 0] == 204, (
+        "the G1 baseline itself must be the historical float32 value"
+    )
 
     out_path = tmp_path / "out" / "qc.tif"
     out_path.parent.mkdir()

@@ -120,7 +120,8 @@ def _print_table(title, keys, cols):
     lines = [f"\n{title}", f"  {'metric':58s}{heads}"]
     for key in keys:
         vals = "".join(
-            f"{(d.get(key, float('nan')) if d else float('nan')):14.5f}" for _, d in cols
+            f"{(d.get(key, float('nan')) if d else float('nan')):14.5f}"
+            for _, d in cols
         )
         lines.append(f"  {key:58s}{vals}")
     print("\n".join(lines))
@@ -201,10 +202,24 @@ def test_cli_max_pixels_triggers_downsampling(tmp_path):
     tifffile.imwrite(imgp, img)
     out = tmp_path / "eval.json"
     subprocess.run(
-        [sys.executable, "bin/seg_quality_eval.py",
-         "--cell-mask", str(cp), "--nuclei-mask", str(npth), "--image", str(imgp),
-         "--id", "p", "--out", str(out),
-         "--pixel-size-um", "0.5", "--max-pixels", "25000"],  # 90000 -> needs 2x
+        [
+            sys.executable,
+            "bin/seg_quality_eval.py",
+            "--cell-mask",
+            str(cp),
+            "--nuclei-mask",
+            str(npth),
+            "--image",
+            str(imgp),
+            "--id",
+            "p",
+            "--out",
+            str(out),
+            "--pixel-size-um",
+            "0.5",
+            "--max-pixels",
+            "25000",
+        ],  # 90000 -> needs 2x
         check=True,
     )
     doc = json.loads(out.read_text())

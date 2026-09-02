@@ -44,7 +44,9 @@ import sys
 import numpy as np
 import pytest
 
-BIN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin")
+BIN_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin"
+)
 UTILS_DIR = os.path.join(BIN_DIR, "utils")
 for _dir in (BIN_DIR, UTILS_DIR):
     if _dir not in sys.path:
@@ -198,7 +200,9 @@ def test_preprocess_qc_png_pixels_match_old_whole_stack_read(tmp_path):
         exp = expected[name]
         assert got.dtype == exp.dtype
         assert got.shape == exp.shape
-        assert np.array_equal(got, exp), f"channel {name} PNG differs from old read path"
+        assert np.array_equal(got, exp), (
+            f"channel {name} PNG differs from old read path"
+        )
 
 
 def _read_png(path):

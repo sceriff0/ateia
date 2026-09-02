@@ -56,7 +56,10 @@ PIXEL_SIZE = 0.325
 
 def _inputs(tmp_path, channels=("DAPI", "CD3", "CD8"), size=256):
     data = np.stack(
-        [np.full((size, size), 100 * (i + 1), dtype=np.uint16) for i in range(len(channels))]
+        [
+            np.full((size, size), 100 * (i + 1), dtype=np.uint16)
+            for i in range(len(channels))
+        ]
     )
     mov = tmp_path / "mov.ome.tiff"
     tifffile.imwrite(str(mov), data, photometric="minisblack")
@@ -81,12 +84,18 @@ def _stitch(tmp_path, channels=("DAPI", "CD3", "CD8")):
     mov, man = _inputs(tmp_path, channels)
     out = tmp_path / "P001_registered.ome.tiff"
     argv = [
-        "--moving", str(mov),
-        "--manifest", str(man),
-        "--moving-name", "mov",
-        "--out", str(out),
-        "--pixel-size", str(PIXEL_SIZE),
-        "--channel-names", *channels,
+        "--moving",
+        str(mov),
+        "--manifest",
+        str(man),
+        "--moving-name",
+        "mov",
+        "--out",
+        str(out),
+        "--pixel-size",
+        str(PIXEL_SIZE),
+        "--channel-names",
+        *channels,
     ]
     assert tiled_stitch.main(argv) == 0
     return out

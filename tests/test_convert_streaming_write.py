@@ -122,7 +122,11 @@ class _FakeDims:
         raise AttributeError(name)
 
     def __repr__(self):
-        return "<Dimensions [" + " ".join(f"{d}: {self._sizes[d]}" for d in self.order) + "]>"
+        return (
+            "<Dimensions ["
+            + " ".join(f"{d}: {self._sizes[d]}" for d in self.order)
+            + "]>"
+        )
 
 
 class _FakePixelSizes:
@@ -227,7 +231,11 @@ def test_the_write_never_materialises_the_whole_stack(monkeypatch, tmp_path):
     )
 
     out, channels = convert_image.convert_to_ome_tiff(
-        tmp_path / "input.czi", tmp_path, "P1", channel_names=["DAPI", "CD3", "CD8"], pixel_size_um=0.325
+        tmp_path / "input.czi",
+        tmp_path,
+        "P1",
+        channel_names=["DAPI", "CD3", "CD8"],
+        pixel_size_um=0.325,
     )
 
     assert channels == ["DAPI", "CD3", "CD8"]
@@ -264,14 +272,18 @@ def test_streamed_pixels_match_the_eager_writer_for_a_multichannel_stack(
     # docstring), so ``ref_path`` (striped) and ``new_path`` (tiled) legitimately differ
     # at the byte level even with the UUID masked. Decoded pixels are the equivalence
     # that must hold.
-    np.testing.assert_array_equal(tifffile.imread(str(new_path)), tifffile.imread(str(ref_path)))
+    np.testing.assert_array_equal(
+        tifffile.imread(str(new_path)), tifffile.imread(str(ref_path))
+    )
 
     # ... and the pixels really are the reordered source, not merely equal to each other.
     expected = np.take(array[0, :, 0], [1, 0, 2], axis=0)
     np.testing.assert_array_equal(tifffile.imread(str(new_path)), expected)
 
 
-def test_streamed_pixels_match_the_eager_writer_for_the_s_as_c_case(monkeypatch, tmp_path):
+def test_streamed_pixels_match_the_eager_writer_for_the_s_as_c_case(
+    monkeypatch, tmp_path
+):
     array, img = _s_as_c_bioimage()
     channels = ["CD3", "DAPI", "CD8"]
 
@@ -286,7 +298,9 @@ def test_streamed_pixels_match_the_eager_writer_for_the_s_as_c_case(monkeypatch,
     # See test_streamed_pixels_match_the_eager_writer_for_a_multichannel_stack: the tiled
     # layout means the raw bytes differ from the striped reference on purpose, so this
     # compares decoded pixels rather than masked bytes.
-    np.testing.assert_array_equal(tifffile.imread(str(new_path)), tifffile.imread(str(ref_path)))
+    np.testing.assert_array_equal(
+        tifffile.imread(str(new_path)), tifffile.imread(str(ref_path))
+    )
 
     # TCZYXS -> squeeze C -> TZYXC -> transpose C in front of Y -> TCZYX -> squeeze T, Z
     expected = np.take(array[0, 0, 0].transpose(2, 0, 1), [1, 0, 2], axis=0)
@@ -306,7 +320,10 @@ def test_the_ome_header_is_unchanged(monkeypatch, tmp_path):
     ref_path, _ = _convert(monkeypatch, img, ref_dir, channels, writer=_legacy_write)
     new_path, _ = _convert(monkeypatch, img, new_dir, channels)
 
-    with tifffile.TiffFile(str(ref_path)) as ref, tifffile.TiffFile(str(new_path)) as new:
+    with (
+        tifffile.TiffFile(str(ref_path)) as ref,
+        tifffile.TiffFile(str(new_path)) as new,
+    ):
         ref_xml = _mask_uuid(ref.ome_metadata.encode())
         new_xml = _mask_uuid(new.ome_metadata.encode())
 
@@ -349,9 +366,9 @@ def test_the_only_nondeterminism_is_the_ome_uuid(tmp_path):
     differing = [i for i in range(len(raw_a)) if raw_a[i] != raw_b[i]]
     uuid_spans = [m.span() for m in _UUID_RE.finditer(raw_a)]
     assert uuid_spans, "no urn:uuid field found in the reference file"
-    assert all(
-        any(lo <= i < hi for lo, hi in uuid_spans) for i in differing
-    ), f"bytes outside the OME UUID differ between two identical writes: {differing[:20]}"
+    assert all(any(lo <= i < hi for lo, hi in uuid_spans) for i in differing), (
+        f"bytes outside the OME UUID differ between two identical writes: {differing[:20]}"
+    )
 
     assert _mask_uuid(raw_a) == _mask_uuid(raw_b)
 
@@ -384,13 +401,23 @@ def test_the_numpy_reader_branches_also_write_identical_pixels(monkeypatch, tmp_
     with monkeypatch.context() as patched:
         patched.setattr(convert_image, "write_ome_tiff", _legacy_write)
         ref_path, _ = convert_image.convert_to_ome_tiff(
-            tmp_path / "in.ndpi", ref_dir, "P1", channel_names=["CD3", "DAPI", "CD8"], pixel_size_um=0.325
+            tmp_path / "in.ndpi",
+            ref_dir,
+            "P1",
+            channel_names=["CD3", "DAPI", "CD8"],
+            pixel_size_um=0.325,
         )
     new_path, _ = convert_image.convert_to_ome_tiff(
-        tmp_path / "in.ndpi", new_dir, "P1", channel_names=["CD3", "DAPI", "CD8"], pixel_size_um=0.325
+        tmp_path / "in.ndpi",
+        new_dir,
+        "P1",
+        channel_names=["CD3", "DAPI", "CD8"],
+        pixel_size_um=0.325,
     )
 
-    np.testing.assert_array_equal(tifffile.imread(str(new_path)), tifffile.imread(str(ref_path)))
+    np.testing.assert_array_equal(
+        tifffile.imread(str(new_path)), tifffile.imread(str(ref_path))
+    )
     np.testing.assert_array_equal(
         tifffile.imread(str(new_path)), np.take(array, [1, 0, 2], axis=0)
     )
@@ -462,7 +489,11 @@ def test_the_write_is_tiled(monkeypatch, tmp_path):
         finally:
             store.close()
 
-    assert _chunks(new_path) == (1, convert_image.CONVERT_TIFF_TILE, convert_image.CONVERT_TIFF_TILE)
+    assert _chunks(new_path) == (
+        1,
+        convert_image.CONVERT_TIFF_TILE,
+        convert_image.CONVERT_TIFF_TILE,
+    )
     assert _chunks(ref_path) == (1,) + array.shape[-2:]
 
 
@@ -534,7 +565,11 @@ def test_a_whole_slide_chunk_is_decoded_once_not_once_per_plane(monkeypatch, tmp
     source = _chunked_read(monkeypatch, array, array.shape, names)
 
     out, _ = convert_image.convert_to_ome_tiff(
-        tmp_path / "in.czi", tmp_path, "P1", channel_names=list(names), pixel_size_um=0.325
+        tmp_path / "in.czi",
+        tmp_path,
+        "P1",
+        channel_names=list(names),
+        pixel_size_um=0.325,
     )
 
     assert source.decodes == 1, (
@@ -558,7 +593,11 @@ def test_a_chunk_is_decoded_once_whatever_the_chunking(monkeypatch, tmp_path):
                 patched, array, (chunk_planes,) + array.shape[1:], names
             )
             out, _ = convert_image.convert_to_ome_tiff(
-                tmp_path / "in.czi", out_dir, "P1", channel_names=list(names), pixel_size_um=0.325
+                tmp_path / "in.czi",
+                out_dir,
+                "P1",
+                channel_names=list(names),
+                pixel_size_um=0.325,
             )
         assert source.decodes == expected, (
             f"chunks of {chunk_planes} planes: {source.decodes} decodes, expected {expected}"
@@ -585,14 +624,24 @@ def test_a_whole_slide_chunk_still_writes_identical_pixels(monkeypatch, tmp_path
         _chunked_read(patched, array, array.shape, names)
         patched.setattr(convert_image, "write_ome_tiff", _legacy_write)
         ref_path, _ = convert_image.convert_to_ome_tiff(
-            tmp_path / "in.czi", ref_dir, "P1", channel_names=list(names), pixel_size_um=0.325
+            tmp_path / "in.czi",
+            ref_dir,
+            "P1",
+            channel_names=list(names),
+            pixel_size_um=0.325,
         )
     _chunked_read(monkeypatch, array, array.shape, names)
     new_path, _ = convert_image.convert_to_ome_tiff(
-        tmp_path / "in.czi", new_dir, "P1", channel_names=list(names), pixel_size_um=0.325
+        tmp_path / "in.czi",
+        new_dir,
+        "P1",
+        channel_names=list(names),
+        pixel_size_um=0.325,
     )
 
-    np.testing.assert_array_equal(tifffile.imread(str(new_path)), tifffile.imread(str(ref_path)))
+    np.testing.assert_array_equal(
+        tifffile.imread(str(new_path)), tifffile.imread(str(ref_path))
+    )
     np.testing.assert_array_equal(tifffile.imread(str(new_path)), array)
 
 
@@ -610,7 +659,11 @@ def test_a_whole_slide_chunk_is_warned_about_by_name(monkeypatch, tmp_path, capl
 
     with caplog.at_level(logging.WARNING):
         convert_image.convert_to_ome_tiff(
-            tmp_path / "in.czi", tmp_path, "P1", channel_names=list(names), pixel_size_um=0.325
+            tmp_path / "in.czi",
+            tmp_path,
+            "P1",
+            channel_names=list(names),
+            pixel_size_um=0.325,
         )
 
     assert "8 planes" in caplog.text and "one dask chunk" in caplog.text, caplog.text
@@ -626,7 +679,11 @@ def test_a_per_plane_chunked_read_is_not_warned_about(monkeypatch, tmp_path, cap
 
     with caplog.at_level(logging.WARNING):
         convert_image.convert_to_ome_tiff(
-            tmp_path / "in.czi", tmp_path, "P1", channel_names=list(names), pixel_size_um=0.325
+            tmp_path / "in.czi",
+            tmp_path,
+            "P1",
+            channel_names=list(names),
+            pixel_size_um=0.325,
         )
 
     assert "one dask chunk" not in caplog.text

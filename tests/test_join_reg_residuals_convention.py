@@ -102,7 +102,9 @@ def _qc_side(mask):
     is what is reproduced here. Returns ``(labels, centroids_xy)``.
     """
     fc = mask_to_geojson.mask_to_feature_collection(mask)
-    labels = np.array([f["properties"]["label"] for f in fc["features"]], dtype=np.int64)
+    labels = np.array(
+        [f["properties"]["label"] for f in fc["features"]], dtype=np.int64
+    )
     _area, cent = cp.feature_area_centroid(cp.from_feature_collection(fc))
     return labels, np.asarray(cent, dtype=float)
 
@@ -219,9 +221,7 @@ def test_join_reg_residuals_is_fed_the_quantification_csv_not_obsm_spatial():
         node
         for node in ast.walk(func)
         if isinstance(node, ast.Assign)
-        and any(
-            isinstance(t, ast.Name) and t.id == arg.id for t in node.targets
-        )
+        and any(isinstance(t, ast.Name) and t.id == arg.id for t in node.targets)
     ]
     assert len(assigns) == 1, (
         f"expected exactly one assignment to {arg.id!r} in {func.name}(), found "
@@ -243,10 +243,17 @@ def test_join_reg_residuals_is_fed_the_quantification_csv_not_obsm_spatial():
             f"centre-of-pixel.\n  {source}"
         )
 
-    body = ast.get_source_segment(
-        src, next(n for n in ast.walk(tree)
-                  if isinstance(n, ast.FunctionDef) and n.name == "join_reg_residuals")
-    ) or ""
+    body = (
+        ast.get_source_segment(
+            src,
+            next(
+                n
+                for n in ast.walk(tree)
+                if isinstance(n, ast.FunctionDef) and n.name == "join_reg_residuals"
+            ),
+        )
+        or ""
+    )
     for forbidden in ("centre_to_corner", "obsm"):
         assert forbidden not in body, (
             f"join_reg_residuals itself now mentions {forbidden!r}; both of its "
@@ -287,9 +294,7 @@ def test_a_corner_offset_on_either_side_changes_the_join(tmp_path):
     )
     assert stats["slides"]["cycle2"]["join_fraction"] == 1.0
 
-    bad_csv = _residual_csv(
-        tmp_path / "corner.csv", centre_to_corner(qc), residuals
-    )
+    bad_csv = _residual_csv(tmp_path / "corner.csv", centre_to_corner(qc), residuals)
     out_bad, stats_bad = esd.join_reg_residuals(
         [bad_csv], quant, labels, max_dist_px=tight
     )

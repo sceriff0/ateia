@@ -330,7 +330,9 @@ print("  Created valid_checkpoint_postprocessing.csv")
 # pixel_size (this task) is required the same way -- appended last, 0.325 to match
 # conf/test.config's pin.
 with open(OUT_DIR / "valid_checkpoint_segmented.csv", "w") as f:
-    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size\n")
+    f.write(
+        "patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size\n"
+    )
     f.write(
         f"P001,P001_ref,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
@@ -347,7 +349,9 @@ print("  Created valid_checkpoint_segmented.csv")
 # under --quantify_compartments false actually has (EXTRACT_NUCLEI_PROPERTIES never
 # ran, but SEGMENT always produces nuclei_mask regardless of that flag).
 with open(OUT_DIR / "valid_checkpoint_segmented_no_compartments.csv", "w") as f:
-    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size\n")
+    f.write(
+        "patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size\n"
+    )
     f.write(
         f"P001,P001_ref,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
@@ -376,7 +380,9 @@ print("  Created valid_checkpoint_segmented_no_compartments.csv")
 #         classpath (which does not have lib/ available -- see tests/layout.nf.test's
 #         header comment).
 with open(OUT_DIR / "segmented.csv", "w") as f:
-    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size\n")
+    f.write(
+        "patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size\n"
+    )
     f.write(
         f"P001,P001_ref,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
@@ -432,7 +438,9 @@ _prior_rng = np.random.default_rng(44)
 _prior_channels = ["DAPI", "PANCK"]
 _prior_planes = np.stack(
     [
-        _render_channel(p001_anatomy, (128, 128), (0, 0), 1.0 if ch == 0 else 0.5, _prior_rng)
+        _render_channel(
+            p001_anatomy, (128, 128), (0, 0), 1.0 if ch == 0 else 0.5, _prior_rng
+        )
         for ch in range(len(_prior_channels))
     ]
 )
@@ -443,7 +451,9 @@ tifffile.imwrite(
     ome=True,
     metadata={"axes": "CYX", "Channel": {"Name": _prior_channels}},
 )
-print(f"  Created P001_image.tiff - shape: {_prior_planes.shape}, channels: {_prior_channels}")
+print(
+    f"  Created P001_image.tiff - shape: {_prior_planes.shape}, channels: {_prior_channels}"
+)
 
 _prior_masks = np.stack(
     [
@@ -451,7 +461,9 @@ _prior_masks = np.stack(
         tifffile.imread(OUT_DIR / "P001_nuclei_mask.tif").astype(np.uint32),
     ]
 )
-with tifffile.TiffWriter(OUT_DIR / "P001_pyramid.ome.tiff", ome=True, bigtiff=True) as _tif:
+with tifffile.TiffWriter(
+    OUT_DIR / "P001_pyramid.ome.tiff", ome=True, bigtiff=True
+) as _tif:
     # subifds=1 reserves one sub-resolution level, exactly as
     # bin/merge_channels_pyramid.py does; the next write with subfiletype=1 fills it.
     _tif.write(
@@ -467,7 +479,9 @@ with tifffile.TiffWriter(OUT_DIR / "P001_pyramid.ome.tiff", ome=True, bigtiff=Tr
         photometric="minisblack",
         metadata={"axes": "CYX", "Channel": {"Name": ["cell_mask", "nuclei_mask"]}},
     )
-print(f"  Created P001_pyramid.ome.tiff - 2 series (image {_prior_planes.shape} + masks {_prior_masks.shape})")
+print(
+    f"  Created P001_pyramid.ome.tiff - 2 series (image {_prior_planes.shape} + masks {_prior_masks.shape})"
+)
 
 # 3e. The NEW-CYCLE samplesheet that goes with prior_run/ — i.e. what a real
 #     `--mode add_cycle --prior_outdir <prior_run> --input <this>` run consumes.
@@ -644,8 +658,20 @@ print("\n6. Creating additional test fixtures for module tests...")
 # all of them for no reason. `solidity` is still drawn -- it now produces
 # convex_area, which is what it physically determines (solidity = area / convex_area).
 _merged_quant_cols = [
-    "fov", "cell_size", "label", "y", "x", "area", "eccentricity", "perimeter",
-    "convex_area", "axis_major_length", "axis_minor_length", "DAPI", "PANCK", "SMA",
+    "fov",
+    "cell_size",
+    "label",
+    "y",
+    "x",
+    "area",
+    "eccentricity",
+    "perimeter",
+    "convex_area",
+    "axis_major_length",
+    "axis_minor_length",
+    "DAPI",
+    "PANCK",
+    "SMA",
 ]
 with open(OUT_DIR / "sample_merged_quant.csv", "w") as f:
     f.write(",".join(_merged_quant_cols) + "\n")
@@ -688,8 +714,19 @@ print("  Created sample_merged_quant.csv (20 cells)")
 # every one of those fixtures' content on regeneration.
 _quant_rng = np.random.default_rng(45)
 _prior_quant_cols = [
-    "fov", "cell_size", "label", "y", "x", "area", "eccentricity", "perimeter",
-    "convex_area", "axis_major_length", "axis_minor_length", "DAPI", "PANCK",
+    "fov",
+    "cell_size",
+    "label",
+    "y",
+    "x",
+    "area",
+    "eccentricity",
+    "perimeter",
+    "convex_area",
+    "axis_major_length",
+    "axis_minor_length",
+    "DAPI",
+    "PANCK",
 ]
 with open(OUT_DIR / "P001_merged_quant.csv", "w") as f:
     f.write(",".join(_prior_quant_cols) + "\n")
@@ -949,8 +986,21 @@ _DELTA_KEYS = (
 )
 
 
-def _stage_record(n_pairs, n_scored, iou_mean, iou_p10, iou_p50, iou_p90, iou_max,
-                   disp_mean, disp_p10, disp_p50, disp_p90, disp_max, dice):
+def _stage_record(
+    n_pairs,
+    n_scored,
+    iou_mean,
+    iou_p10,
+    iou_p50,
+    iou_p90,
+    iou_max,
+    disp_mean,
+    disp_p10,
+    disp_p50,
+    disp_p90,
+    disp_max,
+    dice,
+):
     return {
         "n_pairs": n_pairs,
         "n_pairs_scored": n_scored,
@@ -972,10 +1022,18 @@ def _stage_record(n_pairs, n_scored, iou_mean, iou_p10, iou_p50, iou_p90, iou_ma
 
 
 stage_records = {
-    "native": _stage_record(20, 18, 0.41, 0.20, 0.40, 0.62, 0.70, 18.2, 9.5, 17.8, 27.6, 34.0, 0.39),
-    "rigid": _stage_record(20, 19, 0.68, 0.50, 0.69, 0.85, 0.92, 6.4, 2.1, 6.0, 11.2, 14.5, 0.66),
-    "non_rigid": _stage_record(20, 19, 0.83, 0.68, 0.84, 0.94, 0.97, 2.1, 0.6, 1.9, 3.8, 5.0, 0.82),
-    "micro": _stage_record(20, 20, 0.91, 0.80, 0.92, 0.98, 0.99, 0.9, 0.2, 0.8, 1.7, 2.3, 0.90),
+    "native": _stage_record(
+        20, 18, 0.41, 0.20, 0.40, 0.62, 0.70, 18.2, 9.5, 17.8, 27.6, 34.0, 0.39
+    ),
+    "rigid": _stage_record(
+        20, 19, 0.68, 0.50, 0.69, 0.85, 0.92, 6.4, 2.1, 6.0, 11.2, 14.5, 0.66
+    ),
+    "non_rigid": _stage_record(
+        20, 19, 0.83, 0.68, 0.84, 0.94, 0.97, 2.1, 0.6, 1.9, 3.8, 5.0, 0.82
+    ),
+    "micro": _stage_record(
+        20, 20, 0.91, 0.80, 0.92, 0.98, 0.99, 0.9, 0.2, 0.8, 1.7, 2.3, 0.90
+    ),
 }
 anchor_rec = stage_records[ANCHOR_STAGE]
 delta_vs_anchor = {

@@ -90,7 +90,9 @@ def _candidates():
     out = subprocess.run(
         ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
     ).stdout.split()
-    assert len(out) > 100, f"git ls-files returned only {len(out)} paths -- scope is wrong"
+    assert len(out) > 100, (
+        f"git ls-files returned only {len(out)} paths -- scope is wrong"
+    )
     keep = [
         r
         for r in out
@@ -120,8 +122,8 @@ def test_no_legacy_frontend_references():
         for i, line in enumerate(p.read_text(errors="ignore").splitlines(), 1):
             if PATTERN.search(line):
                 hits.append(f"{rel}:{i}: {line.strip()[:120]}")
-    assert not hits, (
-        "reference(s) to a deleted COARSE front-end remain:\n" + "\n".join(hits)
+    assert not hits, "reference(s) to a deleted COARSE front-end remain:\n" + "\n".join(
+        hits
     )
 
 
@@ -148,7 +150,8 @@ def test_the_allowlist_has_no_dead_entries():
             dead.append(f"{rel}: not a tracked file any more")
             continue
         if not any(
-            PATTERN.search(line) for line in path.read_text(errors="ignore").splitlines()
+            PATTERN.search(line)
+            for line in path.read_text(errors="ignore").splitlines()
         ):
             dead.append(
                 f"{rel}: contains no match for this guard's own pattern, so exempting "

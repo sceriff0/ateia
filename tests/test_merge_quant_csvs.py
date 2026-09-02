@@ -112,9 +112,7 @@ def test_reorder_puts_the_configured_fiducial_first_not_literal_dapi():
 
 def test_reorder_still_puts_dapi_first_under_the_shipped_default():
     """The shipped default must not regress: DAPI still leads for a DAPI panel."""
-    df = pd.DataFrame(
-        {"label": [1], "CD3": [1.0], "DAPI": [2.0], "PANCK": [3.0]}
-    )
+    df = pd.DataFrame({"label": [1], "CD3": [1.0], "DAPI": [2.0], "PANCK": [3.0]})
     out = mqc.reorder_columns(df.copy(), "p1", nuclear_markers=["DAPI", "CELLTOX"])
     markers = [c for c in out.columns if c in ("CD3", "DAPI", "PANCK")]
     assert markers == ["DAPI", "CD3", "PANCK"], markers
@@ -161,8 +159,12 @@ def test_configured_fiducial_is_protected_from_overwrite(tmp_path):
 
 def test_a_later_file_overwrites_an_earlier_file_s_marker(tmp_path):
     base = pd.DataFrame({"label": [1, 2], "area": [10.0, 20.0]})
-    first = _write_csv(tmp_path, "a.csv", pd.DataFrame({"label": [1, 2], "CD3": [100, 200]}))
-    second = _write_csv(tmp_path, "b.csv", pd.DataFrame({"label": [1, 2], "CD3": [999, 888]}))
+    first = _write_csv(
+        tmp_path, "a.csv", pd.DataFrame({"label": [1, 2], "CD3": [100, 200]})
+    )
+    second = _write_csv(
+        tmp_path, "b.csv", pd.DataFrame({"label": [1, 2], "CD3": [999, 888]})
+    )
 
     out = mqc.merge_intensities(base, [first, second])
 
@@ -173,8 +175,12 @@ def test_a_later_file_overwrites_an_earlier_file_s_marker(tmp_path):
 def test_protection_keeps_the_first_file_s_marker_against_a_later_file(tmp_path):
     """Protection is evaluated against the running table, so file 1 wins, not the base."""
     base = pd.DataFrame({"label": [1, 2], "area": [10.0, 20.0]})
-    first = _write_csv(tmp_path, "a.csv", pd.DataFrame({"label": [1, 2], "CD3": [100, 200]}))
-    second = _write_csv(tmp_path, "b.csv", pd.DataFrame({"label": [1, 2], "CD3": [999, 888]}))
+    first = _write_csv(
+        tmp_path, "a.csv", pd.DataFrame({"label": [1, 2], "CD3": [100, 200]})
+    )
+    second = _write_csv(
+        tmp_path, "b.csv", pd.DataFrame({"label": [1, 2], "CD3": [999, 888]})
+    )
 
     out = mqc.merge_intensities(base, [first, second], protected_cols=("CD3",))
 
@@ -184,7 +190,9 @@ def test_protection_keeps_the_first_file_s_marker_against_a_later_file(tmp_path)
 def test_a_cell_absent_from_an_intensity_file_becomes_nan(tmp_path):
     """`how="left"` semantics: the base keeps every cell, missing values are NaN."""
     base = pd.DataFrame({"label": [1, 2, 3], "area": [10.0, 20.0, 30.0]})
-    partial = _write_csv(tmp_path, "a.csv", pd.DataFrame({"label": [1, 3], "CD3": [5.0, 7.0]}))
+    partial = _write_csv(
+        tmp_path, "a.csv", pd.DataFrame({"label": [1, 3], "CD3": [5.0, 7.0]})
+    )
 
     out = mqc.merge_intensities(base, [partial])
 

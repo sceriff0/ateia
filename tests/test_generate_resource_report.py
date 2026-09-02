@@ -86,10 +86,28 @@ def test_parse_size_log(tmp_path):
 def test_rollup_by_process():
     grr = _load()
     rows = [
-        {"process": "A", "tag": "P1", "exit": "0", "realtime_s": 10.0, "cpu_pct": 100.0,
-         "peak_rss_b": 200.0, "peak_vmem_b": 300.0, "rchar_b": 5.0, "wchar_b": 2.0},
-        {"process": "A", "tag": "P2", "exit": "0", "realtime_s": 30.0, "cpu_pct": 150.0,
-         "peak_rss_b": 400.0, "peak_vmem_b": 500.0, "rchar_b": 7.0, "wchar_b": 1.0},
+        {
+            "process": "A",
+            "tag": "P1",
+            "exit": "0",
+            "realtime_s": 10.0,
+            "cpu_pct": 100.0,
+            "peak_rss_b": 200.0,
+            "peak_vmem_b": 300.0,
+            "rchar_b": 5.0,
+            "wchar_b": 2.0,
+        },
+        {
+            "process": "A",
+            "tag": "P2",
+            "exit": "0",
+            "realtime_s": 30.0,
+            "cpu_pct": 150.0,
+            "peak_rss_b": 400.0,
+            "peak_vmem_b": 500.0,
+            "rchar_b": 7.0,
+            "wchar_b": 1.0,
+        },
     ]
     roll = {r["process"]: r for r in grr.rollup_by_process(rows)}
     a = roll["A"]
@@ -108,8 +126,8 @@ def test_join_size_exact_and_fallback():
     ]
     size = {("A", "P001"): 999}
     joined = grr.join_size(trace, size)
-    assert joined[0]["input_bytes"] == 999          # exact (process, tag)
-    assert joined[1]["input_bytes"] == 999          # fallback: same process, sample prefix
+    assert joined[0]["input_bytes"] == 999  # exact (process, tag)
+    assert joined[1]["input_bytes"] == 999  # fallback: same process, sample prefix
 
 
 def test_join_size_prefix_boundary_no_false_match():
@@ -124,9 +142,9 @@ def test_join_size_prefix_boundary_no_false_match():
     size = {("A", "P1"): 111}
     joined = grr.join_size(trace, size)
     by_tag = {j["tag"]: j["input_bytes"] for j in joined}
-    assert by_tag["P10_slideX"] is None       # P1 must not falsely match P10_...
-    assert by_tag["P1_slideY"] == 111         # legitimate "<sample>_" boundary match
-    assert by_tag["P1"] == 111                # exact match
+    assert by_tag["P10_slideX"] is None  # P1 must not falsely match P10_...
+    assert by_tag["P1_slideY"] == 111  # legitimate "<sample>_" boundary match
+    assert by_tag["P1"] == 111  # exact match
 
 
 def test_rollup_by_process_exit_dash_not_counted_as_failure():
@@ -135,10 +153,28 @@ def test_rollup_by_process_exit_dash_not_counted_as_failure():
     failure count / Retries & Failures section."""
     grr = _load()
     rows = [
-        {"process": "A", "tag": "P1", "exit": "-", "realtime_s": 1.0, "cpu_pct": None,
-         "peak_rss_b": None, "peak_vmem_b": None, "rchar_b": None, "wchar_b": None},
-        {"process": "A", "tag": "P2", "exit": "0", "realtime_s": 1.0, "cpu_pct": None,
-         "peak_rss_b": None, "peak_vmem_b": None, "rchar_b": None, "wchar_b": None},
+        {
+            "process": "A",
+            "tag": "P1",
+            "exit": "-",
+            "realtime_s": 1.0,
+            "cpu_pct": None,
+            "peak_rss_b": None,
+            "peak_vmem_b": None,
+            "rchar_b": None,
+            "wchar_b": None,
+        },
+        {
+            "process": "A",
+            "tag": "P2",
+            "exit": "0",
+            "realtime_s": 1.0,
+            "cpu_pct": None,
+            "peak_rss_b": None,
+            "peak_vmem_b": None,
+            "rchar_b": None,
+            "wchar_b": None,
+        },
     ]
     roll = {r["process"]: r for r in grr.rollup_by_process(rows)}
     assert roll["A"]["n_failed"] == 0
@@ -147,9 +183,19 @@ def test_rollup_by_process_exit_dash_not_counted_as_failure():
 def test_build_html_exit_dash_excluded_from_failures():
     grr = _load()
     trace_rows = [
-        {"process": "A", "tag": "P1", "status": "ABORTED", "exit": "-",
-         "realtime_s": 1.0, "peak_rss_b": None, "peak_vmem_b": None,
-         "rchar_b": None, "wchar_b": None, "cpu_pct": None, "duration_s": None},
+        {
+            "process": "A",
+            "tag": "P1",
+            "status": "ABORTED",
+            "exit": "-",
+            "realtime_s": 1.0,
+            "peak_rss_b": None,
+            "peak_vmem_b": None,
+            "rchar_b": None,
+            "wchar_b": None,
+            "cpu_pct": None,
+            "duration_s": None,
+        },
     ]
     html_out = grr.build_html(trace_rows, {}, "ts")
     assert "<tr><th>Failed/non-zero exit</th><td>0</td></tr>" in html_out
@@ -172,10 +218,20 @@ def test_cli_writes_report(tmp_path):
         "MIRAGE:PRE:CONVERT_IMAGE,P001,a.tiff,1073741824\n"
     )
     out = tmp_path / "resource.html"
-    r = subprocess.run([
-        sys.executable, str(SCRIPT),
-        "--trace", str(trace), "--size-log", str(size), "--output", str(out),
-    ], capture_output=True, text=True)
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--trace",
+            str(trace),
+            "--size-log",
+            str(size),
+            "--output",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+    )
     assert r.returncode == 0, r.stderr
     html = out.read_text()
     assert "Resource" in html
@@ -186,12 +242,20 @@ def test_cli_writes_report(tmp_path):
 
 def test_cli_missing_inputs_is_graceful(tmp_path):
     out = tmp_path / "resource.html"
-    r = subprocess.run([
-        sys.executable, str(SCRIPT),
-        "--trace", str(tmp_path / "nope.txt"),
-        "--size-log", str(tmp_path / "nope.csv"),
-        "--output", str(out),
-    ], capture_output=True, text=True)
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--trace",
+            str(tmp_path / "nope.txt"),
+            "--size-log",
+            str(tmp_path / "nope.csv"),
+            "--output",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+    )
     assert r.returncode == 0, r.stderr
     assert out.exists()
     assert "not available" in out.read_text().lower()
@@ -200,9 +264,18 @@ def test_cli_missing_inputs_is_graceful(tmp_path):
 def test_build_html_keeps_zero_byte_matched_input(tmp_path):
     grr = _load()
     trace_rows = [
-        {"process": "A", "tag": "P001", "exit": "0", "realtime_s": 1.0,
-         "peak_rss_b": 100.0, "peak_vmem_b": None, "rchar_b": None,
-         "wchar_b": None, "cpu_pct": None, "duration_s": None},
+        {
+            "process": "A",
+            "tag": "P001",
+            "exit": "0",
+            "realtime_s": 1.0,
+            "peak_rss_b": 100.0,
+            "peak_vmem_b": None,
+            "rchar_b": None,
+            "wchar_b": None,
+            "cpu_pct": None,
+            "duration_s": None,
+        },
     ]
     size_map = {("A", "P001"): 0}
 
@@ -212,8 +285,8 @@ def test_build_html_keeps_zero_byte_matched_input(tmp_path):
 
     section_marker = "<h2>Resource vs Input Size</h2>"
     assert section_marker in html
-    section = html[html.index(section_marker):]
-    section = section[:section.index("</section>")]
+    section = html[html.index(section_marker) :]
+    section = section[: section.index("</section>")]
 
     # The zero-byte but matched row must still appear in the section (not
     # dropped as "unmatched"), and the ratio cell must be empty (N/A), not a
@@ -228,9 +301,19 @@ def test_build_html_escapes_html_special_process_and_tag():
     CSV/trace field) must be escaped, never injected raw into the report."""
     grr = _load()
     trace_rows = [
-        {"process": "A & B", "tag": "<b>P001</b>", "status": "COMPLETED",
-         "exit": "0", "realtime_s": 1.0, "peak_rss_b": 10.0, "peak_vmem_b": None,
-         "rchar_b": None, "wchar_b": None, "cpu_pct": None, "duration_s": None},
+        {
+            "process": "A & B",
+            "tag": "<b>P001</b>",
+            "status": "COMPLETED",
+            "exit": "0",
+            "realtime_s": 1.0,
+            "peak_rss_b": 10.0,
+            "peak_vmem_b": None,
+            "rchar_b": None,
+            "wchar_b": None,
+            "cpu_pct": None,
+            "duration_s": None,
+        },
     ]
     html_out = grr.build_html(trace_rows, {}, "ts")
     assert "<b>P001</b>" not in html_out
@@ -242,9 +325,19 @@ def test_build_html_escapes_html_special_process_and_tag():
 def test_build_html_escapes_failing_task_status_and_exit():
     grr = _load()
     trace_rows = [
-        {"process": "A", "tag": "P1", "status": "<i>FAILED</i>", "exit": "1 & 2",
-         "realtime_s": 1.0, "peak_rss_b": None, "peak_vmem_b": None,
-         "rchar_b": None, "wchar_b": None, "cpu_pct": None, "duration_s": None},
+        {
+            "process": "A",
+            "tag": "P1",
+            "status": "<i>FAILED</i>",
+            "exit": "1 & 2",
+            "realtime_s": 1.0,
+            "peak_rss_b": None,
+            "peak_vmem_b": None,
+            "rchar_b": None,
+            "wchar_b": None,
+            "cpu_pct": None,
+            "duration_s": None,
+        },
     ]
     html_out = grr.build_html(trace_rows, {}, "ts")
     assert "<i>FAILED</i>" not in html_out
@@ -256,12 +349,22 @@ def test_build_html_escapes_failing_task_status_and_exit():
 def test_build_html_cpu_max_pct_has_percent_suffix():
     grr = _load()
     trace_rows = [
-        {"process": "A", "tag": "P1", "status": "COMPLETED", "exit": "0",
-         "realtime_s": 1.0, "peak_rss_b": None, "peak_vmem_b": None,
-         "rchar_b": None, "wchar_b": None, "cpu_pct": 87.5, "duration_s": None},
+        {
+            "process": "A",
+            "tag": "P1",
+            "status": "COMPLETED",
+            "exit": "0",
+            "realtime_s": 1.0,
+            "peak_rss_b": None,
+            "peak_vmem_b": None,
+            "rchar_b": None,
+            "wchar_b": None,
+            "cpu_pct": 87.5,
+            "duration_s": None,
+        },
     ]
     html_out = grr.build_html(trace_rows, {}, "ts")
     section_marker = "<h2>Per-Process Resource Rollup</h2>"
-    section = html_out[html_out.index(section_marker):]
-    section = section[:section.index("</section>")]
+    section = html_out[html_out.index(section_marker) :]
+    section = section[: section.index("</section>")]
     assert "87.5%" in section

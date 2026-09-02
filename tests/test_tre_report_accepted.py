@@ -37,7 +37,13 @@ from tre_report import build_tre_report  # noqa: E402
 
 
 def _rec(ix, iy, tre, accepted=None):
-    r = {"ix": ix, "iy": iy, "cx": float(ix * 10), "cy": float(iy * 10), "tre_rigid": tre}
+    r = {
+        "ix": ix,
+        "iy": iy,
+        "cx": float(ix * 10),
+        "cy": float(iy * 10),
+        "tre_rigid": tre,
+    }
     if accepted is not None:
         r["accepted"] = accepted
     return r
@@ -111,23 +117,46 @@ def test_solve_marks_a_low_confidence_control_as_rejected_in_the_tre_report(tmp_
     )
 
     # Two tiles: one confident real match, one background tile whose peak is an artefact.
-    good = {"ix": 0, "iy": 0, "cx": 0.0, "cy": 0.0, "dx": 2.0, "dy": -1.0,
-            "tre": 2.24, "error": 0.04}
-    bad = {"ix": 1, "iy": 0, "cx": 100.0, "cy": 0.0, "dx": 60.0, "dy": 8.0,
-           "tre": 60.5, "error": 0.9999}
+    good = {
+        "ix": 0,
+        "iy": 0,
+        "cx": 0.0,
+        "cy": 0.0,
+        "dx": 2.0,
+        "dy": -1.0,
+        "tre": 2.24,
+        "error": 0.04,
+    }
+    bad = {
+        "ix": 1,
+        "iy": 0,
+        "cx": 100.0,
+        "cy": 0.0,
+        "dx": 60.0,
+        "dy": 8.0,
+        "tre": 60.5,
+        "error": 0.9999,
+    }
     (tmp_path / "ctrl_0.json").write_text(json.dumps(good))
     (tmp_path / "ctrl_1.json").write_text(json.dumps(bad))
 
     tre_f = tmp_path / "tre.json"
     tiled_solve.main(
         [
-            "--m0", str(m0),
-            "--controls", str(tmp_path / "ctrl_*.json"),
-            "--gate-tre", "1.0",
-            "--max-error", "0.99",
-            "--moving-name", "mov",
-            "--out-manifest", str(tmp_path / "manifest.json"),
-            "--out-tre", str(tre_f),
+            "--m0",
+            str(m0),
+            "--controls",
+            str(tmp_path / "ctrl_*.json"),
+            "--gate-tre",
+            "1.0",
+            "--max-error",
+            "0.99",
+            "--moving-name",
+            "mov",
+            "--out-manifest",
+            str(tmp_path / "manifest.json"),
+            "--out-tre",
+            str(tre_f),
         ]
     )
 
@@ -157,24 +186,51 @@ def test_solve_tre_summary_ignores_the_rejected_control(tmp_path):
         )
     )
     (tmp_path / "ctrl_0.json").write_text(
-        json.dumps({"ix": 0, "iy": 0, "cx": 0.0, "cy": 0.0, "dx": 2.0, "dy": -1.0,
-                    "tre": 2.0, "error": 0.04})
+        json.dumps(
+            {
+                "ix": 0,
+                "iy": 0,
+                "cx": 0.0,
+                "cy": 0.0,
+                "dx": 2.0,
+                "dy": -1.0,
+                "tre": 2.0,
+                "error": 0.04,
+            }
+        )
     )
     (tmp_path / "ctrl_1.json").write_text(
-        json.dumps({"ix": 1, "iy": 0, "cx": 100.0, "cy": 0.0, "dx": 60.0, "dy": 8.0,
-                    "tre": 60.0, "error": 0.9999})
+        json.dumps(
+            {
+                "ix": 1,
+                "iy": 0,
+                "cx": 100.0,
+                "cy": 0.0,
+                "dx": 60.0,
+                "dy": 8.0,
+                "tre": 60.0,
+                "error": 0.9999,
+            }
+        )
     )
 
     tre_f = tmp_path / "tre.json"
     tiled_solve.main(
         [
-            "--m0", str(m0),
-            "--controls", str(tmp_path / "ctrl_*.json"),
-            "--gate-tre", "1.0",
-            "--max-error", "0.99",
-            "--moving-name", "mov",
-            "--out-manifest", str(tmp_path / "manifest.json"),
-            "--out-tre", str(tre_f),
+            "--m0",
+            str(m0),
+            "--controls",
+            str(tmp_path / "ctrl_*.json"),
+            "--gate-tre",
+            "1.0",
+            "--max-error",
+            "0.99",
+            "--moving-name",
+            "mov",
+            "--out-manifest",
+            str(tmp_path / "manifest.json"),
+            "--out-tre",
+            str(tre_f),
         ]
     )
 
@@ -215,8 +271,22 @@ def test_qc_summary_surfaces_the_accepted_and_rejected_counts(tmp_path):
     p = _write_tre(
         tmp_path,
         [
-            {"ix": 0, "iy": 0, "cx": 0.0, "cy": 0.0, "tre_rigid": 2.0, "accepted": True},
-            {"ix": 1, "iy": 0, "cx": 10.0, "cy": 0.0, "tre_rigid": 131.5, "accepted": False},
+            {
+                "ix": 0,
+                "iy": 0,
+                "cx": 0.0,
+                "cy": 0.0,
+                "tre_rigid": 2.0,
+                "accepted": True,
+            },
+            {
+                "ix": 1,
+                "iy": 0,
+                "cx": 10.0,
+                "cy": 0.0,
+                "tre_rigid": 131.5,
+                "accepted": False,
+            },
         ],
         n_accepted=1,
         n_rejected=1,
@@ -235,9 +305,30 @@ def test_heatmap_colour_scale_ignores_rejected_tiles(tmp_path):
     p = _write_tre(
         tmp_path,
         [
-            {"ix": 0, "iy": 0, "cx": 0.0, "cy": 0.0, "tre_rigid": 1.0, "accepted": True},
-            {"ix": 1, "iy": 0, "cx": 10.0, "cy": 0.0, "tre_rigid": 3.0, "accepted": True},
-            {"ix": 2, "iy": 0, "cx": 20.0, "cy": 0.0, "tre_rigid": 131.5, "accepted": False},
+            {
+                "ix": 0,
+                "iy": 0,
+                "cx": 0.0,
+                "cy": 0.0,
+                "tre_rigid": 1.0,
+                "accepted": True,
+            },
+            {
+                "ix": 1,
+                "iy": 0,
+                "cx": 10.0,
+                "cy": 0.0,
+                "tre_rigid": 3.0,
+                "accepted": True,
+            },
+            {
+                "ix": 2,
+                "iy": 0,
+                "cx": 20.0,
+                "cy": 0.0,
+                "tre_rigid": 131.5,
+                "accepted": False,
+            },
         ],
     )
     svg = gqr._tiled_tre_heatmap_svg(gqr.parse_tiled_tre_json(str(p)))
@@ -253,8 +344,22 @@ def test_heatmap_marks_a_rejected_tile_as_rejected(tmp_path):
     p = _write_tre(
         tmp_path,
         [
-            {"ix": 0, "iy": 0, "cx": 0.0, "cy": 0.0, "tre_rigid": 1.0, "accepted": True},
-            {"ix": 1, "iy": 0, "cx": 10.0, "cy": 0.0, "tre_rigid": 131.5, "accepted": False},
+            {
+                "ix": 0,
+                "iy": 0,
+                "cx": 0.0,
+                "cy": 0.0,
+                "tre_rigid": 1.0,
+                "accepted": True,
+            },
+            {
+                "ix": 1,
+                "iy": 0,
+                "cx": 10.0,
+                "cy": 0.0,
+                "tre_rigid": 131.5,
+                "accepted": False,
+            },
         ],
     )
     svg = gqr._tiled_tre_heatmap_svg(gqr.parse_tiled_tre_json(str(p)))
@@ -280,15 +385,36 @@ def test_heatmap_unchanged_when_no_tile_carries_an_accepted_key(tmp_path):
 
 
 def test_summary_table_tiles_column_shows_how_many_were_used(tmp_path):
-    """"Tiles: 3" hides that only 2 of them built the mesh."""
+    """ "Tiles: 3" hides that only 2 of them built the mesh."""
     import generate_qc_report as gqr
 
     p = _write_tre(
         tmp_path,
         [
-            {"ix": 0, "iy": 0, "cx": 0.0, "cy": 0.0, "tre_rigid": 1.0, "accepted": True},
-            {"ix": 1, "iy": 0, "cx": 10.0, "cy": 0.0, "tre_rigid": 3.0, "accepted": True},
-            {"ix": 2, "iy": 0, "cx": 20.0, "cy": 0.0, "tre_rigid": 131.5, "accepted": False},
+            {
+                "ix": 0,
+                "iy": 0,
+                "cx": 0.0,
+                "cy": 0.0,
+                "tre_rigid": 1.0,
+                "accepted": True,
+            },
+            {
+                "ix": 1,
+                "iy": 0,
+                "cx": 10.0,
+                "cy": 0.0,
+                "tre_rigid": 3.0,
+                "accepted": True,
+            },
+            {
+                "ix": 2,
+                "iy": 0,
+                "cx": 20.0,
+                "cy": 0.0,
+                "tre_rigid": 131.5,
+                "accepted": False,
+            },
         ],
         n_tiles=3,
         n_accepted=2,

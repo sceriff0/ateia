@@ -104,7 +104,9 @@ def test_no_reg_ashlar_params_remain():
     )
 
     schema_text = (REPO / "nextflow_schema.json").read_text()
-    assert "reg_tiled_tile" in schema_text, "nextflow_schema.json read back empty or wrong"
+    assert "reg_tiled_tile" in schema_text, (
+        "nextflow_schema.json read back empty or wrong"
+    )
     assert "reg_ashlar_" not in schema_text, "reg_ashlar_* still in the schema"
 
 
@@ -150,4 +152,6 @@ def test_no_ashlar_withname_selector_survives_in_conf_modules_config():
         "check below proves nothing"
     )
     offenders = [n for n in names if n.upper().startswith("ASHLAR")]
-    assert not offenders, f"ashlar withName: selector(s) still in conf/modules.config: {offenders}"
+    assert not offenders, (
+        f"ashlar withName: selector(s) still in conf/modules.config: {offenders}"
+    )

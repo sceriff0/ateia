@@ -158,7 +158,9 @@ def main(argv=None) -> int:
     try:
         mov_src, _mov_dtype, mov_close = open_lazy(a.moving)
         try:
-            _c, h, w = ref_src.shape  # FULL-resolution reference dims: the tile plan's frame
+            _c, h, w = (
+                ref_src.shape
+            )  # FULL-resolution reference dims: the tile plan's frame
             _mc, mh, mw = mov_src.shape
             # ONE factor for both slides: the matcher matches descriptors across the two
             # thumbnails, so a per-slide factor would introduce a scale change M0 cannot

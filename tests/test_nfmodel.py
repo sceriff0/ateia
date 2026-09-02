@@ -4,6 +4,7 @@ Each test here plants a construct that historically defeated a private
 regex parse, and asserts the model still sees the code that follows it.
 A guard built on this model is only as trustworthy as this file.
 """
+
 import re
 
 from tests.nfmodel import (
@@ -399,12 +400,16 @@ def test_flat_tree_scanners_are_really_flat():
     """Each FLAT_TREE_SCANNERS entry must exist, still be discovered (otherwise the
     exemption is dead weight and must be removed), enumerate the tracked tree via
     `git ls-files`, and carry no Nextflow-parsing machinery of its own."""
-    discovered = {p.relative_to(REPO_ROOT).as_posix() for p in _discover_nf_source_readers()}
+    discovered = {
+        p.relative_to(REPO_ROOT).as_posix() for p in _discover_nf_source_readers()
+    }
     problems = []
     for rel in FLAT_TREE_SCANNERS:
         path = REPO_ROOT / rel
         if not path.is_file():
-            problems.append(f"{rel}: no longer exists -- remove it from FLAT_TREE_SCANNERS")
+            problems.append(
+                f"{rel}: no longer exists -- remove it from FLAT_TREE_SCANNERS"
+            )
             continue
         if rel not in discovered:
             problems.append(
@@ -417,7 +422,7 @@ def test_flat_tree_scanners_are_really_flat():
         # been swapped for a diff against HEAD~1. Watched failing before being trusted.
         if '["git", "ls-files"]' not in text:
             problems.append(
-                f"{rel}: does not invoke `[\"git\", \"ls-files\"]` to enumerate the tracked "
+                f'{rel}: does not invoke `["git", "ls-files"]` to enumerate the tracked '
                 "tree, so it is not a whole-tree flat scan -- it does not qualify for this "
                 "exemption"
             )
@@ -463,7 +468,9 @@ WORKFLOW_YAML_GUARDS = {
 
 # A path CONSTRUCTED to a Nextflow/Groovy source file -- `ROOT / "modules/local/x.nf"`,
 # `REPO / f"{name}.groovy"` -- as opposed to a `.nf` path merely quoted in a string.
-_CONSTRUCTS_NF_PATH_RE = re.compile(r"(?:ROOT|REPO|REPO_ROOT)\s*/[^\n]*\.(?:nf|groovy)\b")
+_CONSTRUCTS_NF_PATH_RE = re.compile(
+    r"(?:ROOT|REPO|REPO_ROOT)\s*/[^\n]*\.(?:nf|groovy)\b"
+)
 _GLOBS_NF_RE = re.compile(r"r?glob\(\s*[\"'][^\"']*\.(?:nf|groovy)")
 
 
@@ -471,12 +478,16 @@ def test_workflow_yaml_guards_really_only_parse_workflow_yaml():
     """Each WORKFLOW_YAML_GUARDS entry must exist, still be discovered (otherwise
     the exemption is dead weight and must be removed), actually parse YAML, and
     construct no path to a Nextflow or Groovy source file."""
-    discovered = {p.relative_to(REPO_ROOT).as_posix() for p in _discover_nf_source_readers()}
+    discovered = {
+        p.relative_to(REPO_ROOT).as_posix() for p in _discover_nf_source_readers()
+    }
     problems = []
     for rel in WORKFLOW_YAML_GUARDS:
         path = REPO_ROOT / rel
         if not path.is_file():
-            problems.append(f"{rel}: no longer exists -- remove it from WORKFLOW_YAML_GUARDS")
+            problems.append(
+                f"{rel}: no longer exists -- remove it from WORKFLOW_YAML_GUARDS"
+            )
             continue
         if rel not in discovered:
             problems.append(
@@ -556,7 +567,9 @@ def test_allowlist_only_shrinks():
     repointed by a later task without being removed here -- is a hard
     failure. The list may only ever be edited to shrink it; it cannot be left
     to rot in place the way GUARDS did."""
-    discovered = {p.relative_to(REPO_ROOT).as_posix() for p in _discover_nf_source_readers()}
+    discovered = {
+        p.relative_to(REPO_ROOT).as_posix() for p in _discover_nf_source_readers()
+    }
     stale = []
     for rel in UNREPOINTED_NF_SOURCE_READERS:
         path = REPO_ROOT / rel
@@ -564,7 +577,9 @@ def test_allowlist_only_shrinks():
             stale.append(f"{rel}: no longer exists -- remove it from the allowlist")
             continue
         if "from tests.nfmodel import" in path.read_text():
-            stale.append(f"{rel}: already imports tests.nfmodel -- remove it from the allowlist")
+            stale.append(
+                f"{rel}: already imports tests.nfmodel -- remove it from the allowlist"
+            )
             continue
         if rel not in discovered:
             stale.append(

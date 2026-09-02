@@ -106,7 +106,9 @@ def test_string_nullable_params_are_not_flagged():
 
 def test_the_detector_recognises_the_shape_it_is_meant_to_catch():
     """Pin the regex against the exact removed line, so it cannot rot into a no-op."""
-    removed = "            def maxDisp = params.reg_tiled_max_disp ?: params.reg_tiled_halo"
+    removed = (
+        "            def maxDisp = params.reg_tiled_max_disp ?: params.reg_tiled_halo"
+    )
 
     assert _ELVIS.findall(removed) == ["reg_tiled_max_disp"]
 

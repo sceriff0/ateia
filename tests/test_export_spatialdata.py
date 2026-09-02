@@ -254,9 +254,7 @@ def test_read_pyramid_lazy_matches_the_base_level(tmp_path, monkeypatch):
 
     assert isinstance(result, da.Array)
     assert np.array_equal(np.asarray(result), expected)
-    assert np.array_equal(
-        np.asarray(result[:, 10:20, 5:15]), expected[:, 10:20, 5:15]
-    )
+    assert np.array_equal(np.asarray(result[:, 10:20, 5:15]), expected[:, 10:20, 5:15])
     assert calls and calls[0].get("aszarr") is True and calls[0].get("level") == 0
 
 

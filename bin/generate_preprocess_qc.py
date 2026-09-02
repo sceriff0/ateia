@@ -240,7 +240,9 @@ def generate_preprocess_qc(
 
             # Normalize for visualization
             normalized = normalize_image(
-                channel_img, percentile_low=percentile_low, percentile_high=percentile_high
+                channel_img,
+                percentile_low=percentile_low,
+                percentile_high=percentile_high,
             )
 
             # Downsample

@@ -31,8 +31,23 @@ _SLASHY_PRECEDERS = set("([{,;=~!&|?:+-*%<>^")
 # real code out of the view. The classification is token-aware for that reason.
 _SLASHY_KEYWORDS = frozenset(
     {
-        "return", "case", "in", "when", "else", "assert", "new", "instanceof",
-        "if", "while", "do", "switch", "throw", "yield", "and", "or", "not",
+        "return",
+        "case",
+        "in",
+        "when",
+        "else",
+        "assert",
+        "new",
+        "instanceof",
+        "if",
+        "while",
+        "do",
+        "switch",
+        "throw",
+        "yield",
+        "and",
+        "or",
+        "not",
     }
 )
 
@@ -109,7 +124,11 @@ def code_view(path: Path) -> str:
                 i += 2
                 continue
             if src.startswith("'''", i) or src.startswith('"""', i):
-                state = {"q": src[i : i + 3], "interp": c == '"', "line": _line_of(src, i)}
+                state = {
+                    "q": src[i : i + 3],
+                    "interp": c == '"',
+                    "line": _line_of(src, i),
+                }
                 i += 3
                 continue
             if c in "'\"":
@@ -124,7 +143,11 @@ def code_view(path: Path) -> str:
                 # (delimiter balance, and no raw newline inside a '' or ""
                 # string) are what catch the cases it gets wrong.
                 prev, word = prev_significant(i)
-                if prev is None or prev in _SLASHY_PRECEDERS or word in _SLASHY_KEYWORDS:
+                if (
+                    prev is None
+                    or prev in _SLASHY_PRECEDERS
+                    or word in _SLASHY_KEYWORDS
+                ):
                     state = {"q": "/", "interp": True, "line": _line_of(src, i)}
                     i += 1
                     continue

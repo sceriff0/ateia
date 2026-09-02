@@ -165,8 +165,12 @@ def test_versions_calls_are_literal_or_symmetric_between_script_and_stub():
         script_args = [args for method, args in calls if method == "versions"]
         stub_args = [args for method, args in calls if method == "versionsStub"]
 
-        non_literal_script = [a for a in script_args if a is None or not LITERAL_ARGS_RE.match(a)]
-        non_literal_stub = [a for a in stub_args if a is None or not LITERAL_ARGS_RE.match(a)]
+        non_literal_script = [
+            a for a in script_args if a is None or not LITERAL_ARGS_RE.match(a)
+        ]
+        non_literal_stub = [
+            a for a in stub_args if a is None or not LITERAL_ARGS_RE.match(a)
+        ]
         if not non_literal_script and not non_literal_stub:
             continue
 
@@ -267,10 +271,14 @@ def test_script_and_stub_ask_for_the_same_tool_list():
         text = nf.read_text()
         calls = _extract_calls(text)
         script_calls = [
-            LITERAL_ARGS_RE.match(args).group(1) for method, args in calls if method == "versions" and args and LITERAL_ARGS_RE.match(args)
+            LITERAL_ARGS_RE.match(args).group(1)
+            for method, args in calls
+            if method == "versions" and args and LITERAL_ARGS_RE.match(args)
         ]
         stub_calls = [
-            LITERAL_ARGS_RE.match(args).group(1) for method, args in calls if method == "versionsStub" and args and LITERAL_ARGS_RE.match(args)
+            LITERAL_ARGS_RE.match(args).group(1)
+            for method, args in calls
+            if method == "versionsStub" and args and LITERAL_ARGS_RE.match(args)
         ]
         if not script_calls and not stub_calls:
             continue

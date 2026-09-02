@@ -18,7 +18,8 @@ import pytest
 import tifffile
 
 _SPEC = importlib.util.spec_from_file_location(
-    "pixel_size", Path(__file__).resolve().parent.parent / "bin" / "utils" / "pixel_size.py"
+    "pixel_size",
+    Path(__file__).resolve().parent.parent / "bin" / "utils" / "pixel_size.py",
 )
 ps = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(ps)

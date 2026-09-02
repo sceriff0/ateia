@@ -56,7 +56,9 @@ def _offending_blocks(text):
             if w.strip().startswith("}") and len(block) > 1:
                 break
         joined = "\n".join(block)
-        if re.search(r"(^|\W)error\s+[\"']", joined) or re.search(r"(^|\W)error\s*\(", joined):
+        if re.search(r"(^|\W)error\s+[\"']", joined) or re.search(
+            r"(^|\W)error\s*\(", joined
+        ):
             yield i + 1, joined
 
 

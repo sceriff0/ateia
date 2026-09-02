@@ -52,16 +52,25 @@ def exported(tmp_path_factory):
     out = tmp_path_factory.mktemp("geojson")
     proc = subprocess.run(
         [
-            sys.executable, str(SCRIPT),
-            "--cell_data", str(CELL_CSV),
-            "-o", str(out),
-            "--contours_json", str(CONTOURS),
-            "--nucleus_contours_json", str(CONTOURS),
-            "--pixel_size", "0.325",
+            sys.executable,
+            str(SCRIPT),
+            "--cell_data",
+            str(CELL_CSV),
+            "-o",
+            str(out),
+            "--contours_json",
+            str(CONTOURS),
+            "--nucleus_contours_json",
+            str(CONTOURS),
+            "--pixel_size",
+            "0.325",
         ],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
-    assert proc.returncode == 0, f"export_geojson.py exited {proc.returncode}:\n{proc.stderr}"
+    assert proc.returncode == 0, (
+        f"export_geojson.py exited {proc.returncode}:\n{proc.stderr}"
+    )
     return out, proc.stderr + proc.stdout
 
 
@@ -97,7 +106,9 @@ def test_each_feature_carries_a_closed_polygon_ring(exported):
     {"coordinates": ...} wrapper, which yields a one-element 'ring' that is a dict."""
     out, log = exported
     features = json.loads((out / "cells.geojson").read_text())["features"]
-    assert features, "no features to inspect -- see test_every_csv_row_becomes_a_feature"
+    assert features, (
+        "no features to inspect -- see test_every_csv_row_becomes_a_feature"
+    )
     for i, feat in enumerate(features):
         geom = feat["geometry"]
         assert geom["type"] == "Polygon", (
@@ -127,4 +138,6 @@ def test_every_feature_has_a_nucleus_geometry(exported):
         f"list.\n\n{log}"
     )
     without = [i for i, f in enumerate(features) if not f.get("nucleusGeometry")]
-    assert not without, f"{len(without)} feature(s) carry no nucleusGeometry: {without[:5]}"
+    assert not without, (
+        f"{len(without)} feature(s) carry no nucleusGeometry: {without[:5]}"
+    )

@@ -87,7 +87,7 @@ ALLOWED: dict[tuple[str, str], str] = {
         "`find` exits 1 when a named path does not exist, and a REGISTER task whose "
         "`input_*` glob matched nothing is a case the script handles rather than an "
         "error. The real, named assertion is twenty lines below in the same block -- "
-        "`if [ \"$file_count\" -eq 0 ]; then ... exit 1; fi` -- so nothing is "
+        '`if [ "$file_count" -eq 0 ]; then ... exit 1; fi` -- so nothing is '
         "swallowed; it is simply not on the NEXT line, which is why this is an entry "
         "here instead of a rewrite.\n"
         "It was left alone deliberately, and the cost of changing it is the reason: "
@@ -121,7 +121,11 @@ def _tracked(*patterns: str) -> list[Path]:
     those and report a `|| true` nobody committed.
     """
     out = subprocess.run(
-        ["git", "ls-files", *patterns], cwd=REPO, capture_output=True, text=True, check=True
+        ["git", "ls-files", *patterns],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.split()
     return [REPO / rel for rel in out]
 
@@ -148,11 +152,7 @@ def _clean(text: str) -> str:
 
 
 def _hits(where: str, text: str) -> list[tuple[str, str]]:
-    return [
-        (where, line.strip())
-        for line in text.splitlines()
-        if NEEDLE in line
-    ]
+    return [(where, line.strip()) for line in text.splitlines() if NEEDLE in line]
 
 
 def _all_hits() -> list[tuple[str, str]]:

@@ -156,7 +156,7 @@ def extract_param_references() -> set[str]:
     refs: set[str] = set()
     patterns = [
         "main.nf",
-        "workflows/**/*.nf",   # a typo'd params.foo here read null and no guard saw it
+        "workflows/**/*.nf",  # a typo'd params.foo here read null and no guard saw it
         "subworkflows/**/*.nf",
         "modules/**/*.nf",
         "lib/**/*.groovy",
@@ -195,7 +195,9 @@ def values_equal(config_value, schema_value) -> bool:
     return config_value == schema_value
 
 
-def check_default_agreement(config_text: str, schema_props: dict[str, dict]) -> list[str]:
+def check_default_agreement(
+    config_text: str, schema_props: dict[str, dict]
+) -> list[str]:
     """Report params whose schema default contradicts their nextflow.config default."""
     config_defaults = extract_config_defaults(config_text)
     drift: list[str] = []
@@ -214,9 +216,13 @@ def check_default_agreement(config_text: str, schema_props: dict[str, dict]) -> 
             if has_schema_default and schema_value is not None:
                 drift.append(f"{name}: schema={schema_value!r}, nextflow.config=null")
         elif not has_schema_default:
-            drift.append(f"{name}: schema has no default, nextflow.config={config_value!r}")
+            drift.append(
+                f"{name}: schema has no default, nextflow.config={config_value!r}"
+            )
         elif not values_equal(config_value, schema_value):
-            drift.append(f"{name}: schema={schema_value!r}, nextflow.config={config_value!r}")
+            drift.append(
+                f"{name}: schema={schema_value!r}, nextflow.config={config_value!r}"
+            )
 
     return drift
 

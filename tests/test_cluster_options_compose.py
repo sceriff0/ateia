@@ -27,6 +27,7 @@ RegPresets tables -- and what this file guards is the thing duplication
 actually costs: the two copies drifting apart, silently, because neither one
 mentions the other at runtime.
 """
+
 import re
 
 from tests.nfmodel import REPO_ROOT, strip_comments, with_name_blocks
@@ -52,7 +53,7 @@ def _profile_cluster_options_body():
     while i < len(src) and depth:
         depth += (src[i] == "{") - (src[i] == "}")
         i += 1
-    return src[start:i - 1]
+    return src[start : i - 1]
 
 
 def _process_cluster_options():
@@ -66,7 +67,7 @@ def _process_cluster_options():
             while i < len(block.body) and depth:
                 depth += (block.body[i] == "{") - (block.body[i] == "}")
                 i += 1
-            out.append((block.selector, block.start_line, commentless[start:i - 1]))
+            out.append((block.selector, block.start_line, commentless[start : i - 1]))
     return out
 
 
@@ -131,7 +132,7 @@ def test_recursion_scan_ignores_a_comment_but_catches_real_code():
     commented = (
         "withName: 'FOO' {\n"
         "    // reading task.clusterOptions here would recurse\n"
-        "    clusterOptions = { \"--account=${params.slurm_account}\" }\n"
+        '    clusterOptions = { "--account=${params.slurm_account}" }\n'
         "}\n"
     )
     live = "withName: 'FOO' {\n    clusterOptions = { task.clusterOptions + ' --extra' }\n}\n"

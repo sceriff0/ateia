@@ -202,9 +202,7 @@ def strip_comment_lines(text: str) -> str:
     stripped `#` lines since it was written: a comment explaining why a pin was
     removed necessarily quotes the pin.
     """
-    return "\n".join(
-        ln for ln in text.splitlines() if not ln.strip().startswith("#")
-    )
+    return "\n".join(ln for ln in text.splitlines() if not ln.strip().startswith("#"))
 
 
 def _run_bodies(steps) -> list[str]:
@@ -303,7 +301,7 @@ def _run_bodies_of_file(path: Path) -> list[str]:
     for job in (data.get("jobs") or {}).values():
         if isinstance(job, dict):
             out += [str(s["run"]) for s in steps_of(job) if "run" in s]
-    for step in ((data.get("runs") or {}).get("steps") or []):
+    for step in (data.get("runs") or {}).get("steps") or []:
         if isinstance(step, dict) and "run" in step:
             out.append(str(step["run"]))
     return out
@@ -538,7 +536,9 @@ def _eval_action_if(condition: str, inputs: dict[str, str]) -> bool:
     return equal if op == "==" else not equal
 
 
-def requirements_from_step(step: dict, inputs: dict[str, str] | None = None) -> list[str]:
+def requirements_from_step(
+    step: dict, inputs: dict[str, str] | None = None
+) -> list[str]:
     """requirements/*.txt files ONE step installs, in order.
 
     Three forms, all of which exist in this repo:

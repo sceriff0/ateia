@@ -10,6 +10,7 @@ of the same contract (that the vocabulary exists, that the schema enum agrees
 with Layout, that 'none' survives) is in tests/test_cleanup_vocabulary.py and
 runs everywhere.
 """
+
 import shutil
 import subprocess
 
@@ -35,10 +36,16 @@ def _launch(*args, outdir):
             # No `-q`: Nextflow's quiet mode suppresses log.warn from stdout
             # (it still reaches .nextflow.log), and two of the cases below assert on
             # a WARNING rather than a failure.
-            "nextflow", "run", ".",
-            "-profile", "test", "-stub",
-            "-params-file", "params/dry_run.json",
-            "--outdir", str(outdir),
+            "nextflow",
+            "run",
+            ".",
+            "-profile",
+            "test",
+            "-stub",
+            "-params-file",
+            "params/dry_run.json",
+            "--outdir",
+            str(outdir),
             *args,
         ],
         capture_output=True,
@@ -57,9 +64,12 @@ def test_add_cycle_at_a_cleaning_level_is_refused(tmp_path):
     BEFORE the prior-run checks, or the message a user sees is about a missing
     checkpoint rather than about the flag that caused it."""
     r = _launch(
-        "--mode", "add_cycle",
-        "--cleanup_level", "final",
-        "--prior_outdir", "/nonexistent-prior-outdir",
+        "--mode",
+        "add_cycle",
+        "--cleanup_level",
+        "final",
+        "--prior_outdir",
+        "/nonexistent-prior-outdir",
         outdir=tmp_path,
     )
     out = r.stdout + r.stderr

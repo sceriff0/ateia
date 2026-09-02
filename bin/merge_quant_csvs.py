@@ -141,9 +141,7 @@ def merge_intensities(
         logger.info("  + %s from %s", ", ".join(marker_cols), csv_file.name)
 
     if pending:
-        merged = pd.concat(
-            [merged, pd.DataFrame(pending, index=merged.index)], axis=1
-        )
+        merged = pd.concat([merged, pd.DataFrame(pending, index=merged.index)], axis=1)
 
     return merged
 

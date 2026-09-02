@@ -237,7 +237,10 @@ def apply_basic_profiles(
     tile_shape = tuple(manifest["tile_shape"])
 
     flatfields = _read_profile_stack(
-        flatfield_path, len(profile_channels), tile_shape, "flatfield",
+        flatfield_path,
+        len(profile_channels),
+        tile_shape,
+        "flatfield",
         require_positive=True,
     )
     if darkfield_path is None or not Path(darkfield_path).exists():
@@ -401,9 +404,7 @@ def apply_basic_profiles(
     clip_stats.finalize()
     out_stats.finalize()
 
-    logger.info(
-        f"[OK] Saved OME-TIFF with {n_channels} channels to {output_path}"
-    )
+    logger.info(f"[OK] Saved OME-TIFF with {n_channels} channels to {output_path}")
     # Returns the output PATH, not the pixels. The whole-array version returned the
     # assembled slide, which is precisely the object this function now exists not to
     # build; handing one back would reintroduce the peak at every call site.
@@ -416,7 +417,9 @@ def parse_args(argv=None):
     )
     parser.add_argument("--image", required=True, help="Input OME-TIFF (C, Y, X).")
     parser.add_argument("--sidecar", required=True, help="Tile-position JSON.")
-    parser.add_argument("--flatfield", required=True, help="*-ffp.ome.tif from BASICPY.")
+    parser.add_argument(
+        "--flatfield", required=True, help="*-ffp.ome.tif from BASICPY."
+    )
     # Optional: at upstream defaults BASICPY estimates no darkfield, and while it still
     # writes an all-zero *-dfp.ome.tif, a caller with none is a legitimate case.
     parser.add_argument(

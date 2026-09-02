@@ -49,7 +49,7 @@ def test_config_files_are_present_to_scan():
     files = _config_files()
     assert files, f"no conf/*.config files found under {CONF_DIR}"
     assert CONF_DIR / "modules.config" in files, (
-        "conf/modules.config is not in the scanned set: " f"{[f.name for f in files]}"
+        f"conf/modules.config is not in the scanned set: {[f.name for f in files]}"
     )
 
 

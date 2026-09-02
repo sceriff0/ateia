@@ -1426,10 +1426,16 @@ def main() -> int:
 
     # 'auto' reads the scale off the first single-channel TIFF SPLIT_CHANNELS wrote;
     # they all came from one slide, so any of them carries the same header.
-    _tiles = sorted(Path(args.input_dir).glob("*.tif")) + sorted(Path(args.input_dir).glob("*.tiff"))
+    _tiles = sorted(Path(args.input_dir).glob("*.tif")) + sorted(
+        Path(args.input_dir).glob("*.tiff")
+    )
     _probe = str(_tiles[0]) if _tiles else None
-    args.physical_size_x = resolve_pixel_size(args.physical_size_x, _probe, source=args.input_dir)
-    args.physical_size_y = resolve_pixel_size(args.physical_size_y, _probe, source=args.input_dir)
+    args.physical_size_x = resolve_pixel_size(
+        args.physical_size_x, _probe, source=args.input_dir
+    )
+    args.physical_size_y = resolve_pixel_size(
+        args.physical_size_y, _probe, source=args.input_dir
+    )
     compression = None if args.compression == "none" else args.compression
 
     # Set compression-specific arguments

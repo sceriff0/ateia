@@ -148,7 +148,16 @@ def test_lazy_path_matches_old_full_decode_oracle(tmp_path):
     # published artifact and a silent extra key is how two writers drift. Updated deliberately,
     # with the new keys named. See tests/test_foreground_fraction.py.
     assert set(result.keys()) == {
-        "ix", "iy", "cx", "cy", "dx", "dy", "tre", "error", "ref_fg", "mov_fg",
+        "ix",
+        "iy",
+        "cx",
+        "cy",
+        "dx",
+        "dy",
+        "tre",
+        "error",
+        "ref_fg",
+        "mov_fg",
     }
     assert result["ix"] == 0 and result["iy"] == 0
     assert result["cx"] == 256.0 and result["cy"] == 256.0
@@ -306,7 +315,16 @@ def test_edge_tile_outside_moving_slide_yields_zero_tile(tmp_path, monkeypatch):
     # published artifact and a silent extra key is how two writers drift. Updated deliberately,
     # with the new keys named. See tests/test_foreground_fraction.py.
     assert set(result.keys()) == {
-        "ix", "iy", "cx", "cy", "dx", "dy", "tre", "error", "ref_fg", "mov_fg",
+        "ix",
+        "iy",
+        "cx",
+        "cy",
+        "dx",
+        "dy",
+        "tre",
+        "error",
+        "ref_fg",
+        "mov_fg",
     }
 
 

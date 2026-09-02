@@ -137,8 +137,7 @@ def parse_csv_table_head(csv_path, limit):
         reader = csv.DictReader(fh)
         headers = reader.fieldnames or []
         rows = [
-            [row.get(h, "") for h in headers]
-            for row in itertools.islice(reader, limit)
+            [row.get(h, "") for h in headers] for row in itertools.islice(reader, limit)
         ]
         total = len(rows) + sum(1 for _ in reader)
     return headers, rows, total

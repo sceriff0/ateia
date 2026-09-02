@@ -186,7 +186,12 @@ def test_label_bboxes_preserves_row_order_not_sorted_order():
     import pandas as pd
 
     props_df = pd.DataFrame(
-        {"bbox-0": [1, 2, 3], "bbox-1": [1, 2, 3], "bbox-2": [4, 5, 6], "bbox-3": [4, 5, 6]},
+        {
+            "bbox-0": [1, 2, 3],
+            "bbox-1": [1, 2, 3],
+            "bbox-2": [4, 5, 6],
+            "bbox-3": [4, 5, 6],
+        },
         index=pd.Index([7, 3, 11], name="label"),
     )
 

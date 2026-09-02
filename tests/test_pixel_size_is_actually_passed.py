@@ -42,6 +42,7 @@ BIN = REPO / "bin"
 # The flags that carry a micrometres-per-pixel scale into a script.
 PIXEL_FLAGS = ("--pixel_size", "--pixel-size", "--physical-size-x", "--physical-size-y")
 
+
 # A pixel size is only ever legitimately absent from a module that never asks for one.
 # These are the scripts that DO take a scale, so a module invoking one must supply it.
 def _scripts_taking_a_scale() -> set[str]:
@@ -97,7 +98,9 @@ def test_every_module_invoking_a_scale_consumer_passes_the_scale():
         if not called:
             continue
         if not any(flag in body for flag in PIXEL_FLAGS):
-            offenders.append(f"{name} runs {', '.join(sorted(called))} without a scale flag")
+            offenders.append(
+                f"{name} runs {', '.join(sorted(called))} without a scale flag"
+            )
     assert not offenders, (
         "these modules invoke a script that converts pixels to micrometres but never "
         "pass it one, so the script falls back to whatever its own default is:\n  "

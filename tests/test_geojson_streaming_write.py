@@ -43,7 +43,10 @@ def _features(n):
         {
             "type": "Feature",
             "id": f"cell-{i}",
-            "geometry": {"type": "Polygon", "coordinates": [[[float(i), float(i + 1)]] * 4]},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[float(i), float(i + 1)]] * 4],
+            },
             "properties": {"measurements": [{"name": "CD3", "value": i * 1.5}]},
         }
         for i in range(n)
@@ -132,7 +135,9 @@ def test_export_geojson_produces_the_same_bytes_as_before_the_change(tmp_path):
     )
     out = tmp_path / "cells.geojson"
 
-    n = eg.export_geojson(df=df, output_path=str(out), pixel_size=0.325, marker_cols=["CD3"])
+    n = eg.export_geojson(
+        df=df, output_path=str(out), pixel_size=0.325, marker_cols=["CD3"]
+    )
 
     doc = json.loads(out.read_text())
     assert n == 3

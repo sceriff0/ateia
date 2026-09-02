@@ -69,7 +69,9 @@ def _boolean_params():
             walk(v)
 
     walk(schema)
-    assert names, "schema walk found no boolean params -- the guard would pass vacuously"
+    assert names, (
+        "schema walk found no boolean params -- the guard would pass vacuously"
+    )
     return names
 
 
@@ -136,7 +138,9 @@ def test_the_detector_recognises_the_form_that_actually_fails():
 def test_the_detector_leaves_the_working_forms_alone():
     params = _boolean_params()
 
-    assert not list(_offending_lines("nextflow run . -params-file params/dry_run.json\n", params))
+    assert not list(
+        _offending_lines("nextflow run . -params-file params/dry_run.json\n", params)
+    )
     assert not list(_offending_lines("nextflow run . -profile test,docker\n", params))
     # a non-boolean param legitimately takes a CLI value
     assert not list(_offending_lines("nextflow run . --start preprocessing\n", params))
@@ -177,10 +181,17 @@ def test_no_shell_script_passes_a_boolean_param_on_the_command_line():
     root = Path(__file__).resolve().parents[1]
     bools = _boolean_params()  # noqa: F821 - defined above in this module
 
-    listed = subprocess.run(["git", "ls-files", "*.sh"], cwd=root,
-                            capture_output=True, text=True, check=True).stdout.split()
+    listed = subprocess.run(
+        ["git", "ls-files", "*.sh"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
     scripts = sorted(root / rel for rel in listed)
-    assert scripts, "found no tracked .sh files -- the enumerator is wrong, not the repo"
+    assert scripts, (
+        "found no tracked .sh files -- the enumerator is wrong, not the repo"
+    )
 
     offenders = []
     for sh in scripts:
@@ -192,4 +203,5 @@ def test_no_shell_script_passes_a_boolean_param_on_the_command_line():
                     offenders.append(f"{sh.relative_to(root)}:{i}: {line.strip()}")
     assert not offenders, (
         "shell scripts pass a boolean param on the command line:\n  "
-        + "\n  ".join(offenders))
+        + "\n  ".join(offenders)
+    )

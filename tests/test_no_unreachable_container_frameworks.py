@@ -61,7 +61,9 @@ def _installed(dockerfile_text):
     found = set()
     for dist in FRAMEWORKS:
         # match the dist name as a whole pip token (optionally version-pinned)
-        if re.search(rf"(?<![\w.-]){re.escape(dist)}(?:==[^\s\\]+)?(?=[\s\\]|$)", dockerfile_text):
+        if re.search(
+            rf"(?<![\w.-]){re.escape(dist)}(?:==[^\s\\]+)?(?=[\s\\]|$)", dockerfile_text
+        ):
             found.add(dist)
     return found
 

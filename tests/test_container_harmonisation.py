@@ -108,11 +108,17 @@ def _read_constraints(path=CONSTRAINTS):
 PINNED_EXCEPTIONS = {
     # bioio-ome-tiff 1.4.0 requires tifffile[zarr]<2025.1.10 on python_version < "3.11"; the
     # convert base (eclipse-temurin:21-jre-jammy) is Python 3.10.
-    ("convert", "tifffile"): ("2024.12.12", "bioio-ome-tiff 1.4.0 caps tifffile<2025.1.10 on py<3.11"),
+    ("convert", "tifffile"): (
+        "2024.12.12",
+        "bioio-ome-tiff 1.4.0 caps tifffile<2025.1.10 on py<3.11",
+    ),
     # The bioio 3.5.0 plugin set will not resolve against numpy 1.26.4 (bioio-lif's dask chain).
     # Safe HERE only: this image carries no TensorFlow and no StarDist, which are the sole reason
     # the harmonised numpy is held at the last 1.x.
-    ("convert", "numpy"): ("2.2.6", "bioio 3.5.0 plugin set cannot resolve with numpy 1.26.4"),
+    ("convert", "numpy"): (
+        "2.2.6",
+        "bioio 3.5.0 plugin set cannot resolve with numpy 1.26.4",
+    ),
 }
 
 # Packages a container's FROM base image bakes in, so no `pip install` line for them ever
@@ -159,7 +165,6 @@ def _parse_req(token):
 
 def _is_exact(specs):
     return len(specs) == 1 and specs[0][0] == "=="
-
 
 
 # Module-level, so an unreadable or empty constraints file fails at COLLECTION rather than
@@ -333,7 +338,9 @@ def test_no_forbidden_package_reappears(container):
     # a reinstall and fails the guard. That is backwards: it pressures the next person to delete
     # the rationale rather than keep it. Both Dockerfiles and requirements files comment with `#`.
     text = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
-    back = sorted({f for f in FORBIDDEN if re.search(rf"(?m)^\s*{f}\b|[\s\\]{f}[=\s\\]", text)})
+    back = sorted(
+        {f for f in FORBIDDEN if re.search(rf"(?m)^\s*{f}\b|[\s\\]{f}[=\s\\]", text)}
+    )
     assert not back, (
         f"containers/{container} reinstalls {back}, which was removed for having no importer "
         f"anywhere in bin/. If it is genuinely needed now, add the import first."
@@ -440,8 +447,11 @@ def _third_party_imports(script):
     # source, staged onto $PATH by Nextflow like the rest of bin/, and pip installs
     # nothing for it. `utils` used to be hardcoded here for exactly this reason;
     # deriving the set covers it and every future vendored package alike.
-    local_pkgs = {d.name for d in (REPO / "bin").rglob("*")
-                  if d.is_dir() and (d / "__init__.py").is_file()}
+    local_pkgs = {
+        d.name
+        for d in (REPO / "bin").rglob("*")
+        if d.is_dir() and (d / "__init__.py").is_file()
+    }
     third, seen, queue = set(), set(), [script]
     while queue:
         cur = queue.pop()
@@ -455,7 +465,11 @@ def _third_party_imports(script):
             if isinstance(node, ast.Import):
                 names = [a.name.split(".")[0] for a in node.names]
             elif isinstance(node, ast.ImportFrom):
-                head = node.module.split(".")[0] if (node.level == 0 and node.module) else None
+                head = (
+                    node.module.split(".")[0]
+                    if (node.level == 0 and node.module)
+                    else None
+                )
                 names = [head] if head else []
                 # ``from utils.tiled_io import open_lazy`` -- follow into the submodule, but ONLY
                 # when the head is itself local. Taking the last component unconditionally turned
@@ -589,13 +603,15 @@ def test_tiled_container_torch_kornia_imports_are_confined_to_disk_lightglue():
                 offenders.append(f"{rel}:{lineno} (in {fn or 'module scope'})")
     assert not offenders, (
         "torch/kornia is imported outside _frontend_disk_lightglue in a script the tiled "
-        f"container runs: {offenders}. The (\"tiled\", \"torch\")/(\"tiled\", \"kornia\") "
+        f'container runs: {offenders}. The ("tiled", "torch")/("tiled", "kornia") '
         "UNREACHABLE_IMPORTS exemptions assume the import is confined there; a second import "
         "site needs its own justification, not a free ride on this one."
     )
 
 
-@pytest.mark.parametrize("container,scripts", sorted(_module_container_and_scripts().items()))
+@pytest.mark.parametrize(
+    "container,scripts", sorted(_module_container_and_scripts().items())
+)
 def test_container_installs_what_its_scripts_import(container, scripts):
     """The rule that catches bioio: an image must install what its own scripts import.
 
@@ -626,12 +642,16 @@ def test_every_pinned_exception_is_still_doing_something(key):
     """
     container, package = key
     version, reason = PINNED_EXCEPTIONS[key]
-    assert package in HARMONISED, f"{package} is not in the harmonised set, so exempting it is meaningless"
+    assert package in HARMONISED, (
+        f"{package} is not in the harmonised set, so exempting it is meaningless"
+    )
     assert version != HARMONISED[package], (
         f"the {container}/{package} exception pins {version}, which is what HARMONISED already "
         f"requires -- the exception is stale and should be removed."
     )
-    assert reason.strip(), "every exception must name the upstream constraint that forces it"
+    assert reason.strip(), (
+        "every exception must name the upstream constraint that forces it"
+    )
     actual = _installed(container).get(package)
     assert _is_exact(actual) and actual[0][1] == version, (
         f"containers/{container} pins {package}={actual}, but the exception documents {version}. "

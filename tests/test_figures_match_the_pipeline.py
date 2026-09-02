@@ -110,7 +110,7 @@ NON_PIPELINE_NAMES = {
     "DAPI": "a channel/marker name, not a pipeline name",
     "CD3": "a channel/marker name, not a pipeline name",
     "CELLTOX": "a channel/marker name, not a pipeline name",
-    "CYX": "a TIFF axis order, written as `axes=\"CYX\"`",
+    "CYX": 'a TIFF axis order, written as `axes="CYX"`',
     "PREPROCESS": "the published subdirectory `qc/preprocess`, not a process",
 }
 
@@ -268,9 +268,7 @@ def test_every_parameter_a_figure_names_exists():
     problems, seen = [], 0
     for path in _live_figures():
         problems += _flag_problems(path, defaults)
-        seen += len(
-            {m.group(1) for m in _FLAG.finditer(_prose(path))} & set(defaults)
-        )
+        seen += len({m.group(1) for m in _FLAG.finditer(_prose(path))} & set(defaults))
     assert seen >= 8, (
         f"only {seen} parameter mentions found across the figures -- the "
         "extractor has stopped matching and this test is checking nothing"

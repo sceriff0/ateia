@@ -151,7 +151,10 @@ def test_segment_renders_both_blocks_from_the_one_backend_list():
     # Both blocks must resolve `backend` from the same expression, or two identical
     # `backend.versionTools` reads still name two different backends' tools.
     bindings = re.findall(r"=\s*(SegBackends\.of\([^)\n]*\))", text)
-    assert len(bindings) == 2 and bindings[0] == bindings[1] == "SegBackends.of(params.seg_method)", (
+    assert (
+        len(bindings) == 2
+        and bindings[0] == bindings[1] == "SegBackends.of(params.seg_method)"
+    ), (
         f"segment.nf must bind `backend` from the same SegBackends.of(...) expression in "
         f"script: and stub:, found: {bindings}"
     )

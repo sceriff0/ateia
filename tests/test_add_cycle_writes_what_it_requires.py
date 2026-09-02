@@ -31,6 +31,7 @@ tests/checkpoint_manifest.nf.test's mode=add_cycle case asserts the resulting
 files exist and that every path in them resolves; the two together are the
 evidence.
 """
+
 import re
 from pathlib import Path
 
@@ -141,12 +142,17 @@ def test_the_scan_is_not_vacuous():
         f"include regex is stale, not the pipeline"
     )
     writers = _writers()
-    assert writers, "no checkpoint writers found anywhere -- the collectFile scan is stale"
+    assert writers, (
+        "no checkpoint writers found anywhere -- the collectFile scan is stale"
+    )
     # And the transitive walk really is transitive: add_cycle.nf does not include
     # registered_checkpoint.nf directly. If this stops holding, the walk has
     # silently become one-level and would report a false pass.
     direct = {
-        (SUBWORKFLOWS / "add_cycle.nf").parent.joinpath(rel).resolve().with_suffix(".nf")
+        (SUBWORKFLOWS / "add_cycle.nf")
+        .parent.joinpath(rel)
+        .resolve()
+        .with_suffix(".nf")
         for rel in _INCLUDE.findall(
             strip_comments((SUBWORKFLOWS / "add_cycle.nf").read_text())
         )

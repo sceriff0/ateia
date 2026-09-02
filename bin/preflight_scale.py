@@ -68,7 +68,9 @@ def _parse_pixel_size(raw: str) -> Optional[float]:
             f"--pixel-size {raw!r} is neither a positive number nor '{AUTO}'."
         ) from None
     if value <= 0:
-        raise ValueError(f"--pixel-size must be a positive number of micrometres per pixel, got {value}.")
+        raise ValueError(
+            f"--pixel-size must be a positive number of micrometres per pixel, got {value}."
+        )
     return value
 
 
@@ -77,14 +79,18 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
         description="Resolve --pixel_size for every input slide from OME metadata only, "
         "before any heavy work is staged."
     )
-    ap.add_argument("--images", nargs="+", required=True, help="Input image files to scan.")
+    ap.add_argument(
+        "--images", nargs="+", required=True, help="Input image files to scan."
+    )
     ap.add_argument(
         "--pixel-size",
         required=True,
         help=f"'{AUTO}' to read each image's own OME PhysicalSizeX, or a positive number of "
         "micrometres per pixel.",
     )
-    ap.add_argument("--output", required=True, help="Path to write the per-slide report JSON.")
+    ap.add_argument(
+        "--output", required=True, help="Path to write the per-slide report JSON."
+    )
     return ap.parse_args(argv)
 
 
@@ -108,7 +114,9 @@ def _warn_on_heterogeneous_scales(report: dict, logger) -> None:
 
     clusters: List[List[float]] = []
     for value in values:
-        if clusters and abs(value - clusters[-1][-1]) <= PIXEL_SIZE_RTOL * abs(clusters[-1][-1]):
+        if clusters and abs(value - clusters[-1][-1]) <= PIXEL_SIZE_RTOL * abs(
+            clusters[-1][-1]
+        ):
             clusters[-1].append(value)
         else:
             clusters.append([value])
@@ -121,7 +129,8 @@ def _warn_on_heterogeneous_scales(report: dict, logger) -> None:
         slides = sorted(
             Path(path).name
             for path, info in report.items()
-            if abs(info["pixel_size"] - representative) <= PIXEL_SIZE_RTOL * abs(representative)
+            if abs(info["pixel_size"] - representative)
+            <= PIXEL_SIZE_RTOL * abs(representative)
         )
         groups.append(f"{representative:g} µm/px: {', '.join(slides)}")
 
@@ -130,7 +139,8 @@ def _warn_on_heterogeneous_scales(report: dict, logger) -> None:
         "but are registered together and merged into one pyramid -- %s. This is expected "
         "for a legitimate mixed-magnification cohort and is not an error; each slide "
         "keeps its own resolved scale.",
-        len(clusters), "; ".join(groups),
+        len(clusters),
+        "; ".join(groups),
     )
 
 
@@ -163,11 +173,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             report[str(path)] = {"pixel_size": detected, "source": "metadata"}
             logger.info(
                 "  %s: resolved --pixel_size %s to %g µm/px from OME metadata.",
-                path.name, AUTO, detected,
+                path.name,
+                AUTO,
+                detected,
             )
         else:
             mismatched = warn_on_pixel_size_mismatch(
-                (det_x, det_y), configured, source=path.name, logger=logger,
+                (det_x, det_y),
+                configured,
+                source=path.name,
+                logger=logger,
             )
             if not mismatched and detected is None:
                 unconfirmed.append(path.name)
@@ -181,7 +196,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             "PhysicalSizeX/Y (absent header, absent attribute, non-positive value, or an "
             "unrecognised unit) -- their scale cannot be resolved before the run starts. "
             "Pass an explicit --pixel_size instead of '%s' for: %s.",
-            AUTO, len(unresolvable), AUTO, ", ".join(sorted(unresolvable)),
+            AUTO,
+            len(unresolvable),
+            AUTO,
+            ", ".join(sorted(unresolvable)),
         )
         return 1
 
@@ -196,11 +214,18 @@ def main(argv: Optional[List[str]] = None) -> int:
             "verified against OME metadata for %d slide(s) (no PhysicalSizeX/Y present): "
             "%s. This is normal for many WSI formats and is not an error -- proceeding "
             "with the configured %g µm/px for these slides.",
-            configured, len(unconfirmed), ", ".join(sorted(unconfirmed)), configured,
+            configured,
+            len(unconfirmed),
+            ", ".join(sorted(unconfirmed)),
+            configured,
         )
 
     Path(args.output).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    logger.info("Pre-flight scale scan: resolved %d slide(s); wrote %s", len(report), args.output)
+    logger.info(
+        "Pre-flight scale scan: resolved %d slide(s); wrote %s",
+        len(report),
+        args.output,
+    )
     return 0
 
 

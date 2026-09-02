@@ -260,6 +260,6 @@ def test_no_parallel_entry_column_mapping_outside_param_utils() -> None:
         "Found file(s) quoting 2+ of STEPS' entryColumn values together "
         f"beyond what ENTRY_COLUMN_EXEMPT permits ({entry_columns}) -- this "
         "looks like a parallel step->column mapping outside ParamUtils.STEPS:\n"
-        + "\n".join(offenders) +
-        "\nRoute it through ParamUtils.entryColumnForStep(step) instead."
+        + "\n".join(offenders)
+        + "\nRoute it through ParamUtils.entryColumnForStep(step) instead."
     )

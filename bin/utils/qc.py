@@ -379,9 +379,7 @@ def create_registration_qc(
     try:
         ref_arr, _ref_dtype, ref_close = open_lazy(reference_path)
         reg_arr, _reg_dtype, reg_close = open_lazy(registered_path)
-        factor = decimation_factor(
-            [ref_arr.shape[1:], reg_arr.shape[1:]], max_dim=None
-        )
+        factor = decimation_factor([ref_arr.shape[1:], reg_arr.shape[1:]], max_dim=None)
         ref_nuc = read_decimated(ref_arr, ref_nuc_idx, factor)
         reg_nuc = read_decimated(reg_arr, reg_nuc_idx, factor)
     finally:

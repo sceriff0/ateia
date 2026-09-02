@@ -31,6 +31,7 @@ an earlier branch satisfies it -- and that is an acceptable asymmetry: the
 failure being prevented is "green here, red in CI", and CI is where the strong
 form runs.
 """
+
 import json
 import re
 import subprocess
@@ -97,7 +98,13 @@ def _referenced():
     """fixture path (relative to tests/testdata) -> files that reference it."""
     refs = {}
     for path in sorted(ROOT.glob("tests/**/*")):
-        if path.is_dir() or path.suffix not in (".test", ".py", ".nf", ".config", ".csv"):
+        if path.is_dir() or path.suffix not in (
+            ".test",
+            ".py",
+            ".nf",
+            ".config",
+            ".csv",
+        ):
             continue
         if path.resolve() == Path(__file__).resolve():
             continue
@@ -158,11 +165,15 @@ def test_every_referenced_fixture_is_non_empty_and_openable():
         if name in EMPTY_ON_PURPOSE:
             continue
         if path.stat().st_size == 0:
-            bad.append(f"tests/testdata/{name} is 0 bytes -- referenced by {', '.join(sorted(users))}")
+            bad.append(
+                f"tests/testdata/{name} is 0 bytes -- referenced by {', '.join(sorted(users))}"
+            )
             continue
         ok, why = _openable(path)
         if not ok:
-            bad.append(f"tests/testdata/{name}: {why} -- referenced by {', '.join(sorted(users))}")
+            bad.append(
+                f"tests/testdata/{name}: {why} -- referenced by {', '.join(sorted(users))}"
+            )
     assert not bad, "\n".join(bad) + (
         "\n\nA fixture that exists but cannot be opened fails at the READER, in a "
         "process, with a message about the tool rather than about the fixture. Give "
@@ -218,7 +229,10 @@ def test_the_generator_is_what_produces_the_untracked_ones():
         Path(p).name
         for p in subprocess.run(
             ["git", "ls-files", "tests/testdata"],
-            cwd=ROOT, capture_output=True, text=True, check=True,
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.split()
     }
     referenced = set(_referenced())

@@ -52,8 +52,12 @@ EXTERNAL_ALLOWED = {
 # The retired single-repository name. Nothing may reference it again.
 LEGACY_REPO = "attend_image_analysis"
 
-_IMAGE_REF = re.compile(r"""['"]([A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9][A-Za-z0-9._-]*)['"]""")
-_FIRST_PARTY = re.compile(rf"^{NAMESPACE}/{PREFIX}([a-z0-9]+(?:-[a-z0-9]+)*):(\d+\.\d+\.\d+)$")
+_IMAGE_REF = re.compile(
+    r"""['"]([A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9][A-Za-z0-9._-]*)['"]"""
+)
+_FIRST_PARTY = re.compile(
+    rf"^{NAMESPACE}/{PREFIX}([a-z0-9]+(?:-[a-z0-9]+)*):(\d+\.\d+\.\d+)$"
+)
 
 
 def _manifest_version():
@@ -108,10 +112,14 @@ def test_no_source_references_the_legacy_single_repository():
     ``bolt3x/attend_image_analysis:bioformats_v1`` in its build/push comments after the rename.
     """
     offenders = []
-    containers_files = sorted(p for p in (REPO / "containers").rglob("*") if p.is_file())
-    for path in _searched_files() + containers_files + [
-        REPO / "CLAUDE.md", REPO / ".github/workflows/containers.yml"
-    ]:
+    containers_files = sorted(
+        p for p in (REPO / "containers").rglob("*") if p.is_file()
+    )
+    for path in (
+        _searched_files()
+        + containers_files
+        + [REPO / "CLAUDE.md", REPO / ".github/workflows/containers.yml"]
+    ):
         if not path.is_file():
             continue
         for i, line in enumerate(path.read_text().splitlines(), 1):
@@ -124,7 +132,8 @@ def test_no_source_references_the_legacy_single_repository():
 
 def test_every_image_reference_is_either_first_party_or_an_allowed_external():
     bad = [
-        (f, r) for f, r in _image_refs()
+        (f, r)
+        for f, r in _image_refs()
         if r not in EXTERNAL_ALLOWED and not _FIRST_PARTY.match(r)
     ]
     assert not bad, (
@@ -137,7 +146,8 @@ def test_first_party_images_are_pinned_to_the_manifest_version():
     """An image set and the pipeline that pulls it must not drift apart silently."""
     want = _manifest_version()
     wrong = [
-        (f, r) for f, r in _image_refs()
+        (f, r)
+        for f, r in _image_refs()
         if (m := _FIRST_PARTY.match(r)) and m.group(2) != want
     ]
     assert not wrong, (
@@ -236,7 +246,9 @@ def test_the_build_workflow_preflights_the_registry_credentials():
     """
     text = (REPO / ".github/workflows/containers.yml").read_text()
     assert "DOCKERHUB_USERNAME" in text and "DOCKERHUB_TOKEN" in text
-    preflight = re.search(r"name: Preflight.*?(?=\n      - name:|\n  [a-z])", text, re.S)
+    preflight = re.search(
+        r"name: Preflight.*?(?=\n      - name:|\n  [a-z])", text, re.S
+    )
     assert preflight, (
         "containers.yml has no preflight step, so a publish with missing secrets fans out "
         "into one opaque failure per image instead of failing once with a readable reason."

@@ -22,12 +22,15 @@ nf-test covers THAT site. Nothing stops the next memory closure from being
 written the same way, and the failure only appears for a group size no other
 test in the file uses -- which is precisely how this one survived.
 """
+
 import re
 
 from tests.nfmodel import with_name_blocks
 
 # Receiver of a `.collect {` / `.each {` / `.any {` ... iteration.
-_ITER = re.compile(r"\b([a-z_]\w*)\s*\.\s*(collect|each|find|findAll|any|every|sum|inject)\s*\{")
+_ITER = re.compile(
+    r"\b([a-z_]\w*)\s*\.\s*(collect|each|find|findAll|any|every|sum|inject)\s*\{"
+)
 # Names bound inside the closure itself.
 _LOCAL = re.compile(r"\bdef\s+([a-z_]\w*)")
 
@@ -46,7 +49,7 @@ def _closure_bodies():
             while i < len(block.body) and depth:
                 depth += (block.body[i] == "{") - (block.body[i] == "}")
                 i += 1
-            yield block.selector, block.start_line, block.body[start:i - 1]
+            yield block.selector, block.start_line, block.body[start : i - 1]
 
 
 def test_no_closure_iterates_an_unbound_name():

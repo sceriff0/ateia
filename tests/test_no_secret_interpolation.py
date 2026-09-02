@@ -104,7 +104,7 @@ def test_modules_config_never_interpolates_the_token_value():
     )
     assert not GETENV_INSIDE_GSTRING_RE.search(text), (
         f"conf/modules.config interpolates System.getenv('{TOKEN}') inside a "
-        f"GString (\"...${{...}}...\") -- this bakes the secret's value into "
+        f'GString ("...${{...}}...") -- this bakes the secret\'s value into '
         f"the rendered config/command text. Use the getenv() call only as a "
         f"boolean guard (e.g. '&& System.getenv(...)'), never inside ${{}}."
     )

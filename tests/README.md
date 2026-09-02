@@ -369,6 +369,7 @@ header records the failure, version by version.
 import numpy as np
 from scripts.my_module import my_function
 
+
 def test_my_function():
     """Test my_function with valid input"""
     result = my_function(input_data)

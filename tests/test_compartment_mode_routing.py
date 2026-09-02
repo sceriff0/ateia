@@ -347,7 +347,9 @@ def test_scan_actually_finds_the_consumers():
     sites = _read_sites()
     files = {str(path.relative_to(ROOT)) for path, _no, _line in sites}
     lines = {(str(path.relative_to(ROOT)), no) for path, no, _line in sites}
-    assert len(sites) >= 4, f"only {len(sites)} read site(s) found -- globs may be stale"
+    assert len(sites) >= 4, (
+        f"only {len(sites)} read site(s) found -- globs may be stale"
+    )
     for expected in ALLOWED_FILES:
         assert expected in files, (
             f"{expected} no longer reads any of the three compartment params "

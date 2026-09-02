@@ -332,9 +332,7 @@ def match_lsa(cent_a, cent_b, radius, max_component_cells=DEFAULT_MAX_COMPONENT_
 
     # One undirected graph over na + nb nodes: a-cell i is node i, b-cell j is node na + j.
     n_nodes = na + ok_b.size
-    adj = coo_matrix(
-        (np.ones(cols.size), (rows, na + cols)), shape=(n_nodes, n_nodes)
-    )
+    adj = coo_matrix((np.ones(cols.size), (rows, na + cols)), shape=(n_nodes, n_nodes))
     _, labels = connected_components(adj, directed=False)
 
     order = np.argsort(labels, kind="stable")

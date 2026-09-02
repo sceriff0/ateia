@@ -280,7 +280,9 @@ def _frontend_disk_lightglue(ref, mov, model="euclidean", n_keypoints=2048, **kw
     # carry that reversal for its old front-ends; applying it here silently transposes M0.
     src = kp_mov[matches[:, 1]]
     dst = kp_ref[matches[:, 0]]
-    m, residual, n_inliers = estimate_transform_from_matches(src, dst, model=model, **kwargs)
+    m, residual, n_inliers = estimate_transform_from_matches(
+        src, dst, model=model, **kwargs
+    )
     return m, {"residual_px": residual, "n_inliers": n_inliers}
 
 

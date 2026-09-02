@@ -39,6 +39,7 @@ from tests.nfmodel import strip_comments_and_strings as _strip_comments
 # 1. The pairing trap
 # --------------------------------------------------------------------------- #
 
+
 def test_group_tuple_sort_option_is_never_used():
     """groupTuple(sort:) re-pairs meta with the wrong file. Transpose-then-sort instead."""
     offenders = []
@@ -102,6 +103,7 @@ def test_every_fan_in_orders_by_data():
 # 3. collect()/collectFile() feeding a process must be sorted
 # --------------------------------------------------------------------------- #
 
+
 def test_final_qc_collects_are_sorted():
     body = _strip_comments_only((ROOT / "subworkflows/local/final_qc.nf").read_text())
     # Real calls are 3-arg -- artifactsOf(ch_artifacts, 'kind', consumed_kinds) -- since
@@ -109,13 +111,17 @@ def test_final_qc_collects_are_sorted():
     # sites regardless of whether sort: true is present, so it can never fail: verified
     # by planting a bare .collect() on a real 3-arg call and confirming the 2-arg
     # version stayed green while this one catches it.
-    unsorted = re.findall(r"artifactsOf\(ch_artifacts, '([a-z_]+)'(?:,\s*\w+)?\)\.collect\(\)", body)
+    unsorted = re.findall(
+        r"artifactsOf\(ch_artifacts, '([a-z_]+)'(?:,\s*\w+)?\)\.collect\(\)", body
+    )
     assert not unsorted, (
         f"GENERATE_QC_REPORT slot(s) {sorted(unsorted)} use a bare .collect(). Its inputs are "
         "path collections hashed POSITIONALLY, and collect() emits in arrival order, so the "
         "report re-ran on every identical rerun. Use .collect(sort: true)."
     )
-    assert re.search(r"collectFile\(name: 'collated_versions\.yml', sort: true\)", body), (
+    assert re.search(
+        r"collectFile\(name: 'collated_versions\.yml', sort: true\)", body
+    ), (
         "collated_versions.yml lost `sort: true`. Without it the collected yaml's LINE ORDER "
         "varies by task completion order, so its content -- not just its mtime -- differs "
         "between identical runs."
@@ -143,6 +149,7 @@ def test_input_check_preflight_scale_collect_is_sorted():
 # --------------------------------------------------------------------------- #
 # 4. No process script may hash the whole params map
 # --------------------------------------------------------------------------- #
+
 
 def test_no_process_script_references_the_whole_params_map():
     """`ParamUtils.foo(params)` in a script: block binds the task to EVERY parameter."""

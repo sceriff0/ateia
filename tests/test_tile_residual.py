@@ -50,7 +50,9 @@ def test_recovers_a_known_subpixel_shift_as_the_control_displacement():
     assert dy == pytest.approx(-row_s, abs=0.15)
     # a genuine match is confident; the gating this feeds lives in
     # tests/test_tile_residual_confidence.py
-    assert error < 0.5, f"a real shift between two crops of one field scored error={error:.4f}"
+    assert error < 0.5, (
+        f"a real shift between two crops of one field scored error={error:.4f}"
+    )
 
 
 def test_local_tre_is_the_magnitude_of_the_residual_and_is_small_when_aligned():
@@ -61,4 +63,6 @@ def test_local_tre_is_the_magnitude_of_the_residual_and_is_small_when_aligned():
     assert tre == pytest.approx(np.hypot(dx, dy), abs=1e-6)
     assert tre < 0.1
     # a tile correlated against itself is the most confident match there is
-    assert error == pytest.approx(0.0, abs=1e-6), f"self-correlation scored error={error!r}"
+    assert error == pytest.approx(0.0, abs=1e-6), (
+        f"self-correlation scored error={error!r}"
+    )
