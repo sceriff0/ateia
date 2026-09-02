@@ -330,7 +330,11 @@ def test_out_of_range_channel_index_raises_with_original_message(tmp_path):
 
 # ---------------------------------------------------------------------------
 # 3. segment_cellsam.py -- importable directly in CI (no heavy top-level
-#    imports); exercise the real backend wrapper end-to-end.
+#    imports). Its two channel-read tests below call segment_io's function
+#    directly (not through segment_cellsam), so they exercise the shared
+#    segment_io.extract_dapi_channel implementation rather than the backend
+#    wrapper end-to-end; the delegation identity check below is what actually
+#    proves segment_cellsam is wired to that same implementation.
 # ---------------------------------------------------------------------------
 
 
@@ -347,6 +351,23 @@ def test_segment_cellsam_module_has_no_heavy_top_level_imports():
     for line in src.splitlines():
         if line.startswith("from cellSAM") or line.startswith("import cellSAM"):
             pytest.fail(f"cellSAM import found at module level: {line!r}")
+
+
+def test_segment_cellsam_delegates_to_segment_io():
+    """segment_cellsam.py must delegate its channel read to segment_io, the
+    same shape bin/segment.py is checked against in
+    test_segment_py_delegation_is_live_when_importable below. Without this
+    identity check, the two tests that follow (equivalence, lazy-path) only
+    prove facts about segment_io.extract_dapi_channel itself -- they call it
+    directly -- and say nothing about whether segment_cellsam is actually
+    wired to it.
+    """
+    import segment_cellsam
+
+    assert segment_cellsam.extract_dapi_channel is segment_io.extract_dapi_channel, (
+        "bin/segment_cellsam.py no longer delegates its channel read to "
+        "segment_io.extract_dapi_channel"
+    )
 
 
 @pytest.mark.parametrize("compression", [None, "zlib"])
