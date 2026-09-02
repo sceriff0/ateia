@@ -648,6 +648,24 @@ def test_tiled_tre_plots_exclude_rejected_tiles_from_the_distribution(tmp_path):
     assert "rigid stage, per-tile TRE (px) (n=2)" in out
 
 
+def test_tiled_tre_plots_survive_a_null_tre_rigid_tile(tmp_path):
+    """A tile whose tre_rigid is JSON null still has a present key, so
+    val(t) = t.get("tre_rigid", 0.0) returns None rather than the default --
+    and None / vmax in the heatmap raises TypeError. The section must degrade
+    to the same notice path parse failures use, not crash the whole report."""
+    gqr = _load()
+    jp = _write_tre(
+        tmp_path,
+        "P1_DAPI",
+        coarse=1.0,
+        rigid_p50=1.0,
+        final_p50=None,
+        tiles=[{"ix": 0, "iy": 0, "cx": 8, "cy": 8, "tre_rigid": None}],
+    )
+    out = gqr._tiled_tre_plots([str(jp)])
+    assert "empty-notice" in out or "Could not parse" in out
+
+
 def test_registration_section_renders_stare_tre_from_valis_dir(tmp_path):
     gqr = _load()
     valis = tmp_path / "registration_tre"
@@ -809,6 +827,16 @@ def test_bin_counts_drops_infinities_rather_than_crashing():
     gqr = _load()
     counts, lo, hi = gqr._bin_counts([1.0, float("inf"), 2.0, float("-inf")], 5)
     assert (lo, hi) == (1.0, 2.0)
+    assert sum(counts) == 2
+
+
+def test_bin_counts_survives_a_span_that_overflows_to_inf():
+    """lo/hi are both finite, but hi - lo overflows to inf, making every
+    position (v - lo) / span a nan -- int(nan) raises ValueError unless the
+    non-finite position is steered into a real bin instead."""
+    gqr = _load()
+    counts, lo, hi = gqr._bin_counts([1e308, -1e308], 20)
+    assert len(counts) == 20
     assert sum(counts) == 2
 
 

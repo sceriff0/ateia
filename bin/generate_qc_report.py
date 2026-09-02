@@ -371,10 +371,13 @@ def _bin_counts(values, bins):
     """Bin the finite part of ``values`` into ``bins`` equal-width buckets.
 
     Returns ``(counts, lo, hi)``, or ``([], 0.0, 0.0)`` when there is nothing to
-    bin. Two edge cases are handled here rather than in every caller: the maximum
+    bin. Three edge cases are handled here rather than in every caller: the maximum
     value lands in the LAST bin (``int((hi - lo) / span * bins)`` is ``bins``,
-    one past the end), and an all-identical input widens to ``lo + 1.0`` so the
-    single bar has a width to be drawn in instead of dividing by zero.
+    one past the end); an all-identical input widens to ``lo + 1.0`` so the
+    single bar has a width to be drawn in instead of dividing by zero; and a span
+    that overflows to ``inf`` (both ``lo``/``hi`` finite but far enough apart)
+    makes the normalized position ``nan`` -- that also lands in the last bin
+    rather than raising out of ``int()``.
     """
     vals = _finite(values)
     if not vals or bins < 1:
@@ -385,7 +388,9 @@ def _bin_counts(values, bins):
     counts = [0] * bins
     span = hi - lo
     for v in vals:
-        counts[min(int((v - lo) / span * bins), bins - 1)] += 1
+        pos = (v - lo) / span
+        idx = bins - 1 if not math.isfinite(pos) else min(int(pos * bins), bins - 1)
+        counts[idx] += 1
     return counts, lo, hi
 
 
@@ -771,6 +776,7 @@ def _tiled_tre_plots(tre_jsons):
     for jp in sorted(tre_jsons):
         try:
             info = parse_tiled_tre_json(jp)
+            heatmap = _tiled_tre_heatmap_svg(info)
         except Exception as exc:  # noqa: BLE001 - report, never crash
             errors.append(
                 '<p class="empty-notice">Could not parse '
@@ -812,7 +818,6 @@ def _tiled_tre_plots(tre_jsons):
                 )
             )
         parts.append("</div>")
-        heatmap = _tiled_tre_heatmap_svg(info)
         if heatmap:
             parts.append(heatmap)
     return "\n".join(parts + errors)

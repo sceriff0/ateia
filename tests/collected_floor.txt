@@ -427,4 +427,8 @@
 # parse_csv_table_head -- and replaced by unit tests for the six new plotting
 # functions plus the section-list characterisation test and the stdlib-only guard.
 # The net is an increase; the number below is measured, not derived.
-1426
+
+#
+
+# RE-MEASURED 2026-09-03: +2 for the two final-minors robustness tests (span-overflow _bin_counts, null tre_rigid _tiled_tre_plots); no other count moved.
+1428
