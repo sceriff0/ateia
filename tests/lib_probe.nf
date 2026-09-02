@@ -21,8 +21,72 @@
     APPENDING: later tasks add their own assert blocks under a clearly commented
     section header, following the pattern below. Keep each class's assertions in
     its own banner-delimited section.
+
+    THE workflow{} BLOCK HAS A HARD SIZE CEILING. Nextflow's DSL2 parser captures
+    a top-level workflow{} block's body whole, as a single Groovy string constant,
+    and the JVM class-file format caps any one String constant at 65535 UTF-16
+    code units (org.codehaus.groovy.classgen.ClassCompletionVerifier
+    #checkStringExceedingMaximumLength) -- confirmed empirically 2026-09-02: at
+    60e5a2e the workflow{} block was already 64072 bytes, ~1.4KB below that
+    ceiling, and appending a normally-commented section pushed it over with
+    "String too long. The given string is N Unicode code units long...". A
+    top-level `def` FUNCTION is not subject to this capture -- only the workflow{}
+    block's own text counts against the limit. So a new section with any real
+    amount of prose goes in its own top-level `def checkX() { ... }` function
+    below, called as ONE statement from inside workflow{}; only add assertions
+    directly inline in workflow{} if they are genuinely a one- or two-liner.
 ========================================================================================
 */
+
+/**
+ * ResourceReport — trace-path resolution and the missing-trace diagnostic.
+ * Kept as a top-level function (see the header note above) so its assertions can
+ * carry normal comments without threatening the workflow{} block's size ceiling.
+ */
+def checkResourceReport() {
+
+    // ------------------------------------------------------------------ //
+    // ResourceReport — where the trace file is looked for
+    // ------------------------------------------------------------------ //
+    // Nextflow resolves trace.file (nextflow.config's "${params.trace_dir}/trace.txt")
+    // against launchDir. main.nf's onComplete handler used to hand the RAW param to
+    // cmd.execute(), which resolves against the JVM's working directory instead --
+    // the same thing only when the pipeline happened to be launched from the
+    // directory it runs in. These four assertions pin the resolution rule.
+    assert ResourceReport.tracePath('/abs/trace', '/launch')  == '/abs/trace/trace.txt'
+    assert ResourceReport.tracePath('.trace', '/launch')      == '/launch/.trace/trace.txt'
+    assert ResourceReport.tracePath('./.trace/', '/launch')   == '/launch/.trace/trace.txt'
+    assert ResourceReport.tracePath('a/b', '/launch/')        == '/launch/a/b/trace.txt'
+
+    // A blank trace_dir must throw rather than produce a literal 'null/trace.txt'.
+    def blankTraceDir = false
+    try { ResourceReport.tracePath('  ', '/launch') }
+    catch (IllegalArgumentException ignored) { blankTraceDir = true }
+    assert blankTraceDir : 'ResourceReport.tracePath must reject a blank trace_dir'
+
+    // A relative trace_dir with no launchDir cannot be resolved and must say so,
+    // rather than silently returning the relative path it was given.
+    def blankLaunchDir = false
+    try { ResourceReport.tracePath('.trace', '') }
+    catch (IllegalArgumentException ignored) { blankLaunchDir = true }
+    assert blankLaunchDir : 'ResourceReport.tracePath must reject a relative trace_dir with no launchDir'
+
+    // The diagnostic must NAME the path and state whether tracing was on. A message
+    // that says only "could not generate resource report" leaves an operator with no
+    // way to tell a misconfigured trace_dir from a deliberately disabled trace.
+    def traceOn  = ResourceReport.missingTraceMessage('/launch/.trace/trace.txt', true)
+    def traceOff = ResourceReport.missingTraceMessage('/launch/.trace/trace.txt', false)
+
+    assert traceOn.contains('/launch/.trace/trace.txt')  : 'the ON message must name the path'
+    assert traceOff.contains('/launch/.trace/trace.txt') : 'the OFF message must name the path'
+    assert traceOn  != traceOff : 'the two cases must be distinguishable'
+    assert traceOn.contains('enable_trace')  : 'the ON message must name the parameter'
+    assert traceOff.contains('enable_trace') : 'the OFF message must name the parameter'
+    // No CLI flag form anywhere: Nextflow 26 delivers every --param as a String, so
+    // a message telling an operator to pass one would be advice that cannot work.
+    assert !traceOn.contains('--enable_trace')  : 'must not suggest a CLI boolean'
+    assert !traceOff.contains('--enable_trace') : 'must not suggest a CLI boolean'
+}
 
 workflow {
 
@@ -1028,6 +1092,13 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     try { Meta.fromCheckpointRow([patient_id: 'P1', id: 'x'], '  ', [:]) }
     catch (IllegalArgumentException ignored) { blankStep = true }
     assert blankStep : 'Meta.fromCheckpointRow must reject a blank step'
+
+    // ------------------------------------------------------------------ //
+    // ResourceReport — see checkResourceReport() above workflow{}; kept out of
+    // this block because it is close to the JVM class-file string-constant
+    // ceiling (see the file header note above).
+    // ------------------------------------------------------------------ //
+    checkResourceReport()
 
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info
