@@ -31,6 +31,7 @@ an earlier branch satisfies it -- and that is an acceptable asymmetry: the
 failure being prevented is "green here, red in CI", and CI is where the strong
 form runs.
 """
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -45,17 +46,72 @@ GENERATOR = TESTDATA / "generate_complete_testdata.py"
 # test config. A trailing '.' is prose punctuation, not part of the name.
 _REF = re.compile(r"tests/testdata/([A-Za-z0-9_\-][A-Za-z0-9_.\-]*[A-Za-z0-9_\-])")
 
+# Fixtures that are DELIBERATELY empty, keyed on the name, with the reason. Each
+# entry is verified below to still exist AND still be empty -- a stale exemption is
+# a licence nobody is using that the next reader will trust.
+EMPTY_ON_PURPOSE = {
+    "dummy_singularity.sif": (
+        "not an image and never opened. tests/modules/"
+        "segment_deepcell_token_singularity.config points SEGMENT's `container` at "
+        "this path so Nextflow's Singularity engine treats it as an ALREADY-LOCAL "
+        "image and skips `singularity pull` -- there is no singularity binary in "
+        "this dev environment or on the CI runner. The task then fails at exec, "
+        "AFTER .command.run has been written, and .command.run is the only thing "
+        "tests/modules/segment_deepcell_token.nf.test reads. A real .sif would be "
+        "hundreds of MB and would change nothing."
+    ),
+}
+
+
+def _openable(path):
+    """(ok, reason) -- can this fixture be opened as what its suffix claims?
+
+    Emptiness alone is not the property that matters: a 12-byte TIFF that
+    tifffile cannot parse fails in exactly the way the 0-byte one did
+    (`tifffile.TiffFileError: not a TIFF file b''`, which is how
+    MIRAGE:READ_SEGMENTED_CHECKPOINT:EXTRACT_NUCLEI_PROPERTIES aborted on the
+    nightly runner). So the check is per-type and it actually opens the file.
+    """
+    if path.suffix in (".tif", ".tiff"):
+        import tifffile
+
+        try:
+            with tifffile.TiffFile(path) as tif:
+                if not tif.series:
+                    return False, "TIFF parsed but carries no series"
+        except Exception as exc:  # noqa: BLE001 -- any reader failure is the failure
+            return False, f"tifffile could not open it: {exc.__class__.__name__}: {exc}"
+    elif path.suffix == ".csv":
+        lines = path.read_text(errors="ignore").splitlines()
+        if not lines or "," not in lines[0]:
+            return False, "no comma-separated header line"
+    elif path.suffix == ".json":
+        try:
+            json.loads(path.read_text())
+        except Exception as exc:  # noqa: BLE001
+            return False, f"not valid JSON: {exc.__class__.__name__}: {exc}"
+    return True, ""
+
 
 def _referenced():
     """fixture path (relative to tests/testdata) -> files that reference it."""
     refs = {}
     for path in sorted(ROOT.glob("tests/**/*")):
-        if path.is_dir() or path.suffix not in (".test", ".py", ".nf", ".config"):
+        if path.is_dir() or path.suffix not in (".test", ".py", ".nf", ".config", ".csv"):
             continue
         if path.resolve() == Path(__file__).resolve():
             continue
-        if TESTDATA in path.parents:
+        if path.resolve() == GENERATOR.resolve():
             continue  # the generator naturally names everything it writes
+        if TESTDATA in path.parents and path.suffix != ".csv":
+            continue
+        # A GENERATED CHECKPOINT CSV IS A REFERENCE. tests/testdata/prior_run/csv/
+        # postprocessed.csv names P001_pyramid.ome.tiff in its `pyramid` column and
+        # ADD_CYCLE stages that path into EXTRACT_MASK_SERIES and SPLIT_PRIOR_PYRAMID.
+        # Nothing else in tests/ mentions that fixture, so with tests/testdata/
+        # excluded wholesale this guard could never have seen the one fixture whose
+        # emptiness had no other witness.
+        #
         # Comments blanked, STRINGS INTACT. A fixture named in a `//` comment --
         # this repo's tests explain their fixtures constantly -- is not a
         # reference, and would make this file demand a producer for a path
@@ -78,6 +134,55 @@ def test_every_referenced_fixture_exists():
         "script (RULING R7 -- fixtures are generated, never committed, because "
         "tests/testdata/ is gitignored and a hand-written one is absent in CI)."
     )
+
+
+def test_every_referenced_fixture_is_non_empty_and_openable():
+    """`.exists()` is satisfied by a 0-byte file, and five of them were tracked.
+
+    tests/testdata/{P001_image.tiff, P001_merged_quant.csv, P001_nuclei_mask.tif,
+    P001_pyramid.ome.tiff} were committed at zero bytes and passed the existence
+    check above for months. The cost was not hypothetical: `nf-test --tag real`
+    aborted in EXTRACT_NUCLEI_PROPERTIES with
+    `tifffile.TiffFileError: not a TIFF file b''` and the failure was recorded in
+    .github/workflows/nightly.yml's header as a property of the SUITE rather than
+    of a fixture.
+    """
+    bad = []
+    for name, users in sorted(_referenced().items()):
+        path = TESTDATA / name
+        if not path.is_file():
+            continue  # absence is the check above's business, not this one's
+        if name in EMPTY_ON_PURPOSE:
+            continue
+        if path.stat().st_size == 0:
+            bad.append(f"tests/testdata/{name} is 0 bytes -- referenced by {', '.join(sorted(users))}")
+            continue
+        ok, why = _openable(path)
+        if not ok:
+            bad.append(f"tests/testdata/{name}: {why} -- referenced by {', '.join(sorted(users))}")
+    assert not bad, "\n".join(bad) + (
+        "\n\nA fixture that exists but cannot be opened fails at the READER, in a "
+        "process, with a message about the tool rather than about the fixture. Give "
+        "it a producer in tests/testdata/generate_complete_testdata.py (RULING R7), "
+        "or -- if it is genuinely a sentinel whose content is never read -- add it to "
+        "EMPTY_ON_PURPOSE in this file with the reason."
+    )
+
+
+def test_the_empty_on_purpose_allowlist_has_no_dead_entries():
+    """An exemption for a fixture that is gone, or that now has real content, is a
+    licence nobody is using and the next reader will trust."""
+    stale = []
+    for name, reason in EMPTY_ON_PURPOSE.items():
+        assert reason.strip(), f"{name} has an empty reason"
+        path = TESTDATA / name
+        if not path.is_file():
+            stale.append(f"{name}: no such fixture -- delete the exemption")
+        elif path.stat().st_size != 0:
+            stale.append(
+                f"{name}: is {path.stat().st_size} bytes now, not empty -- delete the exemption"
+            )
+    assert not stale, "\n".join(stale)
 
 
 def test_the_scan_finds_real_references():
