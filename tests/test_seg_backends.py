@@ -145,9 +145,11 @@ def test_segment_renders_both_blocks_from_the_one_backend_list():
         "segment.nf must not hand-write a versions.yml heredoc in either block"
     )
     assert (
-        "ProcessEnvelope.versions(task.process, backend.versionTools)" in text
-        and "ProcessEnvelope.versionsStub(task.process, backend.versionTools)" in text
-    ), "segment.nf must render BOTH blocks from backend.versionTools"
+        "ProcessEnvelope.versions(task.process, backend.versionTools, task.container)"
+        in text
+        and "ProcessEnvelope.versionsStub(task.process, backend.versionTools, task.container)"
+        in text
+    ), "segment.nf must render BOTH blocks from backend.versionTools, task.container"
     # Both blocks must resolve `backend` from the same expression, or two identical
     # `backend.versionTools` reads still name two different backends' tools.
     bindings = re.findall(r"=\s*(SegBackends\.of\([^)\n]*\))", text)

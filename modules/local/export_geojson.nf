@@ -57,9 +57,7 @@ process EXPORT_GEOJSON {
     // ext.args, which renders a SECOND `--pixel_size` that argparse's last-wins
     // semantics lets override this one; both must stay in sync.
     """
-    # Log input size for tracing (-L follows symlinks)
-    input_bytes=\$(stat -L --printf="%s" ${quant_csv} 2>/dev/null || echo 0)
-    echo "${task.process},${meta.patient_id},${quant_csv.name},\${input_bytes}" > ${meta.patient_id}.EXPORT_GEOJSON.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, meta.patient_id, ["${quant_csv}"], "${meta.patient_id}.EXPORT_GEOJSON.size.csv")}
 
     echo "Sample: ${meta.patient_id}"
 
@@ -72,7 +70,7 @@ process EXPORT_GEOJSON {
         ${nucleus_arg} \\
         ${args}
 
-    ${ProcessEnvelope.versions(task.process, ['pandas', 'scipy'])}
+    ${ProcessEnvelope.versions(task.process, ['pandas', 'scipy'], task.container)}
     """
 
     stub:
@@ -81,8 +79,8 @@ process EXPORT_GEOJSON {
     touch export/cells.geojson
     ${params.quantify_compartments ? 'touch export/cells_wholecell.geojson' : ''}
     touch export/cells_data.csv
-    echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.EXPORT_GEOJSON.size.csv
+    ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${meta.patient_id}.EXPORT_GEOJSON.size.csv")}
 
-    ${ProcessEnvelope.versionsStub(task.process, ['pandas', 'scipy'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['pandas', 'scipy'], task.container)}
     """
 }

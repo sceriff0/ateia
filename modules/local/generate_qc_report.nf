@@ -48,7 +48,7 @@ process GENERATE_QC_REPORT {
         --data-dir mirage_qc_data_${timestamp}/ \\
         ${args}
 
-    ${ProcessEnvelope.versions(task.process, [])}
+    ${ProcessEnvelope.versions(task.process, [], task.container)}
     """
 
     stub:
@@ -57,6 +57,6 @@ process GENERATE_QC_REPORT {
     mkdir -p mirage_qc_data_${timestamp}
     touch mirage_qc_report_${timestamp}.html
 
-    ${ProcessEnvelope.versionsStub(task.process, [])}
+    ${ProcessEnvelope.versionsStub(task.process, [], task.container)}
     """
 }
