@@ -554,7 +554,6 @@ UNREPOINTED_NF_SOURCE_READERS = {
     "tests/test_seg_backends_ctx_params.py": _UNREPOINTED_REASON,
     "tests/test_seg_qc_geojson_equivalence.py": _UNREPOINTED_REASON,
     "tests/test_stub_control_json_contract.py": _UNREPOINTED_REASON,
-    "tests/test_versions_envelope.py": _UNREPOINTED_REASON,
     "tests/test_warp_seg_qc.py": _UNREPOINTED_REASON,
 }
 

@@ -13,8 +13,19 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from tests.nfmodel import processes, strip_comments
+
 ROOT = Path(__file__).resolve().parent.parent
 MODULES = sorted((ROOT / "modules" / "local").glob("*.nf"))
+
+# The processes this file governs: modules/local only.
+#
+# modules/nf-core/basicpy/main.nf is vendored and is deliberately out of scope. Read
+# 2026-09-02: it has no versions.yml heredoc at all (it emits `topic: versions` value
+# tuples, the nf-core convention) and no size log, so every rule below would be
+# vacuous on it -- and holding vendored code to this repo's envelope is the same
+# mistake ruff.toml's extend-exclude already refuses to make.
+LOCAL_PROCESSES = [p for p in processes().values() if p.path.parent.name == "local"]
 
 # Documented exception -- not an oversight. There is exactly ONE now:
 #
@@ -56,11 +67,18 @@ def test_no_module_hand_writes_a_versions_heredoc():
 
 CALL_START_RE = re.compile(r"ProcessEnvelope\.(versions|versionsStub)\(")
 
-# A literal tools list: `task.process, ['a', 'b']` or `task.process, []`. Deliberately
-# strict -- see _extract_calls' docstring for why a call that ISN'T this shape must fail
-# loudly rather than be silently treated as "no call here".
+# A literal tools list, with the mandatory `task.container` third argument:
+# `task.process, ['a', 'b'], task.container`.
+#
+# THE THIRD ARGUMENT HAD TO BE ADDED HERE, not left to the symmetric-non-literal
+# escape hatch below. Without it every 3-arg call became "non-literal", every module
+# took the symmetric exception, and test_script_and_stub_ask_for_the_same_tool_list
+# -- the check this entire file exists for -- silently had nothing left to compare in
+# ANY module. Watched: with the old regex and the migrated modules, that test
+# collected zero literal calls and passed while blind.
 LITERAL_ARGS_RE = re.compile(
-    r"^\s*task\.process\s*,\s*(\[\s*(?:'[^']*'\s*(?:,\s*'[^']*'\s*)*)?\])\s*$"
+    r"^\s*task\.process\s*,\s*(\[\s*(?:'[^']*'\s*(?:,\s*'[^']*'\s*)*)?\])"
+    r"\s*(?:,\s*task\.container\s*)?$"
 )
 
 
@@ -290,4 +308,133 @@ def test_script_and_stub_ask_for_the_same_tool_list():
             mismatches.append((nf.name, script_calls, stub_calls))
     assert not mismatches, (
         f"script: and stub: pass different tool lists in {[m[0] for m in mismatches]}: {mismatches}"
+    )
+
+
+# Every ProcessEnvelope entry point that renders a versions.yml heredoc. The bash
+# pair takes no tools list, so it is matched here and nowhere else.
+_VERSIONS_CALL_RE = re.compile(
+    r"ProcessEnvelope\.(versions|versionsStub|versionsBash|versionsBashStub)\s*\("
+)
+
+
+def _split_top_level_commas(args):
+    """Split a call's argument text on its TOP-LEVEL commas only.
+
+    `task.process, ['tifffile', 'bioio'], task.container` is three arguments, not
+    four: the comma inside the list literal is nested. A naive `args.split(",")`
+    reports the last argument as `'bioio']` and this guard would fail every module
+    that names two tools.
+    """
+    depth, out, cur = 0, [], ""
+    for ch in args:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    out.append(cur)
+    return [a.strip() for a in out]
+
+
+def test_every_module_records_its_container():
+    """Every versions.yml must name the image that produced it.
+
+    Ruling R6 makes the container part of 1.0.0's reproducibility claim, and this
+    repo's tags are content-descriptive (`:preprocess`, `:tiled`) rather than
+    immutable -- so `container:` in versions.yml is the only record of WHICH image
+    a given result came out of. `task.container` is non-null even with no container
+    engine enabled (measured 2026-09-02 on 25.04.7), so there is no environment in
+    which passing it is a no-op.
+
+    Read off the COMMENT-STRIPPED view: this asks "does this call actually run?",
+    and a comment quoting a 3-arg call would otherwise satisfy it while the real
+    call ships two arguments. That mistake was made six times in one day on this
+    repo (2026-09-01) and is recorded in CLAUDE.md.
+    """
+    offenders = []
+    for proc in LOCAL_PROCESSES:
+        for half in ("script_body", "stub_body"):
+            text = strip_comments(getattr(proc, half))
+            for m in _VERSIONS_CALL_RE.finditer(text):
+                args = _find_balanced_call_args(text, m.end() - 1)
+                if args is None:
+                    offenders.append(
+                        f"{proc.path.name}:{half}: unbalanced {m.group(1)} call"
+                    )
+                    continue
+                parts = _split_top_level_commas(args)
+                if not parts or parts[-1] != "task.container":
+                    offenders.append(
+                        f"{proc.path.name}:{half}: {m.group(1)}({args.strip()}) does not "
+                        "pass task.container as its last argument"
+                    )
+    assert not offenders, (
+        "versions.yml must record the container image that produced it "
+        "(00-master.md ruling R6):\n  " + "\n  ".join(offenders)
+    )
+
+
+def _blank_envelope_size_log_calls(text):
+    """`text` with every ProcessEnvelope.sizeLog/sizeLogStub call's arguments blanked.
+
+    The outFile argument of a legitimate call legitimately CONTAINS `size.csv`
+    (`"${meta.id}.QUANTIFY.size.csv"`), so the "no hand-written row" rule below
+    cannot be a plain substring check -- it would fail on the very calls it is
+    asking for. Blanking the sanctioned calls first leaves exactly the
+    unsanctioned mentions behind.
+    """
+    out = text
+    while True:
+        m = re.search(r"ProcessEnvelope\.(sizeLog|sizeLogStub)\s*\(", out)
+        if not m:
+            return out
+        args = _find_balanced_call_args(out, m.end() - 1)
+        if args is None:
+            return out
+        end = m.end() + len(args)
+        out = out[: m.start()] + " " * (end - m.start()) + out[end:]
+
+
+def test_every_size_log_module_uses_the_envelope():
+    """A module that emits `size_log` renders BOTH its rows through ProcessEnvelope.
+
+    The failure this closes is the size-log twin of the one the rest of this file
+    closes for versions.yml, and it was worse: all 21 stub blocks wrote the literal
+    `STUB` as the process name, so a stub CSV and a real CSV could not be compared
+    at all, and bin/generate_resource_report.py carried a special case to drop those
+    rows. `-stub` never evaluates `script:`, so nothing in the blocking gate could
+    see the two halves disagree -- and they did: quantify.nf's script row keyed on
+    meta.patient_id while its stub row keyed on meta.id.
+
+    Discovery is by `emit: size_log`, not by a hard-coded list of 21 filenames: a
+    new module that emits a size log is covered the day it is written.
+    """
+    offenders = []
+    for proc in LOCAL_PROCESSES:
+        if "emit: size_log" not in strip_comments(proc.outputs):
+            continue
+        for half, wanted in (
+            ("script_body", "sizeLog("),
+            ("stub_body", "sizeLogStub("),
+        ):
+            text = strip_comments(getattr(proc, half))
+            if f"ProcessEnvelope.{wanted}" not in text:
+                offenders.append(
+                    f"{proc.path.name}:{half}: emits size_log but never calls "
+                    f"ProcessEnvelope.{wanted}"
+                )
+            leftover = _blank_envelope_size_log_calls(text)
+            if "size.csv" in leftover:
+                offenders.append(
+                    f"{proc.path.name}:{half}: writes a *.size.csv row outside "
+                    "ProcessEnvelope.sizeLog/sizeLogStub"
+                )
+    assert not offenders, (
+        "size-log rows must be rendered by lib/ProcessEnvelope.groovy so the "
+        "script: and stub: copies cannot disagree:\n  " + "\n  ".join(offenders)
     )
