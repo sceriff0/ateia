@@ -106,4 +106,14 @@
 # run script actually passes `--shard-strategy round-robin` (verified
 # red/green: deleting the flag from .github/workflows/_test-suite.yml fails
 # this test, restoring it passes). No other test count moved.
-1338
+#
+# RE-MEASURED 2026-09-02 on release/p10-resource-report, phase 10 task 4
+# (generate_resource_report.py: parse requested memory/cpus and failed
+# GB.h in parse_trace/rollup_by_process): 1326 passed, 13 skipped, 0
+# failed -- 1339 collected, up from the prior entry's 1336. The increase
+# is exactly the 3 new cases in tests/test_generate_resource_report.py
+# (test_parse_trace_reads_requested_memory_and_cpus,
+# test_rollup_carries_the_max_request_and_the_cost_of_failures,
+# test_failed_gb_h_falls_back_to_observed_rss_when_no_request_is_recorded);
+# no other test count moved.
+1341

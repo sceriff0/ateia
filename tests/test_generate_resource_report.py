@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "bin" / "generate_resource_report.py"
 
@@ -368,3 +370,90 @@ def test_build_html_cpu_max_pct_has_percent_suffix():
     section = html_out[html_out.index(section_marker) :]
     section = section[: section.index("</section>")]
     assert "87.5%" in section
+
+
+def test_parse_trace_reads_requested_memory_and_cpus():
+    """The trace's `memory` column is the REQUEST. Without it there is no headroom
+    to plot -- only observed peak_rss, which cannot show over-provisioning."""
+    grr = _load()
+    import tempfile
+    from pathlib import Path as _P
+
+    with tempfile.TemporaryDirectory() as d:
+        t = _P(d) / "trace.txt"
+        t.write_text(
+            "task_id\tprocess\ttag\tname\tstatus\texit\tsubmit\tstart\tcomplete\t"
+            "duration\trealtime\t%cpu\tcpus\tmemory\tpeak_rss\tpeak_vmem\trchar\twchar\n"
+            "1\tA\tP001\tn\tCOMPLETED\t0\t-\t-\t-\t12m\t10m\t142%\t8\t100 GB\t3.2 GB\t4 GB\t1 GB\t500 MB\n"
+            "2\tA\tP002\tn\tCOMPLETED\t0\t-\t-\t-\t12m\t10m\t142%\t-\t-\t3.2 GB\t4 GB\t1 GB\t500 MB\n"
+        )
+        rows = grr.parse_trace(t)
+
+    assert rows[0]["memory_b"] == 100 * 1024**3
+    assert rows[0]["cpus"] == 8
+    assert rows[1]["memory_b"] is None  # "-" is missing, not zero
+    assert rows[1]["cpus"] is None
+
+
+def test_rollup_carries_the_max_request_and_the_cost_of_failures():
+    grr = _load()
+    rows = [
+        # succeeded: 100 GB requested for 1 h
+        {
+            "process": "A",
+            "tag": "P1",
+            "exit": "0",
+            "status": "COMPLETED",
+            "realtime_s": 3600.0,
+            "cpu_pct": None,
+            "peak_rss_b": 50 * 1024**3,
+            "peak_vmem_b": None,
+            "rchar_b": None,
+            "wchar_b": None,
+            "memory_b": 100 * 1024**3,
+            "cpus": 8,
+        },
+        # failed after 30 min holding a 200 GB reservation -> 100 GB.h thrown away
+        {
+            "process": "A",
+            "tag": "P1",
+            "exit": "137",
+            "status": "FAILED",
+            "realtime_s": 1800.0,
+            "cpu_pct": None,
+            "peak_rss_b": 190 * 1024**3,
+            "peak_vmem_b": None,
+            "rchar_b": None,
+            "wchar_b": None,
+            "memory_b": 200 * 1024**3,
+            "cpus": 8,
+        },
+    ]
+    a = {r["process"]: r for r in grr.rollup_by_process(rows)}["A"]
+
+    assert a["n_failed"] == 1
+    assert a["mem_req_max_b"] == 200 * 1024**3
+    assert a["failed_realtime_s"] == 1800.0
+    assert a["failed_gb_h"] == pytest.approx(100.0, rel=1e-6)
+
+
+def test_failed_gb_h_falls_back_to_observed_rss_when_no_request_is_recorded():
+    grr = _load()
+    rows = [
+        {
+            "process": "A",
+            "tag": "P1",
+            "exit": "1",
+            "status": "FAILED",
+            "realtime_s": 7200.0,
+            "cpu_pct": None,
+            "peak_rss_b": 10 * 1024**3,
+            "peak_vmem_b": None,
+            "rchar_b": None,
+            "wchar_b": None,
+            "memory_b": None,
+            "cpus": None,
+        },
+    ]
+    a = {r["process"]: r for r in grr.rollup_by_process(rows)}["A"]
+    assert a["failed_gb_h"] == pytest.approx(20.0, rel=1e-6)

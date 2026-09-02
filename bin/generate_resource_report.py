@@ -90,6 +90,19 @@ def parse_percent(s):
         return None
 
 
+def _int_or_none(s):
+    """Parse an integer trace field ('8', '-') to int or None."""
+    if s is None:
+        return None
+    s = s.strip()
+    if not s or s == "-":
+        return None
+    try:
+        return int(float(s))
+    except ValueError:
+        return None
+
+
 def parse_trace(path):
     """Parse trace.txt (TSV) into a list of per-task dicts with normalized fields."""
     rows = []
@@ -108,6 +121,12 @@ def parse_trace(path):
                     "realtime_s": parse_duration(r.get("realtime")),
                     "duration_s": parse_duration(r.get("duration")),
                     "cpu_pct": parse_percent(r.get("%cpu")),
+                    # The REQUEST, not the usage. nextflow.config's trace `fields` has
+                    # carried `memory` and `cpus` all along; nothing read them, so the
+                    # report could show what a task used and never what it asked for --
+                    # and over-provisioning is invisible without both.
+                    "memory_b": parse_bytes(r.get("memory")),
+                    "cpus": _int_or_none(r.get("cpus")),
                     "peak_rss_b": parse_bytes(r.get("peak_rss")),
                     "peak_vmem_b": parse_bytes(r.get("peak_vmem")),
                     "rchar_b": parse_bytes(r.get("rchar")),
@@ -147,6 +166,35 @@ def _sumf(values):
     return sum(v for v in values if v is not None)
 
 
+def _is_failure(row):
+    """A non-zero exit. `-` is Nextflow's not-run/cached sentinel and `` is a
+    missing field; neither is a failure, and counting them as one used to inflate
+    every failure count in the report."""
+    return row.get("exit") not in ("0", "", "-", None)
+
+
+_GIB = 1024**3
+
+
+def _reserved_gb_h(row):
+    """Reserved memory-hours for one task: GB requested x hours held.
+
+    Falls back to observed ``peak_rss`` when no request was recorded, because a
+    task that reserved an unknown amount still held something. Returns 0.0 when
+    neither number is available -- an unknown cost is reported as no cost rather
+    than guessed, and the task count beside it keeps the panel honest.
+    """
+    rt = row.get("realtime_s")
+    if not rt:
+        return 0.0
+    mem = row.get("memory_b")
+    if mem is None:
+        mem = row.get("peak_rss_b")
+    if mem is None:
+        return 0.0
+    return (mem / _GIB) * (rt / 3600.0)
+
+
 def rollup_by_process(trace_rows):
     """Aggregate trace rows into per-process resource summaries."""
     groups = {}
@@ -168,9 +216,12 @@ def rollup_by_process(trace_rows):
                 "peak_vmem_max_b": _maxf([r.get("peak_vmem_b") for r in rows]),
                 "rchar_total_b": _sumf([r.get("rchar_b") for r in rows]),
                 "wchar_total_b": _sumf([r.get("wchar_b") for r in rows]),
-                "n_failed": sum(
-                    1 for r in rows if r.get("exit") not in ("0", "", "-", None)
+                "n_failed": sum(1 for r in rows if _is_failure(r)),
+                "mem_req_max_b": _maxf([r.get("memory_b") for r in rows]),
+                "failed_realtime_s": _sumf(
+                    [r.get("realtime_s") for r in rows if _is_failure(r)]
                 ),
+                "failed_gb_h": sum(_reserved_gb_h(r) for r in rows if _is_failure(r)),
             }
         )
     return out
@@ -326,7 +377,7 @@ def build_html(
 
     # Run totals
     total_wall = _sumf([r.get("realtime_s") for r in trace_rows])
-    n_fail = sum(1 for r in trace_rows if r.get("exit") not in ("0", "", "-", None))
+    n_fail = sum(1 for r in trace_rows if _is_failure(r))
     peak = _maxf([r.get("peak_rss_b") for r in trace_rows])
     totals = (
         f"<table><tbody>"
@@ -420,7 +471,7 @@ def build_html(
     )
 
     # Retries & failures
-    fails = [r for r in trace_rows if r.get("exit") not in ("0", "", "-", None)]
+    fails = [r for r in trace_rows if _is_failure(r)]
     if fails:
         t = "<table><thead><tr><th>Process</th><th>Sample</th><th>Status</th><th>Exit</th></tr></thead><tbody>"
         for r in fails:
