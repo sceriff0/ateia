@@ -267,4 +267,13 @@
 # test_versions_section_missing_file_is_graceful); no other test count moved.
 # Lowering the floor here is the documented escape hatch for a deliberate
 # removal, not drift.
-1392
+
+#
+#
+# RE-MEASURED 2026-09-02 on release/p09-qc-report, task 3 (cut manifest_section):
+# 1319 passed, 13 skipped, 0 failed -- 1332 collected, DOWN from the prior
+# entry's 1334. The Sample Manifest section's rendering is deliberately
+# deleted, and with it its two tests (test_manifest_section,
+# test_manifest_section_escapes_html_special_patient_id); no other test count
+# moved. Same documented escape hatch as task 2.
+1390

@@ -66,14 +66,6 @@ def test_status_strip(tmp_path):
     assert "Segmentation" in html
 
 
-def test_manifest_section(tmp_path):
-    gqr = _load()
-    s = gqr.parse_run_summary_json(_summary(tmp_path))
-    html = gqr.manifest_section(s)
-    assert "P001" in html
-    assert ">3<" in html or "3" in html  # image count present
-
-
 def test_parse_seg_qc_json_flattens(tmp_path):
     gqr = _load()
     p = tmp_path / "P001_seg_qc.json"
@@ -135,19 +127,6 @@ def test_html_table_extra_body_html_appends_colspan_row():
     assert out.index("colspan") < out.index("</tbody>")
 
 
-def test_manifest_section_escapes_html_special_patient_id(tmp_path):
-    gqr = _load()
-    summary = {
-        "manifest": {
-            "totals": {"patients": 1, "images": 1, "channels": 1},
-            "patients": {"<b>P001</b>": {"images": 1, "channels": 1}},
-        }
-    }
-    html = gqr.manifest_section(summary)
-    assert "<b>P001</b>" not in html
-    assert "&lt;b&gt;P001&lt;/b&gt;" in html
-
-
 def test_end_to_end_cli_smoke(tmp_path):
     # Minimal inputs: run summary + versions only; everything else empty dirs.
     (tmp_path / "preprocess_qc").mkdir()
@@ -190,7 +169,6 @@ def test_end_to_end_cli_smoke(tmp_path):
     for header in [
         "Run Summary",
         "Pipeline Stages",
-        "Sample Manifest",
         "Preprocessing QC",
         "Registration QC",
         "Segmentation Overlays",
@@ -259,7 +237,6 @@ def test_report_section_headings_are_exactly_these(tmp_path):
     assert _section_titles(out.read_text()) == [
         "Run Summary",
         "Pipeline Stages",
-        "Sample Manifest",
         "Preprocessing QC",
         "Registration QC",
         "Feature-TRE vs Cell-Displacement Reconciliation",

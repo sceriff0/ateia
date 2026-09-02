@@ -208,38 +208,6 @@ def status_strip_section(present):
     return section("Pipeline Stages", "<div>" + "".join(badges) + "</div>")
 
 
-def manifest_section(summary):
-    """Sample manifest: totals plus a per-patient image/channel table."""
-    manifest = (summary or {}).get("manifest", {})
-    if not manifest:
-        return section(
-            "Sample Manifest", '<p class="empty-notice">Manifest not available.</p>'
-        )
-    totals = manifest.get("totals", {})
-    patients = manifest.get("patients", {})
-    head = _kv_table(
-        [
-            ("Patients", totals.get("patients")),
-            ("Images", totals.get("images")),
-            ("Channels", totals.get("channels")),
-        ]
-    )
-    tbl = (
-        "<table style='margin-top:14px'><thead><tr>"
-        "<th>Patient</th><th>Images</th><th>Channels</th>"
-        "</tr></thead><tbody>"
-    )
-    for pid in sorted(patients):
-        row = patients[pid]
-        tbl += (
-            f"<tr><td>{html.escape(str(pid))}</td>"
-            f"<td>{html.escape(str(row.get('images', '')))}</td>"
-            f"<td>{html.escape(str(row.get('channels', '')))}</td></tr>"
-        )
-    tbl += "</tbody></table>"
-    return section("Sample Manifest", head + tbl)
-
-
 # ---------------------------------------------------------------------------
 # HTML building blocks
 # ---------------------------------------------------------------------------
@@ -923,7 +891,6 @@ def main():
     html_parts = [html_header(timestamp)]
     html_parts.append(run_summary_section(summary))
     html_parts.append(status_strip_section(present))
-    html_parts.append(manifest_section(summary))
     html_parts.append(preprocess_qc_section(args.preprocess_qc))
     html_parts.append(
         registration_qc_section(
