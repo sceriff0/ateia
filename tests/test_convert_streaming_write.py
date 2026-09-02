@@ -39,16 +39,22 @@ bytes fall inside that UUID field. The OME-XML comparison below masks that one
 
 from __future__ import annotations
 
+import importlib.machinery
 import logging
 import re
 import sys
 import types
+from pathlib import Path
 
 import dask.array as da
 import numpy as np
 import tifffile
 
-from bin import convert_image
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin" / "utils"))
+
+import ome_io  # noqa: E402
+
+from bin import convert_image  # noqa: E402
 
 _UUID_RE = re.compile(rb"urn:uuid:[0-9a-fA-F-]{36}")
 _UUID_MASK = b"urn:uuid:00000000-0000-0000-0000-000000000000"
@@ -59,18 +65,38 @@ def _mask_uuid(raw: bytes) -> bytes:
     return _UUID_RE.sub(_UUID_MASK, raw)
 
 
-def _legacy_write(output_filename, image_data, ome_metadata):
+def _legacy_write(
+    output_filename,
+    image_data,
+    *,
+    channels,
+    pixel_size_um,
+    tile=None,
+    pyramid_levels=1,
+    bigtiff=None,
+    axes="CYX",
+    pixel_size_z_um=None,
+):
     """The write this task replaces, verbatim, kept only as the equivalence reference.
 
-    ``bin/convert_image.py`` before this change::
+    ``bin/convert_image.py`` before the streaming rewrite::
 
         tifffile.imwrite(output_filename, image_data, metadata=ome_metadata,
                          photometric="minisblack", ome=True, bigtiff=True)
+
+    It takes the SAME keyword signature the production writer now has (it is
+    monkeypatched in over ``convert_image.write_ome_tiff``), and builds its metadata
+    through ``ome_io.ome_metadata`` -- so what is being compared is the WRITE, not two
+    different headers. ``tifffile.imwrite`` here is in ``tests/``, which
+    ``tests/test_ome_io_is_the_only_writer.py`` deliberately does not scan: the point of
+    a reference implementation is that it is the old code.
     """
     tifffile.imwrite(
         output_filename,
         np.asarray(image_data),
-        metadata=ome_metadata,
+        metadata=ome_io.ome_metadata(
+            channels, pixel_size_um, axes=axes, pixel_size_z_um=pixel_size_z_um
+        ),
         photometric="minisblack",
         ome=True,
         bigtiff=True,
@@ -157,6 +183,15 @@ class _FakeBioImage:
 def _install_fake_bioio(monkeypatch, img):
     module = types.ModuleType("bioio")
     module.BioImage = lambda _path: img
+    # ome_io.require_reader (now called by convert_image.read_image before dispatch)
+    # asks importlib.util.find_spec("bioio"), which -- for a module already present in
+    # sys.modules -- returns sys.modules["bioio"].__spec__ rather than probing the
+    # filesystem. A bare types.ModuleType has that attribute set to None, so find_spec
+    # raises ValueError("bioio.__spec__ is None") and require_reader would report a
+    # real bioio as "not installed" even though this fake module answers every call the
+    # rest of this file makes on it. A real (if loader-less) ModuleSpec is enough to
+    # satisfy find_spec without pulling in the actual package.
+    module.__spec__ = importlib.machinery.ModuleSpec("bioio", loader=None)
     monkeypatch.setitem(sys.modules, "bioio", module)
 
 
@@ -343,19 +378,13 @@ def test_the_only_nondeterminism_is_the_ome_uuid(tmp_path):
     """
     rng = np.random.default_rng(23)
     array = rng.integers(0, 4000, size=(3, 24, 20), dtype=np.uint16)
-    metadata = {
-        "axes": "CYX",
-        "Channel": {"Name": ["DAPI", "CD3", "CD8"]},
-        "PhysicalSizeX": 0.325,
-        "PhysicalSizeXUnit": "µm",
-        "PhysicalSizeY": 0.325,
-        "PhysicalSizeYUnit": "µm",
-    }
+    channels = ["DAPI", "CD3", "CD8"]
+    pixel_size_um = 0.325
 
     first = tmp_path / "one.ome.tif"
     second = tmp_path / "two.ome.tif"
-    _legacy_write(first, array, metadata)
-    _legacy_write(second, array, metadata)
+    _legacy_write(first, array, channels=channels, pixel_size_um=pixel_size_um)
+    _legacy_write(second, array, channels=channels, pixel_size_um=pixel_size_um)
 
     raw_a = first.read_bytes()
     raw_b = second.read_bytes()
@@ -470,8 +499,8 @@ def test_the_write_is_tiled(monkeypatch, tmp_path):
 
     with tifffile.TiffFile(str(new_path)) as new_tif:
         new_tags = new_tif.pages[0].tags
-        assert new_tags["TileWidth"].value == convert_image.CONVERT_TIFF_TILE
-        assert new_tags["TileLength"].value == convert_image.CONVERT_TIFF_TILE
+        assert new_tags["TileWidth"].value == ome_io.CONVERT_TIFF_TILE
+        assert new_tags["TileLength"].value == ome_io.CONVERT_TIFF_TILE
 
     with tifffile.TiffFile(str(ref_path)) as ref_tif:
         ref_tag_names = {t.name for t in ref_tif.pages[0].tags}
@@ -489,11 +518,7 @@ def test_the_write_is_tiled(monkeypatch, tmp_path):
         finally:
             store.close()
 
-    assert _chunks(new_path) == (
-        1,
-        convert_image.CONVERT_TIFF_TILE,
-        convert_image.CONVERT_TIFF_TILE,
-    )
+    assert _chunks(new_path) == (1, ome_io.CONVERT_TIFF_TILE, ome_io.CONVERT_TIFF_TILE)
     assert _chunks(ref_path) == (1,) + array.shape[-2:]
 
 
@@ -689,7 +714,7 @@ def test_a_per_plane_chunked_read_is_not_warned_about(monkeypatch, tmp_path, cap
     assert "one dask chunk" not in caplog.text
 
 
-def test_a_plane_larger_than_one_tile_still_writes(monkeypatch, tmp_path):
+def test_a_plane_larger_than_one_tile_still_writes(tmp_path):
     """The case every other test in this file was too small to reach.
 
     tifffile's iterator mode is TILE-wise, not plane-wise, whenever ``tile=`` is set:
@@ -707,12 +732,15 @@ def test_a_plane_larger_than_one_tile_still_writes(monkeypatch, tmp_path):
     import numpy as np
     import tifffile
 
-    monkeypatch.setattr(convert_image, "CONVERT_TIFF_TILE", 16)
-
     shape = (2, 24, 20)
     data = (np.arange(int(np.prod(shape)), dtype=np.uint16) % 4096).reshape(shape)
     out = tmp_path / "big_plane.ome.tif"
-    convert_image.write_ome_tiff(out, data, {"axes": "CYX"})
+    # tile= as an ARGUMENT rather than monkeypatching the constant: the writer moved
+    # to bin/utils/ome_io.py, and patching convert_image's imported binding would not
+    # reach the default in ome_io.write_ome_tiff's own signature.
+    convert_image.write_ome_tiff(
+        out, data, channels=["a", "b"], pixel_size_um=None, tile=16
+    )
 
     back = tifffile.imread(out)
     assert back.shape == shape
