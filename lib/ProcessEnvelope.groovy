@@ -93,13 +93,12 @@ class ProcessEnvelope {
      * `python:` is prepended automatically — at the time this class was introduced, 27
      * of the then-28 modules reported it (`aggregate_size_logs.nf`, bash-only, was the
      * sole exception; two others called `python3` instead of `python` — still a
-     * `python:` report, just a different interpreter name, not a non-report). Four of
-     * those 28 modules have since gone (`compile_panel.nf`, `phenotype.nf`,
-     * `tiled_register.nf`, `warp_seg_qc_tiled.nf`), so the count as of this comment is
-     * 23 of 24 — still the one bash-only exception. Pass tools in the order they should
-     * appear in the report.
+     * `python:` report, just a different interpreter name, not a non-report).
+     * aggregate_size_logs.nf was the sole exception and now renders through
+     * versionsBash(), so all 28 modules under modules/local/ go through this class.
+     * Pass tools in the order they should appear in the report.
      */
-    static String versions(String process, List<String> tools) {
+    static String versions(String process, List<String> tools, String container = null) {
         def lines = ['cat <<-END_VERSIONS > versions.yml',
                      "\"${process}\":",
                      // Single-quoted Groovy string: `$` has no interpolation meaning here
@@ -107,6 +106,12 @@ class ProcessEnvelope {
                      // must land in .command.sh for bash to execute it. See probe()'s
                      // comment for what happens when this is over-escaped instead.
                      '    python: $(python --version 2>&1 | sed \'s/Python //\')']
+        // Immediately after python:, before the tool probes. `container` is task.container,
+        // which is NON-NULL even with no container engine enabled (measured 2026-09-02 on
+        // 25.04.7: a plain `nextflow run` with no -profile rendered the image name), so in
+        // practice this line is always present. The null branch keeps the 2-arg form honest
+        // rather than writing the string 'null' into a published report.
+        if (container) { lines << "    container: ${container}" }
         lines += tools.collect { probe(it) }
         lines << 'END_VERSIONS'
         return lines.join('\n')
@@ -118,11 +123,43 @@ class ProcessEnvelope {
      * Takes the SAME tools list as versions(). That is the whole point: the two blocks
      * can no longer name different tools.
      */
-    static String versionsStub(String process, List<String> tools) {
+    static String versionsStub(String process, List<String> tools, String container = null) {
         def lines = ['cat <<-END_VERSIONS > versions.yml',
                      "\"${process}\":",
                      '    python: stub']
+        // `stub`, never the real image name: a stub run produced no evidence about any
+        // image, and versions.yml is the provenance artifact.
+        if (container) { lines << '    container: stub' }
         lines += tools.collect { "    ${yamlKey(it)}: stub" }
+        lines << 'END_VERSIONS'
+        return lines.join('\n')
+    }
+
+    /**
+     * The heredoc for a module with NO Python interpreter.
+     *
+     * modules/local/aggregate_size_logs.nf runs in `container 'ubuntu:22.04'` and is the
+     * only such module. It hand-wrote its heredoc for exactly this reason, and
+     * tests/test_versions_envelope.py carried it as a documented exception. That is no
+     * longer necessary: the reason was never "this module is special", it was "versions()
+     * always prepends python:", and `python --version 2>&1` in an image without Python
+     * writes the shell's own error message into the report as a version number.
+     */
+    static String versionsBash(String process, String container = null) {
+        def lines = ['cat <<-END_VERSIONS > versions.yml',
+                     "\"${process}\":",
+                     '    bash: $(bash --version | head -n1 | sed \'s/GNU bash, version //\')']
+        if (container) { lines << "    container: ${container}" }
+        lines << 'END_VERSIONS'
+        return lines.join('\n')
+    }
+
+    /** The same heredoc for a `stub:` block, every value the literal `stub`. */
+    static String versionsBashStub(String process, String container = null) {
+        def lines = ['cat <<-END_VERSIONS > versions.yml',
+                     "\"${process}\":",
+                     '    bash: stub']
+        if (container) { lines << '    container: stub' }
         lines << 'END_VERSIONS'
         return lines.join('\n')
     }

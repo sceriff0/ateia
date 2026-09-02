@@ -143,6 +143,62 @@ def checkProcessEnvelope() {
     catch (IllegalArgumentException ignored) { noPaths = true }
     assert noPaths : 'ProcessEnvelope.sizeLog must reject an empty shellPaths list'
 
+    // ------------------------------------------------------------------ //
+    // ProcessEnvelope — container identity in versions.yml
+    // ------------------------------------------------------------------ //
+    // WHY versions.yml AND NOT THE TRACE. The trace records what Nextflow was told
+    // to run; versions.yml is what the RUN ITSELF reports, and it is the artifact
+    // that ships with the results. Ruling R6 makes the image a first-class part of
+    // 1.0.0's reproducibility claim, and an image tag in this repo is descriptive
+    // (:preprocess, :tiled), not immutable -- so "which image produced this" is a
+    // question the outputs must answer for themselves.
+    def withContainer = ProcessEnvelope.versions('MIRAGE:POST:MERGE_AND_PYRAMID',
+                                                 ['tifffile'], 'bolt3x/mirage-merge:1.0.0')
+    def containerLines = withContainer.readLines()
+    assert containerLines[0] == 'cat <<-END_VERSIONS > versions.yml'
+    assert containerLines[1] == '"MIRAGE:POST:MERGE_AND_PYRAMID":'
+    assert containerLines[2].startsWith('    python: $(python --version')
+    // Immediately after python:, before the tool probes -- the position is asserted,
+    // not just the presence, because bin/generate_qc_report.py renders the block in
+    // file order into a published table.
+    assert containerLines[3] == '    container: bolt3x/mirage-merge:1.0.0'
+    assert containerLines[4].startsWith('    tifffile: $(python -c ')
+
+    // A null container renders NO line: an absent container must not become the
+    // string 'null' in a published report.
+    assert !ProcessEnvelope.versions('P', ['tifffile'], null).contains('container:')
+    assert !ProcessEnvelope.versions('P', ['tifffile']).contains('container:')
+
+    // The stub reports `stub`, never the real image name: a stub run produced no
+    // evidence about any image, and claiming one would be a fabricated provenance
+    // record in exactly the artifact that exists to carry provenance.
+    def stubContainer = ProcessEnvelope.versionsStub('MIRAGE:POST:MERGE_AND_PYRAMID',
+                                                     ['tifffile'], 'bolt3x/mirage-merge:1.0.0')
+    assert stubContainer.readLines()[3] == '    container: stub'
+    assert !stubContainer.contains('bolt3x')
+
+    // The bash-only pair, for a module with no Python interpreter at all.
+    // AGGREGATE_SIZE_LOGS runs in ubuntu:22.04; routing it through versions() would
+    // run `python --version 2>&1` and write the SHELL'S ERROR MESSAGE
+    // ("bash: python: command not found") into a published report as a version
+    // number, because that heredoc pipes stderr into the value.
+    def bashVersions = ProcessEnvelope.versionsBash('MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS', 'ubuntu:22.04')
+    assert bashVersions.readLines() == [
+        'cat <<-END_VERSIONS > versions.yml',
+        '"MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS":',
+        '    bash: $(bash --version | head -n1 | sed \'s/GNU bash, version //\')',
+        '    container: ubuntu:22.04',
+        'END_VERSIONS',
+    ]
+    assert !bashVersions.contains('python:')
+    def bashStub = ProcessEnvelope.versionsBashStub('MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS', 'ubuntu:22.04')
+    assert bashStub.readLines() == [
+        'cat <<-END_VERSIONS > versions.yml',
+        '"MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS":',
+        '    bash: stub',
+        '    container: stub',
+        'END_VERSIONS',
+    ]
 }
 
 workflow {
