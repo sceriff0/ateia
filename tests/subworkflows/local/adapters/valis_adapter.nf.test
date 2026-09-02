@@ -104,7 +104,9 @@ nextflow_workflow {
         then {
             assertAll(
                 { assert workflow.success },
-                // Naming a channel that is not emitted throws here, which is the check.
+                // workflow.out is map-like: naming an emit that was never declared
+                // yields null rather than throwing, so the check IS the `!= null`
+                // assertion on each line below -- an omitted emit fails it silently.
                 { assert workflow.out.registered != null },
                 { assert workflow.out.transform != null },
                 { assert workflow.out.transform_by_slide != null },

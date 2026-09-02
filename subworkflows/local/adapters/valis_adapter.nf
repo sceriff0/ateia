@@ -111,7 +111,11 @@ workflow VALIS_ADAPTER {
             try {
                 return RegisteredMatch.pair(metas_list, files_list, manifest)
             }
-            catch (IllegalStateException e) {
+            catch (RuntimeException e) {
+                // RegisteredMatch.pair throws IllegalStateException for its own three
+                // failure modes, but signature() throws IllegalArgumentException when
+                // a meta carries null channels -- catch both, or the patient prefix
+                // below is silently dropped for that case.
                 throw new IllegalStateException(
                     "VALIS adapter, patient ${patient_id}: ${e.message}", e)
             }

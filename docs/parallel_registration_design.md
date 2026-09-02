@@ -335,7 +335,7 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   registered pixel coordinates match what postprocessing/segmentation expects.
 - **OME channel manifest.** STITCH must still emit `channels_manifest.json` (filename → OME
   channel names) so `TILED_ADAPTER` matches registered files back to meta by channel signature
-  (`valis_adapter.nf:76-113`). Reuse `create_channels_manifest.py`.
+  (`lib/RegisteredMatch.groovy`). Reuse `create_channels_manifest.py`.
 
 ## Implementation status (branch `feat/tiled-registration`)
 

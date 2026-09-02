@@ -283,6 +283,24 @@ def checkRegisteredMatch() {
     }
     catch (IllegalStateException e) { noFileForMeta = e.message }
     assert noFileForMeta.startsWith('RegisteredMatch: unmatched') : "got: ${noFileForMeta}"
+
+    // Exception 3c: a duplicate FILE signature (as opposed to 3b's duplicate META
+    // signature, already rejected earlier). refMeta and movMeta have DISTINCT
+    // signatures, so the meta-side duplicate check does not fire -- but both
+    // manifest entries below name refMeta's channel set, so fileBySignature
+    // collapses them to one map slot and movFile's entry is overwritten. This is
+    // the third behaviour change documented in lib/RegisteredMatch.groovy's
+    // docstring: the old closure would have silently paired the surviving file to
+    // both metas, whereas here movMeta's signature has no file left and the
+    // "unmatched" throw below is fatal.
+    def dupFileSig = ''
+    try {
+        RegisteredMatch.pair([refMeta, movMeta], [refFile, movFile],
+                             ['P1_DAPI_PANCK_SMA_registered.ome.tiff': ['DAPI', 'PANCK', 'SMA'],
+                              'P1_DAPI_CD3_registered.ome.tiff'      : ['DAPI', 'PANCK', 'SMA']])
+    }
+    catch (IllegalStateException e) { dupFileSig = e.message }
+    assert dupFileSig.startsWith('RegisteredMatch: unmatched') : "got: ${dupFileSig}"
 }
 
 workflow {

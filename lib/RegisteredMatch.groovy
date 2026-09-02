@@ -23,6 +23,17 @@
     and the run would complete successfully with mislabelled channels all the way out to
     the GeoJSON. There is no "best effort" branch on purpose.
 
+    A THIRD BEHAVIOUR CHANGE FROM THE OLD CLOSURE, besides the two called out above
+    (lower-case-before-sort, and the IllegalStateException message prefixes): a
+    duplicate FILE signature is now fatal. `fileBySignature` is a plain map keyed on
+    signature, so two registered files that happen to carry the same channel set
+    overwrite one another in it -- the old closure built the same kind of map and then
+    paired whatever survived, silently attaching the same meta to two different metas'
+    slots. Here the meta-side duplicate check catches equal META signatures, but a
+    duplicate FILE signature with distinct meta signatures slips past it and is instead
+    caught downstream, when the meta whose file got overwritten finds no file left for
+    its signature and hits the "unmatched" throw below -- fatal, not silent.
+
     All methods are static; nothing here reads params.
 ========================================================================================
 */
