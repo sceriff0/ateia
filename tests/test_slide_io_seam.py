@@ -68,6 +68,18 @@ PIXEL_WRITERS = {
         "the multi-site CZYX pseudo-FOV stack BASICPY fits on",
     ),
     "bin/tiled_stitch.py": (1, "the STARE registered slide"),
+    # The seam itself. The regex counts BOTH a def line and a call line whenever they share
+    # a name -- `def ome_tiff_writer(` and `def write_ome_tiff(` each match their own pattern
+    # too, not just their call sites -- so this is 3 def lines (ome_tiff_writer, write_ome_tiff,
+    # write_tiff) plus the 3 real tifffile calls they wrap (TiffWriter(...), the
+    # ome_tiff_writer(...) call inside write_ome_tiff, and the tifffile.imwrite(...) call
+    # inside write_tiff): 6, measured with _writer_sites("bin/utils/ome_io.py") rather than
+    # assumed. This is the ONLY file allowed to name tifffile's writers at all; see
+    # tests/test_ome_io_is_the_only_writer.py.
+    "bin/utils/ome_io.py": (
+        6,
+        "the seam: every TIFF this pipeline writes goes through here",
+    ),
     "bin/utils/image_utils.py": (
         1,
         "generic helper; the caller supplies the decisions",
@@ -75,16 +87,33 @@ PIXEL_WRITERS = {
     "bin/utils/qc.py": (2, "QC raster output, not a pipeline artifact"),
 }
 
-# Writers that emit a (C, H, W) stack. These MUST set photometric="minisblack".
+# Writers that emit a (C, H, W) stack and pass photometric THEMSELVES. Every one of these
+# still constructs its own tw.write(...) call, so the flag is theirs to set.
 MULTI_CHANNEL_WRITERS = (
     "bin/apply_basic_profiles.py",
-    "bin/convert_image.py",
     "bin/tile_for_basic.py",
     "bin/merge_channels_pyramid.py",
     "bin/tiled_stitch.py",
 )
 
-_WRITE_CALL = re.compile(r"tifffile\.imwrite\(|TiffWriter\(")
+# ... and the one that DELEGATES the flag. bin/convert_image.py hands its stack to
+# ome_io.write_ome_tiff, which sets photometric="minisblack" itself. Naming the delegation
+# rather than dropping the file is what keeps the property covered: without the second
+# assertion below, moving the flag into the seam would have silently removed
+# convert_image.py from this check with nothing put in its place.
+DELEGATED_MULTI_CHANNEL_WRITERS = {
+    "bin/convert_image.py": "bin/utils/ome_io.py",
+}
+
+#: Every route by which a file under bin/ writes pixels. Before bin/utils/ome_io.py
+#: existed this was `tifffile.imwrite(` and `TiffWriter(` alone, because those were the
+#: only routes there were; ten scripts called them directly. They are now reachable from
+#: exactly one file, and the other twelve writers call one of ome_io's three entry
+#: points. Both halves are matched here so that the INVENTORY -- which file writes what,
+#: and how many times -- survives the seam rather than collapsing to a single row.
+_WRITE_CALL = re.compile(
+    r"tifffile\.imwrite\(|TiffWriter\(|write_tiff\(|write_ome_tiff\(|ome_tiff_writer\("
+)
 
 
 def _writer_sites(rel):
@@ -146,6 +175,29 @@ def test_every_multi_channel_writer_sets_photometric_minisblack(rel):
     assert 'photometric="minisblack"' in text, (
         f'{rel} writes a multi-channel stack without photometric="minisblack". tifffile will '
         "store it as one page with C samples and pages[i] will raise IndexError."
+    )
+
+
+@pytest.mark.parametrize("rel,owner", sorted(DELEGATED_MULTI_CHANNEL_WRITERS.items()))
+def test_a_delegating_multi_channel_writer_has_an_owner_that_sets_the_flag(rel, owner):
+    """The delegation must be real in both directions: the caller must not set the flag
+    (or it is not delegating), and the owner must.
+
+    The owner-side check matches the KWARG shape (a trailing comma; both real call sites
+    in ome_io.py have another keyword after ``photometric=`` so this is structural, not a
+    style guess) rather than the bare ``photometric="minisblack"`` substring. ome_io.py's
+    own module docstring names that bare string in prose while explaining the rule, and a
+    text-matching guard checked against the bare substring is satisfied by that prose even
+    when the real kwarg is changed to something else -- watched failing this way before
+    being narrowed.
+    """
+    assert 'photometric="minisblack"' not in (REPO / rel).read_text(), (
+        f"{rel} sets photometric itself, so it is not delegating -- move it back into "
+        "MULTI_CHANNEL_WRITERS"
+    )
+    assert 'photometric="minisblack",' in (REPO / owner).read_text(), (
+        f"{rel} delegates its photometric flag to {owner}, which does not set it. Every "
+        "per-page read downstream of the converted slide breaks silently."
     )
 
 
@@ -239,7 +291,7 @@ def test_every_mask_writer_sets_bigtiff(rel):
 # Every generator fed to a tiled write is declared here with what it yields. A new one
 # has to be added deliberately, which is the moment to ask whether it yields tiles.
 TILE_FED_GENERATORS = {
-    "_iter_tiles": "bin/convert_image.py -- wraps _iter_planes and re-slices each plane",
+    "_iter_tiles": "bin/utils/ome_io.py -- wraps _iter_planes and re-slices each plane",
     "_tiles": "bin/apply_basic_profiles.py -- channel-major, tile-major",
     "_plane_tiles": "bin/merge_channels_pyramid.py -- per-plane tile walk",
     "stream_tiles": "bin/tiled_stitch.py -- warps and emits one out_tile at a time",
@@ -260,7 +312,7 @@ def _tiled_writes_with_a_generator():
                 continue
             fn = node.func
             name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
-            if name not in ("write", "imwrite"):
+            if name not in ("write", "imwrite", "write_tiff"):
                 continue
             if not any(k.arg == "tile" for k in node.keywords):
                 continue
