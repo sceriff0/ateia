@@ -689,6 +689,7 @@ BLOCKING_CHECKS = [
     ("DISK front-end non-skip proof", "tests/test_coarse_frontend.py"),
     ("nf-test stub suite", "nf-test test --tag stub"),
     ("ruff lint", "ruff check ."),
+    ("ruff format (blocking since release 1.0 phase 02)", "ruff format --check ."),
     ("lib/ probe (the only unit-test surface lib/*.groovy has)", "tests/lib_probe.nf"),
     (
         "profiles parse without the gitignored site config",

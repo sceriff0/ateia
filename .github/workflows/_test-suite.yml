@@ -532,10 +532,12 @@ jobs:
           test "$n" -ge 1
 
   # ============================================================================
-  # Python lint (blocking) — ruff check only, not ruff format. The repo is not
-  # format-normalized yet, so format enforcement is deliberately out of scope;
-  # this job only fails the build on actual lint errors (pyflakes/pycodestyle/
-  # import-sort per ruff.toml).
+  # Python lint (blocking) — BOTH `ruff check` (pyflakes/pycodestyle/import-sort
+  # per ruff.toml) and `ruff format --check`. Format enforcement used to be out
+  # of scope because the repo was not normalized; it was normalized in one commit
+  # for release 1.0 (132 files) and the check went blocking in the same phase, so
+  # that the normalisation cannot silently rot back. ruff is version-pinned in
+  # requirements/lint.txt precisely because a formatter release changes output.
   # ============================================================================
   ruff:
     name: Ruff lint
@@ -559,6 +561,13 @@ jobs:
       - name: Run ruff check
         run: |
           ruff check .
+
+      - name: Run ruff format --check
+        # Separate step, not `&&`-chained onto the one above: a formatting
+        # failure and a lint failure are different fixes, and the Actions UI
+        # names the step that failed.
+        run: |
+          ruff format --check .
 
       - name: Run actionlint
         # WORKFLOW LINT LIVES IN THIS JOB, AND THAT IS DELIBERATE. It used to sit
