@@ -721,6 +721,15 @@ BLOCKING_CHECKS = [
     # longer appears in any `run:` body and matching it would assert the old
     # implementation rather than the check.
     ("actionlint (workflow + composite-action syntax)", "actionlint"),
+    # Added by phase 07. The format suite runs the CONVERT_IMAGE reader stack
+    # against synthesised pyramidal/BigTIFF/RGB/8-bit/float/HDF5/NDPI fixtures.
+    # The needle is the DIRECTORY form, which is also what keeps this suite out
+    # of python-tests' collection: `pytest tests/` (the blocking python suite's
+    # needle, above) would match a `tests/` run, not this one.
+    (
+        "format suite (convert image's reader stack)",
+        "pytest -v tests/integration/formats",
+    ),
 ]
 
 
@@ -1484,6 +1493,7 @@ GATE_MEMBERSHIP = {
         "nextflow-stub",
         "nf-test-stub",
         "security-tests",
+        "format-tests",
         "ruff",
     },
 }

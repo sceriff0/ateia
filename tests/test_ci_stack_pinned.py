@@ -300,6 +300,7 @@ def test_the_scanned_files_actually_install_something():
 #   _test-suite.yml::nf-test-stub    testdata.txt
 #   _test-suite.yml::security-tests  testdata.txt
 #   _test-suite.yml::ruff            lint.txt
+#   _test-suite.yml::format-tests    format-tests.txt
 #   nightly.yml::nf-test-real        testdata.txt
 #   nightly.yml::nf-test-integration testdata.txt
 # requirements/nf-core.txt was in this set until Phase 7 deleted the `nf-core lint`
@@ -322,6 +323,7 @@ EXPECTED_CI_REQUIREMENTS = {
     "requirements/kornia.txt",
     "requirements/testdata.txt",
     "requirements/lint.txt",
+    "requirements/format-tests.txt",
 }
 
 
