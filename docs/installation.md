@@ -66,6 +66,17 @@ names never reach a commit. Every command on this site ends in `-c site.config`.
     `-profile test` and `-profile test_full` pin their own small ceilings, so the
     demo runs with nothing else set.
 
+!!! note "Every command on this site is verified to actually launch"
+    `tests/test_documented_commands_are_runnable.py` checks that every documented
+    `nextflow run` command carries `--outdir` and the sizing pair (`-c
+    site.config`, a pinning profile, or a preset that carries both) — a STATIC
+    token check, run in the Python test suite. `tests/documented_commands_launch.sh`
+    goes further: it substitutes each command's placeholders for this repo's own
+    fixtures and actually runs `nextflow -stub -params-file params/dry_run.json`
+    against every one, so an unrecognised flag or a schema rejection fails CI too,
+    not just a missing `--outdir`. Both run in `_test-suite.yml`'s
+    `nextflow-stub` job.
+
 ## Choose a container backend
 
 Every MIRAGE process runs inside a container with a pinned version tag — you don't install the scientific tools (VALIS, StarDist, Bio-Formats, …) yourself. Pick the backend that matches where you're running.

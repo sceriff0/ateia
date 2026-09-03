@@ -410,6 +410,22 @@ jobs:
         run: |
           bash tests/resume_check.sh 1
 
+      - name: Verify every documented nextflow command launches
+        # The execution counterpart to
+        # tests/test_documented_commands_are_runnable.py's static token check
+        # (Fix Round 1). That check is blind to anything only nf-schema itself
+        # can catch -- an unrecognised flag, a missing required parameter -- so
+        # this script actually runs `nextflow -stub -params-file
+        # params/dry_run.json -c <site.config>` for every documented command,
+        # substituted against this job's own fixtures. Needs its own step for
+        # the same reason cleanup_work.sh and resume_check.sh do: it is neither
+        # a pytest nor an nf-test, and `--dry_run` keeps it fast -- every
+        # command validates and exits before any process (therefore any
+        # container) is ever touched, so this belongs here rather than in the
+        # docker/singularity-pulling containers.yml job.
+        run: |
+          bash tests/documented_commands_launch.sh
+
       - name: Upload stub test results
         if: always()
         uses: actions/upload-artifact@v4

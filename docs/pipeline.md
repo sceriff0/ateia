@@ -275,7 +275,7 @@ Fold a new imaging cycle into a completed patient run, reusing prior assets.
 Bypasses the step gate; `--start` / `--stop` are rejected in this mode.
 
 ```bash
-nextflow run . --mode add_cycle --prior_outdir results/ --input new_cycle.csv --outdir results_cycle2 -c site.config
+nextflow run . --mode add_cycle --cleanup_level none --prior_outdir results/ --input new_cycle.csv --outdir results_cycle2 -c site.config
 ```
 
 | Stage | What happens | Reused? |
