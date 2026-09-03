@@ -1143,7 +1143,7 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     // tool and that no real run ever emits. `-stub` never evaluates script:, so nothing
     // in the blocking gate could see the two key sets were disjoint.
     assert SegBackends.methods().toSorted() == ['cellsam', 'instantseg', 'stardist']
-    assert SegBackends.of('stardist').versionTools   == ['deepcell', 'tensorflow']
+    assert SegBackends.of('stardist').versionTools   == ['tensorflow']
     assert SegBackends.of('instantseg').versionTools == ['instanseg', 'torch']
     assert SegBackends.of('cellsam').versionTools    == ['cellSAM', 'torch']
 

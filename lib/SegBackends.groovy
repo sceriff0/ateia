@@ -21,7 +21,7 @@
  *               checks, not boilerplate, and each is meaningless for the other two
  *               backends -- see the per-backend comments below.
  *   versionTools the backend's own tools, as BARE PYTHON MODULE NAMES -- not rendered
- *               YAML. StarDist reports deepcell/tensorflow, InstanSeg instanseg/torch,
+ *               YAML. StarDist reports tensorflow, InstanSeg instanseg/torch,
  *               CellSAM cellSAM/torch. lib/ProcessEnvelope.groovy turns each name into
  *               its probe row and prepends the shared `python:` row, and
  *               modules/local/segment.nf feeds THIS ONE LIST to both
