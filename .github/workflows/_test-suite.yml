@@ -390,6 +390,42 @@ jobs:
         run: |
           bash tests/cleanup_work.sh
 
+      - name: Verify -resume reuses the cache (behavioural)
+        # The behavioural counterpart to tests/test_resume_determinism.py, and like
+        # tests/cleanup_work.sh it needs its own step or it runs nowhere: it is
+        # neither a pytest nor an nf-test, because what it measures is an OUTCOME
+        # across two whole pipeline sessions. It was referenced in the project's
+        # developer notes as "the behavioural resume check" while appearing in no
+        # workflow file at all.
+        #
+        # Container-free, like every other step in this job: the script runs
+        # `nextflow -q run . -profile test -stub`.
+        #
+        # ONE resume, not the script's default of three. The property is asserted
+        # per resume -- a re-submitted process outside {GENERATE_QC_REPORT,
+        # AGGREGATE_SIZE_LOGS} fails immediately -- so a second and third pass
+        # buy probability, not coverage, and this job already runs two full stub
+        # pipelines per matrix leg. The static guard is the one the gate leans on
+        # precisely because the regression this looks for was intermittent.
+        run: |
+          bash tests/resume_check.sh 1
+
+      - name: Verify every documented nextflow command launches
+        # The execution counterpart to
+        # tests/test_documented_commands_are_runnable.py's static token check
+        # (Fix Round 1). That check is blind to anything only nf-schema itself
+        # can catch -- an unrecognised flag, a missing required parameter -- so
+        # this script actually runs `nextflow -stub -params-file
+        # params/dry_run.json -c <site.config>` for every documented command,
+        # substituted against this job's own fixtures. Needs its own step for
+        # the same reason cleanup_work.sh and resume_check.sh do: it is neither
+        # a pytest nor an nf-test, and `--dry_run` keeps it fast -- every
+        # command validates and exits before any process (therefore any
+        # container) is ever touched, so this belongs here rather than in the
+        # docker/singularity-pulling containers.yml job.
+        run: |
+          bash tests/documented_commands_launch.sh
+
       - name: Upload stub test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -401,12 +437,25 @@ jobs:
             .nextflow.log
 
   # ============================================================================
-  # nf-test stub suite (fast, every push/PR)
+  # nf-test stub suite (fast, every push/PR) — SHARDED FOUR WAYS.
+  #
+  # Measured on CI run 33641966166 (branch release/p01-suite-truth, 2026-09-02):
+  # every other job in this file finishes in <= 5 min, but nf-test (stub) alone
+  # ran > 25 min over 214 tests, serially -- it IS the CI wall-clock. nf-test
+  # 0.9.0+ (the pinned NFTEST_VERSION) supports `--shard i/n` with
+  # `--shard-strategy round-robin`, so the suite is split into four parallel
+  # legs instead of run end to end on one machine. `round-robin` (rather than
+  # splitting by file) keeps the four shards close to even as tests are added
+  # or removed, without anyone having to rebalance a static list by hand.
   # ============================================================================
   nf-test-stub:
-    name: nf-test (stub)
+    name: nf-test (stub, ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     steps:
       - name: Checkout repository
@@ -426,17 +475,18 @@ jobs:
       - name: Generate test data
         uses: ./.github/actions/generate-testdata
 
-      - name: Run nf-test stub suite
+      - name: Run nf-test stub suite (this shard)
         # Container-free (-profile test) and stub-only (--tag stub): stub blocks
         # need no images. Real cases are tagged "real" and run in nightly.yml.
         run: |
-          nf-test test --tag stub --profile test --verbose
+          nf-test test --tag stub --profile test --verbose \
+            --shard ${{ matrix.shard }}/4 --shard-strategy round-robin
 
       - name: Upload nf-test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: nf-test-stub-results
+          name: nf-test-stub-results-${{ matrix.shard }}
           path: |
             .nf-test/
             tests/output/
@@ -512,10 +562,84 @@ jobs:
           test "$n" -ge 1
 
   # ============================================================================
-  # Python lint (blocking) — ruff check only, not ruff format. The repo is not
-  # format-normalized yet, so format enforcement is deliberately out of scope;
-  # this job only fails the build on actual lint errors (pyflakes/pycodestyle/
-  # import-sort per ruff.toml).
+  # Format suite — the readers CONVERT_IMAGE actually runs
+  # ============================================================================
+  # ITS OWN JOB, AND ITS OWN INTERPRETER, FOR A MEASURED REASON. bioio-ome-tiff
+  # 1.4.0 requires tifffile[zarr]<2025.1.10 on python 3.10 and >=2025.5.21 on
+  # 3.11, against a harmonised tifffile==2025.5.10 — so it cannot live in
+  # requirements/ci.txt on either of python-tests' matrix legs. Installing bioio
+  # WITHOUT that plugin resolves and is worthless: an OME-TIFF then reads back as
+  # channel names 'Channel:0:0...' with a pixel size of 1.0, i.e. a different
+  # reader than production. requirements/format-tests.txt carries the image's own
+  # pins and tests/test_format_test_env_matches_the_convert_image.py asserts they
+  # stay equal to containers/convert/Dockerfile's.
+  #
+  # python 3.10 is not a default: containers/convert's base
+  # (eclipse-temurin:21-jre-jammy) is 3.10, and the pin set above only resolves
+  # there.
+  #
+  # `pytest tests/integration/formats` — the DIRECTORY, not `tests/` — is what
+  # keeps this suite out of python-tests' collection and out of
+  # tests/collected_floor.txt. tests/integration is already excluded from the
+  # standard pytest invocation, so no ignore flag has to be added anywhere.
+  #
+  # WHAT THIS JOB BUYS TODAY, HONESTLY. It installs the full bioio + bioio-ome-tiff
+  # stack, but `ome_io.read_info`'s own routing (`_is_tifffile_readable`) sends
+  # EVERY current fixture — `.ome.tif(f)`, `.tif(f)`, `.ndpi(s)`, `.h5` — through
+  # `_info_via_tifffile`/`_info_via_hdf5`, never `_info_via_bioio`, because tifffile
+  # can open all of them directly and is preferred (it is installed everywhere,
+  # bioio in one image — see read_info's own docstring). So this job today buys an
+  # IMPORT + PIN-DRIFT check on the bioio stack (it fails if bioio/bioio-ome-tiff
+  # stop installing together, or drift from the image), not READ COVERAGE of the
+  # bioio branch itself. RULING R3 forbids a committable vendor fixture (.svs/.czi/
+  # .nd2/.lif), which is what would force a real file through `_info_via_bioio` —
+  # until one exists, `_info_via_bioio`'s S-as-C remap
+  # (test_read_info_remaps_interleaved_rgb_samples_to_channels in
+  # tests/test_ome_io.py) is exercised only through a mocked BioImage, never bytes.
+  format-tests:
+    name: Format suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Python and the convert image's reader stack
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: '3.10'
+          upgrade-pip: 'true'
+          requirements: 'requirements/format-tests.txt'
+
+      - name: Generate test data
+        # `setup-python: 'false'` — requirements/format-tests.txt already carries
+        # numpy, tifffile and h5py, and re-running actions/setup-python here would
+        # replace the reader stack this job exists to test.
+        uses: ./.github/actions/generate-testdata
+        with:
+          setup-python: 'false'
+
+      - name: Prove the reader stack is the one that shipped
+        # A skip is not a pass, and neither is an import that silently fell back.
+        # If bioio-ome-tiff is absent, every channel-name assertion below reads
+        # 'Channel:0:0' and the suite tests the wrong reader.
+        run: |
+          python -c "import bioio, bioio_ome_tiff, bioio_tifffile, h5py, tifffile; print(bioio.__version__, tifffile.__version__)"
+
+      - name: Run the format suite
+        run: |
+          pytest -v tests/integration/formats
+
+  # ============================================================================
+  # Python lint (blocking) — BOTH `ruff check` (pyflakes/pycodestyle/import-sort
+  # per ruff.toml) and `ruff format --check`. Format enforcement used to be out
+  # of scope because the repo was not normalized; it was normalized in one commit
+  # for release 1.0 (133 files) and the check went blocking in the same phase, so
+  # that the normalisation cannot silently rot back. ruff is version-pinned in
+  # requirements/lint.txt precisely because a formatter release changes output.
   # ============================================================================
   ruff:
     name: Ruff lint
@@ -539,6 +663,13 @@ jobs:
       - name: Run ruff check
         run: |
           ruff check .
+
+      - name: Run ruff format --check
+        # Separate step, not `&&`-chained onto the one above: a formatting
+        # failure and a lint failure are different fixes, and the Actions UI
+        # names the step that failed.
+        run: |
+          ruff format --check .
 
       - name: Run actionlint
         # WORKFLOW LINT LIVES IN THIS JOB, AND THAT IS DELIBERATE. It used to sit
@@ -565,6 +696,60 @@ jobs:
         uses: ./.github/actions/actionlint
 
   # ============================================================================
+  # Documentation build (mkdocs --strict)
+  # ============================================================================
+  # BLOCKING, IN THIS FILE, DELIBERATELY. It lived in nightly.yml from 2026-09-02
+  # until plan 12 (docs phase): a called reusable workflow's own conclusion is
+  # the worst conclusion of ANY job inside it, gate membership included or not
+  # (measured on CI run 33641966166), so a red `docs` job in a workflow with no
+  # gate aggregator could still fail nothing a caller reads. `--strict` plus the
+  # `validation:` block in `mkdocs.yml` turns three categories that default to
+  # `info` -- orphan pages, dangling anchors, dead relative links -- into a
+  # failed build; mkdocs 1.6 has no `error` level, so `warn` + `--strict` IS the
+  # mechanism (see `mkdocs.yml`'s own note). Plan 12 fixed the four warnings this
+  # job carried at landing (2 orphan pages, 3 dangling anchors, measured
+  # 2026-09-02), so it now sits in `suite-gate`'s `needs:` like every other leg.
+  docs:
+    name: Docs build (mkdocs --strict)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          # FULL HISTORY. mkdocs.yml loads mkdocs-git-revision-date-localized,
+          # which reads each page's last-commit date out of git. On the default
+          # shallow clone it falls back to the build date and logs a WARNING to
+          # do so -- and under `--strict` a warning is an abort, so a shallow
+          # checkout would fail this job for a reason that has nothing to do
+          # with the documentation.
+          fetch-depth: 0
+
+      - name: Set up Python and install the docs stack
+        # docs/requirements.txt, not a requirements/ file: this stack is
+        # documentation tooling, shares no package with any container image, and
+        # Read the Docs installs the same file. tests/test_ci_stack_pinned.py's
+        # rules are satisfied -- the install goes through `-r`, and no version
+        # string appears in this YAML.
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: '3.10'
+          requirements: 'docs/requirements.txt'
+
+      - name: Build the documentation
+        run: |
+          mkdocs build --strict --site-dir _site
+
+      - name: Upload the built site
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-site
+          path: _site/
+
+  # ============================================================================
   # Suite gate — the single result the callers depend on
   # ============================================================================
   # WITHOUT THIS JOB THE GATE WOULD BE WEAKER THAN THE ONE IT REPLACES, and the
@@ -572,7 +757,7 @@ jobs:
   #
   # A caller's `needs.test-suite.result` is the called WORKFLOW's conclusion, and
   # a GitHub Actions workflow whose jobs were all skipped concludes `success`. So
-  # if one of the five jobs above ever gained a `paths:` or an `if:` filter and
+  # if one of the six jobs above ever gained a `paths:` or an `if:` filter and
   # stopped running, the caller would read `success` and wave it through -- which
   # is precisely the "a needed job that stops running must block the merge"
   # failure both callers' aggregators were rewritten to close.
@@ -581,14 +766,14 @@ jobs:
   # explicitly and treats anything that is not a success as a failure. It is the
   # same shape ci.yml's `all-tests` and release.yml's `test` have, which is not a
   # third copy -- those two now read ONE result each (this workflow's), and this
-  # is where the five are enumerated.
+  # is where the six are enumerated.
   #
   # `needs:` must list EVERY other job in this file. A leg missing from it is
   # invisible to this gate and fully visible in the run status: the worst of both.
   # tests/test_release_workflow_graph.py asserts the list is complete.
   suite-gate:
     name: Suite gate
-    needs: [python-tests, nextflow-stub, nf-test-stub, security-tests, ruff]
+    needs: [python-tests, nextflow-stub, nf-test-stub, security-tests, format-tests, ruff, docs]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -617,8 +802,16 @@ jobs:
             echo "::error::Security tests did not pass (result: ${{ needs.security-tests.result }})"
             exit 1
           fi
+          if [ "${{ needs.format-tests.result }}" != "success" ]; then
+            echo "::error::Format suite did not pass (result: ${{ needs.format-tests.result }})"
+            exit 1
+          fi
           if [ "${{ needs.ruff.result }}" != "success" ]; then
             echo "::error::Ruff lint did not pass (result: ${{ needs.ruff.result }})"
+            exit 1
+          fi
+          if [ "${{ needs.docs.result }}" != "success" ]; then
+            echo "::error::The docs build did not pass (result: ${{ needs.docs.result }})"
             exit 1
           fi
           echo "Every job in the shared test suite passed."

@@ -17,6 +17,7 @@ another publishes registered/summary (small text provenance that survives every
 level). A block-level `'params.cleanup_level' in block.body` check would call
 that block gated on the strength of either one.
 """
+
 import re
 
 from tests.nfmodel import (
@@ -74,7 +75,7 @@ def _enclosing_map(brackets: str, text: str, pos: int) -> str:
 def _publish_entries():
     """(selector, line, path_expr, leaf, entry_text) per publishDir destination."""
     for block in with_name_blocks():
-        text = strip_comments(block.raw_body)          # strings intact
+        text = strip_comments(block.raw_body)  # strings intact
         brackets = strip_comments_and_strings(block.raw_body)  # safe to balance
         for m in _PUBLISH_PATH.finditer(text):
             yield (
@@ -177,9 +178,10 @@ def test_the_gate_text_is_identical_everywhere():
     # folding those in would make this assertion about something else entirely.
     variants = {
         " ".join(v.split()).rstrip("]").strip()
-        for v in re.findall(r"enabled:\s*([^,\n]+)", strip_comments(
-            (REPO_ROOT / "conf" / "modules.config").read_text()
-        ))
+        for v in re.findall(
+            r"enabled:\s*([^,\n]+)",
+            strip_comments((REPO_ROOT / "conf" / "modules.config").read_text()),
+        )
         if "cleanup_level" in v
     }
     assert variants, "no cleanup gate found in conf/modules.config at all"
@@ -240,11 +242,11 @@ def test_no_gate_is_written_as_a_closure():
     offenders = [
         f"conf/modules.config: `enabled: {{{v.strip()}}}` is a closure and will "
         f"coerce to false at every cleanup level"
-        for v in re.findall(r"enabled:\s*\{([^}]*)\}", strip_comments(
-            (REPO_ROOT / "conf" / "modules.config").read_text()
-        ))
+        for v in re.findall(
+            r"enabled:\s*\{([^}]*)\}",
+            strip_comments((REPO_ROOT / "conf" / "modules.config").read_text()),
+        )
     ]
     assert not offenders, "\n".join(offenders) + (
-        "\n\nWrite it as a plain boolean expression: "
-        f"`enabled: {GATE}`"
+        f"\n\nWrite it as a plain boolean expression: `enabled: {GATE}`"
     )

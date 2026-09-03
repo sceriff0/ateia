@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIRAGE Supplementary Figure S6 — Accuracy measures</title>
+<style>
+  /* ======================================================================
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4 · S5 · S6)
+     ----------------------------------------------------------------------
+     DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
+     this set has to survive being detached from the repository — attached to
+     a submission, mailed, opened from file:// — so it may not reference an
+     external stylesheet, not even a sibling one. This block is therefore
+     repeated verbatim in docs/figures/pipeline-schematic.html,
+     docs/figures/registration-schematic.html, docs/figures/qc-schematic.html,
+     docs/figures/zarr-schematic.html, docs/figures/coarse-schematic.html and
+     docs/figures/accuracy-schematic.html, and is ported (with the slate
+     counterpart the figures deliberately lack) to docs/stylesheets/extra.css.
+     Change one, change all seven.
+
+     SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
+     paper ground.
+
+     ONE FONT STACK, shared with docs/stylesheets/extra.css so the site and
+     the figures really do read as one artefact (that file's header claimed
+     they did while leading with a different family).
+
+     ONE BREAKPOINT LADDER for the whole set: 1040 · 880 · 760 · 640 · 520.
+     No figure introduces a sixth rung.
+
+     ONE SIZING SCALE: .tag/.tag-def/.tag-alt .53rem / 1px 4px · .pp span
+     .62rem / 1px 5px · table.pr td.k .7rem, td.v/td.val .68rem ·
+     .masthead h1 max-width 72ch.
+
+     OVERFLOW DISCIPLINE: every grid track is minmax(0,…) and every grid or
+     flex item carries min-width:0. Without it a track's automatic minimum is
+     min-content, so one long identifier (GENERATE_POSTPROCESSING_QC) widens
+     its column and pushes the whole grid outside the panel border instead of
+     wrapping.
+     ====================================================================== */
+  :root{
+    --paper:#ffffff; --panel:#ffffff; --sub:#f6f7f8; --sub-2:#eef0f2;
+    --ink:#0f1113; --ink-2:#3c4147; --ink-3:#767c83;
+    --rule:#c3c8cd; --rule-2:#e5e8ea; --bar:#1b1e22;
+    --serif:Georgia,"Times New Roman",Cambria,"Noto Serif",serif;
+    --sans:"Inter","Helvetica Neue",Helvetica,Arial,"Segoe UI",system-ui,sans-serif;
+    --mono:"JetBrains Mono","SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+  .sheet{max-width:1060px;margin:0 auto;padding:40px 26px 72px;}
+
+  .masthead{border-bottom:2px solid var(--ink);padding-bottom:12px;}
+  .masthead .kick{font-size:.71rem;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);font-weight:700;}
+  .masthead h1{font-weight:700;font-size:1.32rem;letter-spacing:-.01em;margin:.3em 0 0;max-width:72ch;line-height:1.26;text-wrap:balance;}
+  .standfirst{font-family:var(--serif);font-size:.95rem;color:var(--ink-2);margin:12px 0 30px;max-width:82ch;}
+
+  /* Figure-set navigation. Relative filenames, so the strip works both from
+     file:// on a detached copy sitting beside its siblings and from the built
+     MkDocs site, which copies docs/figures/ through verbatim. */
+  .figset{display:flex;gap:0;flex-wrap:wrap;align-items:center;margin:12px 0 0;
+    font-family:var(--mono);font-size:.63rem;letter-spacing:.05em;text-transform:uppercase;}
+  .figset a,.figset span{border:1px solid var(--rule);padding:4px 9px;margin:0 -1px 0 0;
+    color:var(--ink-2);text-decoration:none;white-space:nowrap;}
+  .figset a:hover{border-color:var(--ink);color:var(--ink);}
+  .figset .self{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:700;}
+
+  .panel{position:relative;background:var(--panel);border:1px solid var(--rule);padding:20px 20px 18px;margin:0 0 20px;}
+  .panel > .plabel{position:absolute;top:-1px;left:-1px;background:var(--ink);color:#fff;font-weight:700;
+    font-size:.85rem;line-height:1;padding:6px 9px;}
+  .panel-head{margin:2px 0 16px 26px;}
+  .panel-head h2{font-size:1.02rem;font-weight:700;letter-spacing:-.01em;margin:0;}
+  .panel-head p{font-size:.85rem;color:var(--ink-2);margin:3px 0 0;max-width:84ch;}
+
+  code{font-family:var(--mono);font-size:.82em;background:var(--sub);border:1px solid var(--rule-2);border-radius:2px;padding:.5px 4px;}
+  .tbl-scroll{overflow-x:auto;}
+
+  /* parameter chips */
+  .pp{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px;min-width:0;}
+  .pp span{font-family:var(--mono);font-size:.62rem;background:var(--sub);border:1px solid var(--rule-2);padding:1px 5px;
+    color:var(--ink-2);max-width:100%;min-width:0;overflow-wrap:anywhere;}
+  .pp b{color:var(--ink);font-weight:700;}
+  .tag{font-family:var(--mono);font-size:.53rem;text-transform:uppercase;letter-spacing:.04em;padding:1px 4px;
+    font-weight:700;border:1px solid var(--rule);color:var(--ink-2);background:var(--sub-2);white-space:nowrap;}
+  .tag-on{border-color:var(--ink);color:var(--ink);background:#fff;}
+  .tag-def{font-family:var(--mono);font-size:.53rem;background:var(--ink);color:#fff;padding:1px 4px;font-weight:700;white-space:nowrap;}
+  .tag-alt{font-family:var(--mono);font-size:.53rem;background:var(--sub);color:var(--ink-2);border:1px solid var(--rule);padding:1px 4px;white-space:nowrap;}
+
+  /* parameter tables (td.v in S1/S3, td.val in S2 — same scale) */
+  table.pr{border-collapse:collapse;width:100%;font-size:.78rem;}
+  table.pr td{padding:3.5px 4px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
+  table.pr tr:last-child td{border-bottom:none;}
+  table.pr td.k{font-family:var(--mono);font-size:.7rem;font-weight:700;white-space:nowrap;}
+  table.pr td.v,table.pr td.val{font-family:var(--mono);font-size:.68rem;color:var(--ink-2);white-space:nowrap;
+    padding-right:8px;font-variant-numeric:tabular-nums;}
+  table.pr td.v.w{white-space:normal;overflow-wrap:anywhere;}
+  table.pr td.d{color:var(--ink-2);}
+  .nul{color:var(--ink-3);font-style:italic;}
+
+  .caption{font-family:var(--serif);font-size:.83rem;color:var(--ink-2);line-height:1.62;border-top:1px solid var(--rule);padding-top:16px;margin-top:8px;}
+  .caption b{color:var(--ink);}
+  .footnote{font-family:var(--sans);font-size:.72rem;color:var(--ink-3);margin-top:14px;display:block;}
+
+  /* method-agnostic frame — horizontal rail */
+  .rail{display:flex;align-items:stretch;gap:0;border:1px solid var(--rule);flex-wrap:wrap;}
+  .rail .r{flex:1 1 150px;padding:11px 13px;border-right:1px solid var(--rule);border-top:3px solid var(--ink);
+    min-width:0;overflow-wrap:anywhere;}
+  .rail .r:last-child{border-right:none;}
+  .rail .r.disp{border-top-color:var(--ink-3);border-top-style:dashed;background:var(--sub);}
+  .rail .r .t{font-family:var(--mono);font-size:.62rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);}
+  .rail .r .v{font-weight:700;font-family:var(--mono);font-size:.74rem;margin-top:3px;}
+  .rail .r .d{font-size:.76rem;color:var(--ink-2);margin-top:4px;}
+  .railnote{font-family:var(--mono);font-size:.72rem;color:var(--ink-2);margin-top:11px;display:flex;gap:16px;flex-wrap:wrap;}
+  .railnote b{color:var(--ink);}
+
+  /* two-backend header strip */
+  .bkhead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;
+    background:var(--bar);color:#fff;padding:9px 13px;font-family:var(--mono);}
+  .bkhead .name{font-weight:700;font-size:.86rem;letter-spacing:.02em;}
+  .bkhead .sub{font-size:.68rem;color:#c7cacd;}
+  .bkhead .flag{font-size:.6rem;background:#fff;color:var(--ink);padding:1px 6px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+  .bkhead .flag-alt{background:transparent;color:#fff;border:1px solid #6b7075;}
+
+  /* ordered stage stack */
+  .stack{border:1px solid var(--rule);border-top:none;background:var(--sub);padding:11px;display:flex;flex-direction:column;gap:0;}
+  .stg{background:var(--panel);border:1px solid var(--rule);border-left:2.5px solid var(--ink);padding:9px 11px;position:relative;}
+  .stg + .stg{margin-top:16px;}
+  .stg::before{content:"↓";position:absolute;top:-14px;left:14px;font-family:var(--mono);font-size:.7rem;color:var(--rule);}
+  .stg:first-child::before{content:none;}
+  .stg{min-width:0;}
+  .stg .sn{font-family:var(--mono);font-weight:700;font-size:.74rem;display:flex;flex-wrap:wrap;gap:7px;
+    align-items:center;min-width:0;overflow-wrap:anywhere;}
+  .stg .sn .num{background:var(--ink);color:#fff;font-size:.6rem;padding:1px 5px;border-radius:2px;}
+  .stg .sx{font-size:.79rem;color:var(--ink-2);margin-top:5px;}
+  .tag-skip{border-style:dashed;color:var(--ink-3);}
+
+  .emit{border:1px dashed var(--ink-3);background:var(--sub-2);padding:8px 10px;margin-top:11px;
+    font-family:var(--mono);font-size:.7rem;color:var(--ink-2);}
+  .emit b{color:var(--ink);}
+  .emit .lbl{text-transform:uppercase;letter-spacing:.05em;font-size:.58rem;color:var(--ink-3);display:block;margin-bottom:4px;}
+
+  .callout{border-left:3px solid var(--ink);background:var(--sub);padding:8px 12px;font-size:.8rem;color:var(--ink-2);margin:12px 0 0;}
+  .callout b{color:var(--ink);}
+
+  /* mode branch (fanout) */
+  .branch{border:1px dashed var(--ink-3);background:var(--sub-2);padding:9px;display:flex;flex-direction:column;gap:8px;margin-top:11px;}
+  .branch .bh{font-family:var(--mono);font-size:.61rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);}
+  .branch .opt{background:var(--panel);border:1px solid var(--rule);padding:8px 9px;}
+  .branch .opt .oh{font-family:var(--mono);font-weight:700;font-size:.7rem;display:flex;justify-content:space-between;gap:6px;flex-wrap:wrap;align-items:center;}
+  .branch .opt .ox{font-size:.75rem;color:var(--ink-2);margin-top:3px;}
+  .branch .opt .chain{font-family:var(--mono);font-size:.64rem;color:var(--ink);margin-top:6px;overflow-x:auto;white-space:nowrap;}
+
+  /* comparison / spec tables */
+  table.rc{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:.72rem;font-variant-numeric:tabular-nums;}
+  table.rc caption{font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);text-align:left;padding:0 0 7px;}
+  table.rc th{text-align:left;font-weight:700;color:var(--ink-2);border-bottom:1.5px solid var(--ink);padding:6px 9px;vertical-align:bottom;}
+  table.rc th.v,table.rc td.v{width:31%;}
+  table.rc td{padding:6px 9px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
+  table.rc tr:last-child td{border-bottom:none;}
+  table.rc td.k{color:var(--ink-3);white-space:nowrap;}
+  table.rc td .em{color:var(--ink);font-weight:700;}
+  .valwin{background:#f2f4f5;}
+
+  table.ss{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:.72rem;}
+  table.ss th{text-align:left;font-weight:700;color:var(--ink-2);border-bottom:1.5px solid var(--ink);padding:5px 8px;white-space:nowrap;}
+  table.ss td{padding:5px 8px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
+  table.ss tr:last-child td{border-bottom:none;}
+
+  /* reg_qc ladder */
+  .ladder{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+  @media(max-width:760px){.ladder{grid-template-columns:minmax(0,1fr);}}
+  .lv{border:1px solid var(--rule);border-top:2.5px solid var(--ink);padding:10px 11px;background:var(--panel);min-width:0;}
+  .lv .h{font-family:var(--mono);font-weight:700;font-size:.72rem;display:flex;justify-content:space-between;align-items:center;gap:6px;}
+  .lv .h .n{background:var(--ink);color:#fff;font-size:.58rem;padding:1px 5px;}
+  .lv .x{font-size:.77rem;color:var(--ink-2);margin-top:5px;}
+  .lv .proc{font-family:var(--mono);font-size:.62rem;color:var(--ink-3);margin-top:6px;}
+
+  /* parameters */
+  .pgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 26px;}
+  @media(max-width:760px){.pgrid{grid-template-columns:minmax(0,1fr);}}
+  .pcol{min-width:0;}
+  /* Below the 880 rung the two .pgrid tracks are too narrow for the longest keys
+     (reg_tiled_coarse_max_dim) to stay on one line. */
+  @media(max-width:880px){table.pr td.k,table.pr td.val{white-space:normal;overflow-wrap:anywhere;}}
+  .pcol h4{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);
+    margin:14px 0 4px;padding-bottom:3px;border-bottom:1px solid var(--ink);}
+
+  .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;}
+  .grid2 > *{min-width:0;}
+  @media(max-width:880px){.grid2{grid-template-columns:minmax(0,1fr);}}
+
+
+  /* ---- added: two-step teaching components ---- */
+  .twoq{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0;border:1px solid var(--rule);}
+  @media(max-width:880px){.twoq{grid-template-columns:minmax(0,1fr);}}
+  .twoq .q{padding:13px 15px;border-right:1px solid var(--rule);min-width:0;overflow-wrap:anywhere;}
+  .twoq .q:last-child{border-right:none;}
+  @media(max-width:880px){.twoq .q{border-right:none;border-bottom:1px solid var(--rule);}
+    .twoq .q:last-child{border-bottom:none;}}
+  .twoq .q .qn{font-family:var(--mono);font-size:.6rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);}
+  .twoq .q h3{font-size:.94rem;margin:4px 0 6px;font-weight:700;letter-spacing:-.01em;}
+  .twoq .q p{font-size:.81rem;color:var(--ink-2);margin:0 0 8px;}
+  .twoq .q dl{margin:0;font-size:.78rem;}
+  .twoq .q dt{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin-top:8px;}
+  .twoq .q dd{margin:2px 0 0;color:var(--ink-2);}
+  .twoq .q dd b{color:var(--ink);}
+
+  figure.dia{margin:14px 0 0;border:1px solid var(--rule);background:var(--sub);padding:12px 12px 8px;}
+  figure.dia svg{display:block;width:100%;height:auto;max-width:920px;margin:0 auto;}
+  figure.dia figcaption{font-size:.75rem;color:var(--ink-2);margin-top:8px;font-family:var(--sans);}
+  figure.dia figcaption b{color:var(--ink);}
+
+  /* deep two-step anatomy block */
+  .step{border:1px solid var(--rule);background:var(--panel);margin-top:14px;}
+  .step > .sh{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;background:var(--sub-2);
+    border-bottom:1px solid var(--rule);padding:8px 12px;}
+  .step > .sh .k{font-family:var(--mono);font-size:.6rem;font-weight:700;letter-spacing:.06em;
+    text-transform:uppercase;background:var(--ink);color:#fff;padding:2px 6px;}
+  .step > .sh .ttl{font-weight:700;font-size:.9rem;letter-spacing:-.01em;}
+  .step > .sh .who{font-family:var(--mono);font-size:.66rem;color:var(--ink-3);margin-left:auto;}
+  .step .sb{padding:11px 13px 13px;}
+  .step .sb > p{margin:0 0 9px;font-size:.83rem;color:var(--ink-2);}
+  .step .sb > p:last-child{margin-bottom:0;}
+  .step .sb b{color:var(--ink);}
+  table.qa{border-collapse:collapse;width:100%;font-size:.79rem;margin:2px 0 0;}
+  table.qa td{padding:5px 8px 5px 0;border-bottom:1px solid var(--rule-2);vertical-align:top;color:var(--ink-2);}
+  table.qa tr:last-child td{border-bottom:none;}
+  table.qa td.q{font-family:var(--mono);font-size:.61rem;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--ink-3);white-space:nowrap;width:150px;padding-top:7px;}
+  table.qa td b{color:var(--ink);}
+  .math{font-family:var(--mono);font-size:.76rem;background:var(--sub);border:1px solid var(--rule-2);
+    padding:7px 10px;margin:9px 0;overflow-x:auto;white-space:nowrap;color:var(--ink);}
+  .math .cm{color:var(--ink-3);}
+  .warnbox{border-left:3px solid var(--ink);background:#fff;border:1px solid var(--ink);
+    padding:8px 12px;font-size:.79rem;color:var(--ink-2);margin:10px 0 0;}
+  .warnbox b{color:var(--ink);}
+  .warnbox .wl{font-family:var(--mono);font-size:.57rem;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--ink);font-weight:700;display:block;margin-bottom:3px;}
+  ul.tight{margin:6px 0 0;padding-left:18px;font-size:.8rem;color:var(--ink-2);}
+  ul.tight li{margin:3px 0;}
+  ul.tight b{color:var(--ink);}
+  .procmap{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:11px;}
+  @media(max-width:880px){.procmap{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  @media(max-width:520px){.procmap{grid-template-columns:minmax(0,1fr);}}
+  .procmap .pm{border:1px solid var(--rule);border-top:2.5px solid var(--ink);background:var(--panel);padding:9px 10px;min-width:0;}
+  .procmap .pm .nm{font-family:var(--mono);font-weight:700;font-size:.68rem;overflow-wrap:anywhere;}
+  .procmap .pm .fk{font-family:var(--mono);font-size:.58rem;color:var(--ink-3);margin-top:2px;}
+  .procmap .pm .ds{font-size:.74rem;color:var(--ink-2);margin-top:5px;}
+  .procmap .pm .mem{font-family:var(--mono);font-size:.6rem;margin-top:6px;border-top:1px solid var(--rule-2);padding-top:5px;color:var(--ink-2);}
+  .procmap .pm .mem b{color:var(--ink);}
+  .stalebox{border:1px solid var(--rule);background:var(--sub);padding:10px 13px;margin-top:14px;}
+  .stalebox h4{margin:0 0 6px;font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2);}
+  .stalebox ul{margin:0;padding-left:17px;font-size:.77rem;color:var(--ink-2);}
+  .stalebox li{margin:2.5px 0;}
+  .stalebox b{color:var(--ink);}
+</style>
+
+</head>
+<body>
+
+<div class="sheet">
+
+  <div class="masthead">
+    <div class="kick">Supplementary Figure S6 · accuracy measures</div>
+    <h1>Four registration-accuracy numbers this pipeline reports — two scored by the transform's own features, two independent, and none of them a ground truth</h1>
+  </div>
+  <nav class="figset" aria-label="Supplementary figure set">
+    <a href="pipeline-schematic.html">S1 · pipeline</a>
+    <a href="registration-schematic.html">S2 · registration</a>
+    <a href="qc-schematic.html">S3 · quality control</a>
+    <a href="zarr-schematic.html">S4 · lazy reads</a>
+    <a href="coarse-schematic.html">S5 · coarse alignment</a>
+    <span class="self">S6 · accuracy measures</span>
+  </nav>
+  <p class="standfirst">Every registration run in this pipeline can emit up to four distinct
+    accuracy-shaped numbers, produced by different processes, in different units, at different
+    QC levels. Nothing in the source states which of them may be read as evidence that a
+    registration is <i>correct</i>. This figure names all four, draws which ones share their
+    input with the transform that produced them, and states plainly that none of them is checked
+    against an externally-verified correspondence.</p>
+
+  <!-- a — THE NAIVE EXPECTATION -->
+  <section class="panel">
+    <span class="plabel">a</span>
+    <div class="panel-head"><h2>The naive expectation — "the pipeline reports a registration
+      error"</h2>
+      <p>A reviewer reading one QC JSON sees a small, well-labelled set of numbers and reasonably
+        expects them to describe one thing. They describe four different things, and they
+        disagree with each other by design — not by bug.</p></div>
+    <div class="tbl-scroll"><table class="rc">
+      <caption>one slide-stage, four numbers — three read verbatim from the worked example in
+        <code>docs/registration_qc.md</code> (lines 174-177); the fourth has no documented worked
+        example and is left blank</caption>
+      <thead><tr><th>measure</th><th class="v">value</th></tr></thead>
+      <tbody>
+        <tr><td class="k">intrinsic TRE (rigid stage)</td><td class="v"><span class="em">no worked example is documented — illustrative only</span></td></tr>
+        <tr><td class="k">cell displacement, centroid p50 (rigid stage)</td><td class="v"><span class="em">4.1&nbsp;px / 1.33&nbsp;µm</span></td></tr>
+        <tr><td class="k">seg-QC mean IoU (rigid stage)</td><td class="v"><span class="em">0.42</span></td></tr>
+        <tr><td class="k">matched-pair fraction of segmented cells</td><td class="v"><span class="em">0.91</span></td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout" style="margin-top:12px"><b>None of these four is "the" registration
+      error.</b> The first has no documented worked value to cite at all — a fact worth sitting
+      with on its own. The second is <code>WARP_SEG_QC</code>'s own centroid residual, reported in
+      both units the same JSON carries. The third is a Dice-like overlap bounded by how well two
+      independent segmentation runs agree in the first place, not only by registration. The fourth
+      is a diagnostic about the pairing itself — how many segmented cells got matched at all — not
+      about the transform's accuracy. Panel&nbsp;b names what each one is actually computed from;
+      panel&nbsp;c is why the distinction between the first and the rest matters.</div>
+  </section>
+
+  <!-- b — THE FOUR MEASURES -->
+  <section class="panel">
+    <span class="plabel">b</span>
+    <div class="panel-head"><h2>The four measures, and what each is computed from</h2>
+      <p>All four are emitted per moving slide; none of the first two is gated by
+        <code>reg_qc</code> — a registration method always reports its own intrinsic error,
+        regardless of QC level. The last two exist only at <code>reg_qc&nbsp;=&nbsp;2</code>.</p></div>
+    <div class="tbl-scroll"><table class="rc">
+      <thead><tr><th>measure</th><th class="v">computed from</th><th class="v">unit</th><th class="v">produced by</th><th class="v">reg_qc</th></tr></thead>
+      <tbody>
+        <tr><td class="k">intrinsic TRE</td>
+          <td class="v">VALIS: its own keypoint-match residual after the fit
+            (<code>*_summary.csv</code>, the "rTRE" table). STARE: the DISK+LightGlue anchor's
+            RANSAC residual plus the per-tile phase-correlation shift
+            (<code>*_tre.json</code>).</td>
+          <td class="v">px</td>
+          <td class="v"><code>REGISTER</code> / <code>TILED_SOLVE</code></td>
+          <td class="v"><span class="em">always</span> — part of registration itself</td></tr>
+        <tr><td class="k">STARE confidence gate</td>
+          <td class="v">Normalised phase-correlation error, <code>[0,1]</code>, per tile — the
+            same measurement that decides whether a control point enters the mesh. Only the
+            resulting accept/reject flag and <code>tre_rigid</code> land in <code>*_tre.json</code>;
+            the raw confidence number itself is not published.</td>
+          <td class="v">unitless [0,1]</td>
+          <td class="v"><code>TILED_REG_TILE</code> (measures) / <code>TILED_SOLVE</code> (gates)</td>
+          <td class="v"><span class="em">always</span> — STARE method only, not QC-gated</td></tr>
+        <tr><td class="k">cell displacement</td>
+          <td class="v">Median/p90/max centroid distance between the same nuclei, warped through
+            each registration stage, paired once at the rigid anchor.</td>
+          <td class="v">µm when a pixel size resolves (typically VALIS); px otherwise (typically
+            STARE — the pipeline never passes a pixel size to this step on that path)</td>
+          <td class="v"><code>WARP_SEG_QC</code></td>
+          <td class="v">2</td></tr>
+        <tr><td class="k">seg-QC IoU / dice_matched</td>
+          <td class="v">Per-pair IoU over the same warped, fixed-paired nuclei;
+            <code>dice_matched</code> is the areal Dice restricted to those matched pairs
+            only.</td>
+          <td class="v">unitless [0,1]</td>
+          <td class="v"><code>WARP_SEG_QC</code> — same JSON, same process, as cell displacement</td>
+          <td class="v">2</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- c — CIRCULARITY -->
+  <section class="panel">
+    <span class="plabel">c</span>
+    <div class="panel-head"><h2>Circularity — the load-bearing panel</h2>
+      <p>Two of the four measures are computed from the same features the registrar optimised
+        against; the other two are computed from an independently segmented signal the registrar
+        never saw.</p></div>
+    <div class="grid2">
+      <div class="branch" style="margin-top:0">
+        <div class="bh">circular — same features the registrar fit</div>
+        <div class="opt"><div class="oh"><span>intrinsic TRE</span><span class="tag">↺ self-scored</span></div>
+          <div class="ox">The registrar reports its own residual on the very correspondences it
+            used to solve for the transform. A transform that overfits a handful of bright,
+            easy-to-match points can report an excellent intrinsic TRE while the rest of the
+            tissue — everything the matcher did not key on — is untouched.</div></div>
+        <div class="opt"><div class="oh"><span>STARE confidence gate</span><span class="tag">↺ self-scored</span></div>
+          <div class="ox">The same normalised phase-correlation error is used <i>both</i> to
+            decide which control points enter the mesh <i>and</i> as the only quality signal
+            about how well that tile matched. Measured, not hypothetical: a tile that is roughly
+            <b>40–90% off-tissue is ACCEPTED with a WRONG recovered shift</b>, in every one of
+            <b>12</b> swept geometry/seed configurations, injecting a bogus
+            displacement of up to <b>131&nbsp;px</b> — and the range gate cannot catch it, because
+            131&nbsp;px is well inside the default <code>max_disp</code> of <b>256&nbsp;px</b>
+            (<code>reg_tiled_halo</code>).</div></div>
+      </div>
+      <div class="branch" style="margin-top:0">
+        <div class="bh">independent — a signal the registrar never saw</div>
+        <div class="opt"><div class="oh"><span>cell displacement</span><span class="tag-def">independent input</span></div>
+          <div class="ox">Nuclei are segmented on each slide's <i>native</i>, pre-registration
+            image by the run's own segmenter — a different algorithm, working from cell
+            morphology, that never sees the registrar's keypoints or its optimisation
+            target.</div></div>
+        <div class="opt"><div class="oh"><span>seg-QC IoU / dice_matched</span><span class="tag-def">independent input</span></div>
+          <div class="ox">Computed on the exact same warped, fixed-paired native-segmentation
+            polygons as cell displacement — a second summary of the one independent signal this
+            pipeline has, not a second independent measurement.</div></div>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:12px"><b>What this means for reading a report.</b> An
+      excellent intrinsic TRE and an excellent confidence-gate pass rate say the registrar is
+      happy with itself. They say nothing about whether the cells the registrar was never shown
+      actually landed on top of each other. Cell displacement and <code>dice_matched</code> are
+      the only two numbers in this pipeline that can contradict a registrar that is quietly
+      wrong.</div>
+  </section>
+
+  <!-- d — THE CORRELATION -->
+  <section class="panel">
+    <span class="plabel">d</span>
+    <div class="panel-head"><h2>The correlation, and what a divergence means</h2>
+      <p><code>GENERATE_QC_REPORT</code> plots every slide-stage's intrinsic TRE (the circular
+        measure) against its cell displacement (the independent one) on log-log axes, with a
+        shaded agreement band at a fixed divergence ratio.</p></div>
+    <div class="rail">
+      <div class="r"><div class="t">x-axis</div><div class="v">intrinsic TRE</div>
+        <div class="d">The registrar's own self-reported residual for that stage — VALIS's
+          <code>rigid_D</code>/<code>non_rigid_D</code> column, or STARE's
+          <code>coarse_tre_px</code>/refined p50.</div></div>
+      <div class="r"><div class="t">y-axis</div><div class="v">cell displacement</div>
+        <div class="d">The same stage's <code>WARP_SEG_QC</code> centroid-residual p50 — the
+          independent measure.</div></div>
+      <div class="r"><div class="t">the band</div><div class="v">3× either way</div>
+        <div class="d">A slide-stage is called divergent when the larger of the two numbers
+          exceeds <b>3×</b> the smaller — a symmetric rule, drawn as two lines parallel to the
+          identity on the log axes rather than recomputed per point.</div></div>
+    </div>
+    <div class="callout" style="margin-top:12px"><b>Reading a point off the band.</b> A
+      slide-stage whose <b>cell displacement is much larger than its intrinsic TRE</b> is a
+      registrar reporting a small residual on its own features while the independently segmented
+      tissue disagrees — either the transform genuinely failed somewhere the registrar's features
+      never sampled, or the independent segmentation/pairing itself produced an artefact; the
+      reconciliation cannot tell the two apart by itself, only flag that they disagree. A
+      slide-stage whose <b>intrinsic TRE is much larger than its cell displacement</b> means the
+      tissue-level correspondence is actually fine despite a poor self-reported feature fit — the
+      keypoints the registrar had to work with were sparse or noisy in a way that did not carry
+      through to the cells. A point inside the band means the two measures corroborate each
+      other, which is the only case in which either one, alone, would have been a reasonable
+      thing to trust.</div>
+    <div class="warnbox" style="margin-top:10px"><span class="wl">a labelling caveat in the
+      reconciliation itself</span> The reconciliation's own output fields are named
+      <code>feature_tre_um</code> and <code>cell_disp_um</code> regardless of what unit the
+      numbers are actually in. The cell-displacement side is genuine µm only when a pixel size
+      resolved (the VALIS-typical case) and is otherwise the raw px value under a µm-suffixed
+      key; the intrinsic-TRE side is always whichever unit its own source file already reports,
+      unconverted. The divergence ratio is unit-free by construction (it compares a number to
+      itself scaled), so a same-unit comparison is unaffected — but a reader taking either axis
+      label as a literal micron count should not.</div>
+  </section>
+
+  <!-- e — THE KNOBS -->
+  <section class="panel">
+    <span class="plabel">e</span>
+    <div class="panel-head"><h2>The knobs</h2>
+      <p>Defaults verbatim from the <code>params{}</code> block of <code>nextflow.config</code>.</p></div>
+    <div class="tbl-scroll"><table class="pr">
+      <tr><td class="k">reg_qc</td><td class="val">2</td>
+        <td class="d">0 none · 1 overlay · 2 +cell-based measures. <b>2 is the default</b> — the
+          independent measure this figure argues matters most is on unless a run opts out. The
+          ladder is a cost switch, not a capability tier: no level changes what the registration
+          itself does, only how much of it gets measured.</td></tr>
+      <tr><td class="k">reg_tiled_max_error</td><td class="val">0.99</td>
+        <td class="d">STARE's confidence gate threshold — drop a control point whose
+          phase-correlation error exceeds this (0 = perfect match, ~1 = no shared structure).</td></tr>
+      <tr><td class="k">reg_tiled_gate_tre</td><td class="val">1.0</td>
+        <td class="d">STARE refines only tiles whose rigid-stage TRE (px) exceeds this — a tile
+          already aligned to better than this contributes nothing to the mesh.</td></tr>
+      <tr><td class="k">spatialdata_residual_join_max_px</td><td class="val">15.0</td>
+        <td class="d">Max centroid distance (px) when spatially joining WARP_SEG_QC's per-cell
+          residuals onto the segmentation mask for SpatialData export — a separate join, not a
+          registration-quality knob.</td></tr>
+    </table></div>
+  </section>
+
+  <!-- f — HONEST LIMITS -->
+  <section class="panel">
+    <span class="plabel">f</span>
+    <div class="panel-head"><h2>Honest limits</h2>
+      <p>What none of the four measures in this figure can do, stated once rather than left for a
+        reviewer to discover per-measure.</p></div>
+    <div class="warnbox"><span class="wl">1 — there is no ground truth anywhere in this
+      pipeline</span> All four measures are reference-free: they describe how well a transform's
+      own features fit each other, or how well two independently produced signals (a registrar's
+      transform and a segmenter's cells) agree with each other. Agreement between two reference-free
+      signals is evidence, not proof — none of the four can say a configuration is correct, only
+      that it is more or less internally consistent than another.</div>
+    <div class="warnbox" style="margin-top:10px"><span class="wl">2 — nothing in this repository
+      or its sibling branches closes that gap today</span> No landmark TRE against ANHIR or
+      ACROBAT correspondences was ever measured for this release. The harness that would produce
+      one (<code>benchmarks/registration_eval/</code>) exists on no branch, including
+      <code>benchmarking</code>; the removal record — benchmarks/README.md section B,
+      documenting it and a synthetic-ground-truth successor also removed after it — lives only on
+      the <code>benchmarking</code> branch, since <code>main</code> and <code>dev</code> carry no
+      <code>benchmarks/</code> directory at all.</div>
+    <div class="warnbox" style="margin-top:10px"><span class="wl">3 — the question a reviewer is
+      most likely to ask has no answer here</span> "What is the absolute registration error, in
+      physical units, against independently and externally verified correspondences?" This
+      pipeline cannot answer that question for any configuration it ships. That is the fact this
+      figure exists to say out loud, rather than leave for a reviewer to discover by reading four
+      JSON keys and assuming one of them must be it.</div>
+  </section>
+
+  <p class="caption">
+    <b>Supplementary Figure S6. What each accuracy measure actually measures.</b>
+    <b>(a)</b> A registration run can emit four differently-scoped accuracy numbers per slide-stage;
+    none is privileged as "the" registration error, and they are not required to agree.
+    <b>(b)</b> Intrinsic TRE and the STARE confidence gate are emitted unconditionally, as part of
+    registration itself; cell displacement and seg-QC IoU/<code>dice_matched</code> exist only at
+    <code>reg_qc&nbsp;=&nbsp;2</code>, computed by <code>WARP_SEG_QC</code> from nuclei segmented on
+    each slide's native image. <b>(c)</b> Intrinsic TRE and the confidence gate are both scored on
+    the same features the registrar optimised against or used to decide its own mesh; cell
+    displacement and <code>dice_matched</code> are the only two numbers computed from a signal the
+    registrar never saw. <b>(d)</b> Plotting intrinsic TRE against cell displacement exposes exactly
+    the failure mode neither catches alone — a registrar that scores itself well on features that
+    do not represent the tissue, or an independent measure thrown off by a segmentation artefact —
+    with a fixed 3× ratio marking disagreement; the reconciliation's own output fields carry a
+    µm-suffixed name regardless of the unit actually inside them. <b>(e)</b> <code>reg_qc</code>
+    defaults to its richest level; STARE's two gating parameters are correctness knobs, not
+    cost/accuracy tier knobs. <b>(f)</b> None of the four measures is checked against an
+    externally-verified correspondence, nothing in this codebase currently closes that gap, and a
+    reviewer asking for an absolute error in physical units against known correspondences has no
+    answer here. This figure is the accuracy counterpart to Supplementary Figure <b>S3</b>'s QC
+    architecture and Supplementary Figure <b>S2</b>'s registration detail, and to Supplementary
+    Figure <b>S5</b>'s account of how the STARE front-end that produces one of these four numbers
+    actually works.
+    <span class="footnote">All algorithm details and parameter defaults are read verbatim from the
+    pipeline source
+    (<code>bin/warp_seg_qc.py</code>, <code>bin/utils/cell_pairs.py</code>,
+    <code>bin/utils/tre_report.py</code>, <code>bin/utils/tile_residual.py</code>,
+    <code>bin/tiled_solve.py</code>, <code>bin/register.py</code>,
+    <code>bin/generate_qc_report.py</code>, <code>subworkflows/local/registration.nf</code>,
+    <code>subworkflows/local/adapters/valis_adapter.nf</code>,
+    <code>subworkflows/local/adapters/tiled_adapter.nf</code>, <code>lib/ParamUtils.groovy</code>,
+    <code>nextflow.config</code>, <code>modules/local/warp_seg_qc.nf</code>,
+    <code>lib/WarpBackends.groovy</code>, <code>docs/registration_qc.md</code>,
+    <code>tests/test_figures_have_no_retired_names.py</code>).</span>
+  </p>
+</div>
+</body>
+</html>

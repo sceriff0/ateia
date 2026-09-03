@@ -120,7 +120,7 @@ tours every file it produces.
 
     ---
 
-    All 90 operator-settable parameters, grouped by stage, with defaults and guidance.
+    All 89 operator-settable parameters, grouped by stage, with defaults and guidance.
 
     [:octicons-arrow-right-24: Parameters](parameters.md)
 
@@ -137,10 +137,12 @@ tours every file it produces.
 
     ---
 
-    Four self-contained figures — S1 the whole pipeline,
+    Six self-contained figures — S1 the whole pipeline,
     [S2 registration](figures/registration-schematic.html){ target=_blank },
     [S3 quality control](figures/qc-schematic.html){ target=_blank },
-    [S4 lazy reads](figures/zarr-schematic.html){ target=_blank }.
+    [S4 lazy reads](figures/zarr-schematic.html){ target=_blank },
+    [S5 coarse alignment](figures/coarse-schematic.html){ target=_blank },
+    [S6 accuracy measures](figures/accuracy-schematic.html){ target=_blank }.
 
     [:octicons-arrow-right-24: S1 · pipeline](figures/pipeline-schematic.html){ target=_blank }
 

@@ -368,6 +368,118 @@ nextflow_workflow {
         }
     }
 
+    /*
+     * THE ASSERTION WITH TEETH for the native-image join (Task 7). ch_for_qc pairs each
+     * moving slide's NATIVE (pre-registration) image to its own registered file via
+     * `.join(ch_natives_for_qc, by: 0)` keyed on meta.id. A join() drops an unmatched
+     * pair SILENTLY -- workflow.success stays true and workflow.out.qc simply has fewer
+     * entries -- and a wrong-but-present key cross-pairs one slide's native image with
+     * another slide's registered one, which no size/count assertion would catch either.
+     *
+     * Two moving slides, each with a distinct channel set (so REGISTER's stub names
+     * their registered file distinctly, register.nf:199) AND a distinct native testdata
+     * file, is what makes the pairing checkable at all: GENERATE_REGISTRATION_QC stages
+     * its native input into its own `native/` subdirectory (stageAs: 'native/*'), so
+     * every task directory containing one is this process's, and the native file it
+     * staged must match the SAME slide as the registered file staged alongside it.
+     *
+     * THE REFERENCE IS NAMED SO THAT IT SORTS FIRST, and that is load-bearing rather than
+     * cosmetic. registration.nf orders a patient's slides by meta.id (`items` is
+     * `.toSorted { it[0].id }`), and both the natives stream and the registered stream
+     * inherit that order. If the join key is degraded from meta.id to something
+     * NON-UNIQUE -- meta.patient_id is the obvious mistake, since it is right there in the
+     * same closure -- join() falls back to pairing the duplicates FIFO in arrival order,
+     * and with the reference sorting LAST (ids P004_ref/P004_mov1/P004_mov2) that FIFO
+     * order happens to be the correct one, so the mutation stayed GREEN and this test's
+     * cross-pair teeth were arrival-order luck. With cyclic-IF ids (the reference is
+     * cycle1, so it sorts FIRST) the reference's own native image is the first thing
+     * queued under the patient key, the first moving slide pops it, and every subsequent
+     * pair is shifted by one -- deterministically wrong, deterministically red. Drill
+     * performed 2026-09-03: changing BOTH `meta.id` keys in registration.nf's
+     * ch_natives_for_qc/ch_for_qc block to `meta.patient_id` fails this test.
+     *
+     * WHY THE REGISTERED FILE IS IDENTIFIED THROUGH qc/ AND NOT BY GLOBBING THE TASK DIR.
+     * GENERATE_REGISTRATION_QC takes FOUR inputs, and two of them end '_registered.ome.tiff':
+     * the moving slide's own registered file AND the patient's REFERENCE registered file
+     * (`reference` in the input tuple -- the stub REGISTER registers the reference too, and
+     * names it from ITS channels). So a `listFiles().find { it.name.endsWith(...) }` over the
+     * task directory returns whichever of the two the filesystem happens to hand back first
+     * -- the moving one on APFS, the REFERENCE on CI's ext4, which is exactly how this test
+     * passed locally and failed in GitHub Actions run 33723851819 reporting a mis-pairing
+     * that had not happened. qc/<registered.simpleName>_QC_RGB.png is derived from the
+     * `registered` input ALONE (modules/local/generate_registration_qc.nf's stub block), so
+     * it names exactly one slide and cannot collide with the reference.
+     */
+    test("Should pair each slide's own native image with its registered file, not the other slide's - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                padding = false
+                // reg_qc defaults to 2 (level >= 1), so GENERATE_REGISTRATION_QC runs
+                // without needing to set anything here.
+            }
+            workflow {
+                """
+                input[0] = Channel.fromList([
+                    [[patient_id: 'P004', id: 'P004_cycle1', is_reference: true, channels: ['DAPI']],
+                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)],
+                    [[patient_id: 'P004', id: 'P004_cycle2', is_reference: false, channels: ['DAPI', 'CD3']],
+                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true)],
+                    [[patient_id: 'P004', id: 'P004_cycle3', is_reference: false, channels: ['DAPI', 'CD8']],
+                     file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true)]
+                ])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.qc.size() == 2 },
+                {
+                    // Every GENERATE_REGISTRATION_QC task directory has a `native/`
+                    // subdirectory (unique to this process's stageAs).
+                    def taskDirs = []
+                    new File("$workDir").eachFileRecurse { f ->
+                        if (f.isDirectory() && f.name == 'native') {
+                            taskDirs << f.parentFile
+                        }
+                    }
+                    assert taskDirs.size() == 2 :
+                        "expected 2 GENERATE_REGISTRATION_QC task dirs (one per moving slide), found ${taskDirs.size()}"
+
+                    def pairs = taskDirs.collect { dir ->
+                        def nativeFiles = new File(dir, 'native').listFiles()
+                        assert nativeFiles.size() == 1 :
+                            "expected exactly one staged native file, found ${nativeFiles*.name}"
+                        // See the header: the qc/ output is the ONLY unambiguous name of
+                        // the `registered` input in this directory.
+                        def qcFiles = new File(dir, 'qc').listFiles()
+                            .findAll { it.name.endsWith('_QC_RGB.png') }
+                        assert qcFiles.size() == 1 :
+                            "expected exactly one qc/*_QC_RGB.png, found ${qcFiles*.name}"
+                        [native: nativeFiles[0].name, registered: qcFiles[0].name]
+                    }
+
+                    def cd3Task = pairs.find { it.registered.contains('CD3') }
+                    def cd8Task = pairs.find { it.registered.contains('CD8') }
+                    assert cd3Task != null : "no task rendered QC for the CD3 slide: ${pairs}"
+                    assert cd8Task != null : "no task rendered QC for the CD8 slide: ${pairs}"
+                    // The teeth: a wrong or dropped join would either cross these two
+                    // (CD3's task staging cycle3's native file, or -- under a patient_id
+                    // key -- the REFERENCE's) or leave one without a native/ file at all.
+                    assert cd3Task.native == 'P001_mov1.ome.tiff' :
+                        "P004_cycle2 (CD3) task staged native file '${cd3Task.native}', expected P001_mov1.ome.tiff"
+                    assert cd8Task.native == 'P001_mov2.ome.tiff' :
+                        "P004_cycle3 (CD8) task staged native file '${cd8Task.native}', expected P001_mov2.ome.tiff"
+                }
+            )
+        }
+    }
+
     test("Should register images using VALIS - real") {
 
         tag "real"
@@ -403,10 +515,21 @@ nextflow_workflow {
                     assert get(1).get(1) != null
                 }},
                 // patient_id preserved in all outputs
-                { with(workflow.out.registered) {
-                    def patient_ids = collect { it[0].patient_id }
+                // Explicit receiver on the collect, NOT `with(...) { collect { ... } }`.
+                // Unqualified, `collect` inside a `with` block does not reach the
+                // delegate List: the closure is handed the WHOLE list as `it`, so
+                // `it[0]` is the first [meta, path] tuple and `.patient_id` spreads over
+                // it, giving `MissingPropertyException ... for java.util.ArrayList,
+                // Reason: No such property: patient_id for class: java.lang.String`.
+                // Measured on nightly runs 33633986188 and 33740335196. `get(n)` in a
+                // `with` block is fine (it is a real List method); it is the Groovy
+                // extension methods that miss. The stub cases in this file already use
+                // the explicit form and are green.
+                {
+                    def patient_ids = workflow.out.registered.collect { it[0].patient_id }
+                    assert patient_ids.size() == 2
                     assert patient_ids.every { it == 'P001' }
-                }},
+                },
                 // Checkpoint CSV created
                 { with(workflow.out.checkpoint_csv) {
                     assert size() == 1

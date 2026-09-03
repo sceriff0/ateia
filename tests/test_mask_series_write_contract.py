@@ -64,13 +64,17 @@ def _run(tmp_path, monkeypatch):
     expected = _pyramid_with_mask_series(pyramid)
     outdir = tmp_path / "out"
     monkeypatch.setattr(
-        sys, "argv", ["extract_mask_series.py", "--pyramid", str(pyramid), "--outdir", str(outdir)]
+        sys,
+        "argv",
+        ["extract_mask_series.py", "--pyramid", str(pyramid), "--outdir", str(outdir)],
     )
     ems.main()
     return outdir, expected
 
 
-def test_masks_are_written_compressed_like_every_other_mask_writer(tmp_path, monkeypatch):
+def test_masks_are_written_compressed_like_every_other_mask_writer(
+    tmp_path, monkeypatch
+):
     outdir, _ = _run(tmp_path, monkeypatch)
 
     for name in ("cell_mask.tif", "nuclei_mask.tif"):
@@ -82,7 +86,9 @@ def test_masks_are_written_compressed_like_every_other_mask_writer(tmp_path, mon
             )
 
 
-def test_masks_are_written_bigtiff_so_a_full_resolution_pair_cannot_overflow(tmp_path, monkeypatch):
+def test_masks_are_written_bigtiff_so_a_full_resolution_pair_cannot_overflow(
+    tmp_path, monkeypatch
+):
     outdir, _ = _run(tmp_path, monkeypatch)
 
     for name in ("cell_mask.tif", "nuclei_mask.tif"):

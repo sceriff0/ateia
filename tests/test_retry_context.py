@@ -15,6 +15,7 @@ as `all_attempts_failed()`, but the actual code (and its one existing caller
 in bin/register.py) already uses it as a property. This test follows the
 real code, not the brief.
 """
+
 from __future__ import annotations
 
 import sys

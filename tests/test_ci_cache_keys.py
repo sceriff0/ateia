@@ -135,7 +135,7 @@ def _steps_of_file(path: Path):
         for step in job.get("steps") or []:
             if isinstance(step, dict):
                 out.append((f"{rel}::{job_id}", step))
-    for step in ((data.get("runs") or {}).get("steps") or []):
+    for step in (data.get("runs") or {}).get("steps") or []:
         if isinstance(step, dict):
             out.append((rel, step))
     return out
@@ -171,7 +171,9 @@ def _uncommented(text: str) -> str:
     """
     return "\n".join(
         stripped
-        for stripped in (ci_actions.strip_line_comment(line) for line in text.splitlines())
+        for stripped in (
+            ci_actions.strip_line_comment(line) for line in text.splitlines()
+        )
         if stripped.strip()
     )
 
@@ -294,7 +296,9 @@ def test_every_cached_path_has_a_declared_installer_in_the_same_file():
                     f"appear in {path.relative_to(ROOT).as_posix()}, so nothing in "
                     "that file puts the bytes there"
                 )
-    assert checked >= 2, f"only {checked} cached path(s) examined; the scan is not reading them"
+    assert checked >= 2, (
+        f"only {checked} cached path(s) examined; the scan is not reading them"
+    )
     assert not offenders, (
         "cached path(s) with no owner in the file that caches them:\n  "
         + "\n  ".join(offenders)

@@ -6,17 +6,18 @@
 <title>MIRAGE Supplementary Figure S4 — Lazy reads</title>
 <style>
   /* ======================================================================
-     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4)
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4 · S5 · S6)
      ----------------------------------------------------------------------
      DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
      this set has to survive being detached from the repository — attached to
      a submission, mailed, opened from file:// — so it may not reference an
      external stylesheet, not even a sibling one. This block is therefore
      repeated verbatim in docs/figures/pipeline-schematic.html,
-     docs/figures/registration-schematic.html, docs/figures/qc-schematic.html
-     and docs/figures/zarr-schematic.html, and is ported (with the slate
+     docs/figures/registration-schematic.html, docs/figures/qc-schematic.html,
+     docs/figures/zarr-schematic.html, docs/figures/coarse-schematic.html and
+     docs/figures/accuracy-schematic.html, and is ported (with the slate
      counterpart the figures deliberately lack) to docs/stylesheets/extra.css.
-     Change one, change all five.
+     Change one, change all seven.
 
      SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
      paper ground.
@@ -210,6 +211,8 @@
     <a href="registration-schematic.html">S2 · registration</a>
     <a href="qc-schematic.html">S3 · quality control</a>
     <span class="self">S4 · lazy reads</span>
+    <a href="coarse-schematic.html">S5 · coarse alignment</a>
+    <a href="accuracy-schematic.html">S6 · accuracy measures</a>
   </nav>
   <p class="standfirst">Lazy, region-readable zarr views of an OME-TIFF were never missing from this pipeline:
     <code>bin/utils/tiled_io.py</code> has carried <code>open_lazy</code>, <code>read_decimated</code> and
@@ -235,7 +238,7 @@
     (panels <b>d</b> and <b>g</b>).<br><br>
     <b>Second revision, four back to five — and the headline claim reversed.</b> <code>MERGE_AND_PYRAMID</code>
     reads through <code>open_lazy</code> at two call sites
-    (<code>bin/merge_channels_pyramid.py:553</code> for the channel files, <code>:619</code> for the masks) and was
+    (<code>bin/merge_channels_pyramid.py:479</code> for the channel files, <code>:545</code> for the masks) and was
     named nowhere in this figure, despite being the <b>largest measured win in the set</b>. It is also the
     counter-example to the old panel <b>h</b>: this figure used to say that no memory closure had been lowered and
     that the scheduler saw nothing. <b>Three were lowered</b>, and panel <b>h</b> now names them.</div>
@@ -254,7 +257,7 @@
         <p class="x">A slide is <code>(C, H, W)</code>. <code>tifffile.imread</code> decodes every marker channel;
           the consumer then indexes one out of it. A zarr view indexes first and decodes only the tiles that slice
           touches. This is the axis all four changed sites moved on.</p>
-        <div class="src">open_lazy — bin/utils/tiled_io.py:32</div>
+        <div class="src">open_lazy — bin/utils/tiled_io.py:34</div>
       </div>
       <div class="bx mut">
         <h4>THE SPATIAL AXIS &mdash; not removable here</h4>
@@ -267,9 +270,9 @@
           (<code>SPLIT_CHANNELS</code>, <code>SEGMENT</code>, <code>MERGE_AND_PYRAMID</code>) slice regions off the
           lazy view directly and call neither — they have no decimation path to disable. Panels <b>f</b> and
           <b>g</b> give the three separate reasons the win is unavailable in each case.</p>
-        <div class="src">bin/utils/qc.py:382 (the one decimation_factor call) ·
+        <div class="src">bin/utils/qc.py:571 (the one decimation_factor call) ·
           bin/generate_preprocess_qc.py:211 (factor=1, hard-coded) ·
-          decimation_factor — bin/utils/tiled_io.py:86 (returns 1 when max_dim is None)</div>
+          decimation_factor — bin/utils/tiled_io.py:88 (returns 1 when max_dim is None)</div>
       </div>
     </div>
     <div class="callout"><span class="wl">the capability was never missing — only its reach</span>
@@ -305,21 +308,21 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
         <p class="x"><code>open_lazy</code> presents channel-<b>first</b> only. It has no notion of a
           <code>(Y, X, C)</code> layout, which is why every new call site keeps an eager fallback for that case —
           see panel <b>g</b>, blocker 4.</p>
-        <div class="src">bin/utils/tiled_io.py:66-84</div>
+        <div class="src">bin/utils/tiled_io.py:68-85</div>
       </div>
       <div class="bx">
         <h4>why bytes, not rows</h4>
         <p class="x">A fixed row count is not a memory bound: a band of a 30k-wide slide is ~7&times; the same band
           of a 4k-wide one. <code>band_rows_for</code> divides the budget by the row width, then snaps down to a
           multiple of <code>factor</code> so the sampled rows stay globally aligned.</p>
-        <div class="src">bin/utils/tiled_io.py:106-114</div>
+        <div class="src">bin/utils/tiled_io.py:113-125</div>
       </div>
       <div class="bx">
         <h4>one factor, not one per slide</h4>
         <p class="x">The shared factor is a correctness requirement of the STARE coarse anchor, not a convenience:
           squeezing each slide under <code>max_dim</code> independently would introduce a scale change between the
           two thumbnails and bake a bogus scale term into <code>M0</code>.</p>
-        <div class="src">bin/utils/tiled_io.py:86-102</div>
+        <div class="src">bin/utils/tiled_io.py:88-99</div>
       </div>
     </div>
   </section>
@@ -507,7 +510,7 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
       <h4>HOW &mdash; the BioIO convert, the third measurement</h4>
       <p class="x">A 144 MB <code>8 &times; 3000 &times; 3000</code> uint16 OME-TIFF, opened as a lazy dask array
         over a tifffile zarr store — the same <i>shape</i> of object <code>BioImage.dask_data</code> is — and written
-        through the <b>real</b> <code>convert_image.write_ome_tiff</code>. Peak is
+        through the <b>real</b> <code>ome_io.write_ome_tiff</code>. Peak is
         <code>resource.getrusage(RUSAGE_SELF).ru_maxrss</code>, sampled in a <b>fresh subprocess per variant</b>
         (not <code>tracemalloc</code>, which does not see NumPy's allocations); all outputs byte-identical with the
         OME UUID masked.</p>
@@ -582,7 +585,7 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
         <text x="558" y="173" font-size="9" fill="var(--ink)" font-weight="700">none</text>
       </svg>
       <p class="cap">Verified directly on the 6-channel probe of panel <b>d</b>. The same
-        <code>out="memmap"</code> pattern survives at <code>bin/utils/image_utils.py:209</code>, behind
+        <code>out="memmap"</code> pattern survives at <code>bin/utils/image_utils.py:210</code>, behind
         <code>load_image(..., memmap=True)</code>, and was deliberately left alone: <b>no caller in
         <code>bin/</code> ever passes <code>memmap=True</code></b>, so it is reported dead code rather than a
         fixed site.</p>
@@ -701,14 +704,14 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
           <code>&lt;patient&gt;/qc/registration/</code>. A <code>--no-fullres</code> flag exists in the CLI, but the
           process' config block passes no <code>ext.args</code>, so it is never used in production. Decimating this
           read would silently degrade a deliverable rather than save anything.</p>
-        <div class="src">bin/generate_registration_qc.py:142 · conf/modules.config, GENERATE_REGISTRATION_QC publishDir</div>
+        <div class="src">bin/generate_registration_qc.py:175 · conf/modules.config, GENERATE_REGISTRATION_QC publishDir</div>
       </div>
       <div class="bx">
         <h4>3 &mdash; a cross-plane comparison in a samples-last layout</h4>
         <p class="x"><code>read_single_ndpi</code> tests <code>image_data[...,0] == [...,1] == [...,2]</code> to
           decide whether an NDPI's RGB is really greyscale. That is samples-<i>last</i> and needs all three planes
           at once — incompatible with <code>tiled_io</code>'s channel-first <code>(C, H, W)</code> contract.</p>
-        <div class="src">bin/convert_image.py:177,209-226</div>
+        <div class="src">bin/convert_image.py:161-175</div>
       </div>
       <div class="bx">
         <h4>4 &mdash; the (Y, X, C) fallback, kept and never exercised</h4>
@@ -735,14 +738,14 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
             (<code>np.squeeze</code>, <code>np.transpose</code>, <code>np.take</code>, plain indexing) dispatches
             through dask's <code>__array_function__</code> and stays lazy, so <b>none</b> of the dimension-order
             logic had to be rewritten.</p>
-          <div class="src">bin/convert_image.py:61 (read_image_bioio) · :466 (write_ome_tiff)</div></div>
+          <div class="src">bin/convert_image.py:40 (read_image_bioio) · bin/utils/ome_io.py:428 (write_ome_tiff)</div></div>
         <div><div class="lb">why the read alone would have saved nothing</div>
           <p class="tx"><b>Both halves had to change.</b> A lazy handle passed to <code>tifffile.imwrite</code> is
             simply <code>np.asarray</code>'d — the materialisation moves from the read to the write and the peak is
             unchanged. The write now streams: <code>TiffWriter.write(iterator, shape=, dtype=)</code>, the same form
             <code>bin/tiled_stitch.py</code> already used in production. Measured at
             <b>435 &rarr; 168 MB</b> peak (panel <b>d</b>).</p>
-          <div class="src">bin/convert_image.py:397 (_iter_planes) · :389 (_axis0_slabs)</div></div>
+          <div class="src">bin/utils/ome_io.py:321 (_iter_planes) · :313 (_axis0_slabs)</div></div>
       </div>
     </div>
 
@@ -779,7 +782,7 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
             <td class="d">Byte budget for one streamed row band — independent of slide width. Bounds peak
               memory to one band plus the accumulated decimated result when <code>factor &gt; 1</code>; at
               <code>factor == 1</code> (sites 1 and 2 below) striding is a no-op, so this bounds a per-band
-              read, not the read's overall peak. <code>bin/utils/tiled_io.py:103</code></td></tr>
+              read, not the read's overall peak. <code>bin/utils/tiled_io.py:110</code></td></tr>
           <tr><td class="k">max_dim</td><td class="v"><span class="nul">None</span> wherever it is passed</td>
             <td class="d">Passed to <code>decimation_factor</code>. <code>None</code> &rarr; factor 1 &rarr; no
               spatial decimation. STARE passes a real value; nothing else does.</td></tr>
@@ -791,7 +794,7 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
             <td class="d">The BioIO convert only. Peak of the streamed write is one chunk of whatever
               <code>dask_data</code> hands back — one plane in the good case, the whole stack in the bad one. It is
               <b>not a dial this pipeline owns</b>, which is why the bad case is warned about at runtime instead of
-              configured away. <code>bin/convert_image.py:397</code></td></tr>
+              configured away. <code>bin/utils/ome_io.py:321</code> (<code>_iter_planes</code>)</td></tr>
         </table>
       </div>
       <div class="pcol">

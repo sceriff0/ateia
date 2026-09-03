@@ -4,9 +4,35 @@
 import argparse
 import csv
 import json
+import logging
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
+from logger import configure_logging, get_logger  # noqa: E402
+
+logger = get_logger(__name__)
 
 
 def flatten(doc):
+    """Flatten one per-patient CSE JSON into a single CSV row.
+
+    Nested ``metrics`` sub-objects become ``"<group>::<metric>"`` columns; the
+    downsampling keys are carried through because ``QualityScore`` drifts with
+    the factor and a merged report that hid the factor would be misleading.
+
+    Parameters
+    ----------
+    doc : dict
+        A parsed ``*_seg_eval.json``.
+
+    Returns
+    -------
+    dict
+        ``id``, ``QualityScore``, ``downsample_factor``,
+        ``effective_pixel_size_um``, then one column per nested metric. Keys
+        absent from an older JSON default to ``None`` rather than raising.
+    """
     row = {
         "id": doc["id"],
         "QualityScore": doc.get("QualityScore"),
@@ -27,6 +53,7 @@ def flatten(doc):
 
 def main():
     """CLI entry point: merge per-patient CSE JSONs into one CSV (one row per patient)."""
+    configure_logging(level=logging.INFO)
     ap = argparse.ArgumentParser()
     ap.add_argument("--inputs", nargs="+", required=True)
     ap.add_argument("--out", required=True)
@@ -45,7 +72,8 @@ def main():
         w = csv.DictWriter(fh, fieldnames=cols)
         w.writeheader()
         w.writerows(rows)
+    logger.info("Merged %d per-patient CSE JSON(s) into %s", len(rows), a.out)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

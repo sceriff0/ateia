@@ -20,6 +20,10 @@ process, default and path below is read from the pipeline source —
       the tagged artifact stream, the kind vocabulary, and the retry-then-fail contract
     - **S4 · lazy reads** — [figure](figures/zarr-schematic.html){ target=_blank } ·
       where lazy zarr reads cut peak memory, and every place they cannot help
+    - **S5 · coarse alignment** — [figure](figures/coarse-schematic.html){ target=_blank } ·
+      why the STARE global pose is a learned matcher, and what that costs in memory
+    - **S6 · accuracy measures** — [figure](figures/accuracy-schematic.html){ target=_blank } ·
+      the four registration-accuracy numbers, which two are scored on the registrar's own features, and why none is ground truth
 
 ---
 
@@ -186,7 +190,7 @@ Chips give real defaults. Every process runs in a pinned container and emits
         <div class="x">Per-cell marker intensity against the mask, one task per channel, merged
           per patient by <code>MERGE_QUANT_CSVS</code>. Median always; Mean/Sum added by
           <code>expanded_quantification</code>.</div>
-        <div class="pp"><span>compartments <b>true</b></span><span>expanded <b>true</b></span></div></div>
+        <div class="pp"><span>compartments <b>true</b></span><span>expanded <b>false</b></span></div></div>
       <div class="mod"><div class="n">EXPORT_GEOJSON</div>
         <div class="x">QuPath / FlowPath <code>cells.geojson</code> with raw per-marker
           measurements, plus a lighter whole-cell-only variant.</div>
@@ -271,7 +275,7 @@ Fold a new imaging cycle into a completed patient run, reusing prior assets.
 Bypasses the step gate; `--start` / `--stop` are rejected in this mode.
 
 ```bash
-nextflow run . --mode add_cycle --prior_outdir results/ --input new_cycle.csv --outdir results_cycle2
+nextflow run . --mode add_cycle --cleanup_level none --prior_outdir results/ --input new_cycle.csv --outdir results_cycle2 -c site.config
 ```
 
 | Stage | What happens | Reused? |

@@ -35,6 +35,7 @@
 include { SEGMENT                   } from '../../modules/local/segment'
 include { EXTRACT_CELL_PROPERTIES   } from '../../modules/local/extract_cell_properties'
 include { EXTRACT_NUCLEI_PROPERTIES } from '../../modules/local/extract_nuclei_properties'
+include { CHECKPOINT_WRITER         } from './checkpoint_writer'
 
 workflow SEGMENTATION {
     take:
@@ -108,10 +109,10 @@ workflow SEGMENTATION {
     // column per row.
     //
     // registered_image's published path uses publishedOrAsIs, not the plain
-    // is_passthrough branch subworkflows/local/registered_checkpoint.nf uses for
-    // csv/registered.csv. registered_checkpoint.nf's ch_registered is ALWAYS a fresh
-    // channel from THIS run's own REGISTRATION (it is only ever called from inside
-    // registration.nf), so a bare is_passthrough check is enough there. This file's
+    // is_passthrough branch register_patient.nf's CHECKPOINT_WRITER call uses for
+    // csv/registered.csv. That ch_registered is ALWAYS a fresh channel from THIS
+    // run's own REGISTER_PATIENT invocation, so a bare is_passthrough check is
+    // enough there. This file's
     // ch_registered is not: at `--start segmentation`, it is INPUT_CHECK.out.samples
     // reading csv/registered.csv back -- ALREADY an absolute published path from a
     // prior run -- and INPUT_CHECK never sets meta.is_passthrough (only
@@ -172,17 +173,13 @@ workflow SEGMENTATION {
         .join(ch_nucleus_contours_value, by: 0, remainder: true)
         .map { pid, placeholder, real -> tuple(pid, real ?: placeholder) }
 
-    ch_checkpoint_csv = ch_registered_for_ckpt
-        // Not written at a cleaning level: neither the registered slides nor the
-        // masks nor the contours are published there, so every one of this row's
-        // four path columns would dangle. See Checkpoint.writesAtLevel.
-        .filter { Checkpoint.writesAtLevel(Layout.SEGMENTED, params.cleanup_level) }
+    ch_checkpoint_rows = ch_registered_for_ckpt
         .combine(ch_cell_mask_path, by: 0)
         .combine(ch_nuclei_mask_path, by: 0)
         .combine(ch_contours_path, by: 0)
         .combine(ch_nucleus_contours_total, by: 0)
         .map { pid, meta, reg_path, cell_mask, nuclei_mask, contours, nucleus_contours ->
-            Checkpoint.row(Layout.SEGMENTED, [
+            [
                 patient_id      : pid,
                 // RULING R17: carried forward from meta, never re-derived from
                 // registered_image's basename below -- see lib/Checkpoint.groovy.
@@ -195,17 +192,14 @@ workflow SEGMENTATION {
                 contours        : contours,
                 nucleus_contours: nucleus_contours,
                 pixel_size      : meta.pixel_size,
-            ])
+            ]
         }
-        .collectFile(
-            name: Layout.checkpointCsvName(Layout.SEGMENTED),
-            newLine: true,
-            sort: true,
-            // sort: true for the same reproducibility reason as every other
-            // checkpoint writer — see postprocess.nf's identical comment.
-            storeDir: Layout.checkpointDir(params.outdir),
-            seed: Checkpoint.header(Layout.SEGMENTED)
-        )
+
+    // Not written at a cleaning level: neither the registered slides nor the masks nor
+    // the contours are published there, so every one of this row's four path columns
+    // would dangle. The gate itself is CHECKPOINT_WRITER's; see Checkpoint.writesAtLevel.
+    CHECKPOINT_WRITER(Layout.SEGMENTED, ch_checkpoint_rows)
+    ch_checkpoint_csv = CHECKPOINT_WRITER.out.csv
 
     ch_size_logs = Channel.empty()
         .mix(SEGMENT.out.size_log)
@@ -308,17 +302,11 @@ workflow READ_SEGMENTED_CHECKPOINT {
 
     main:
     // Columns come from lib/Checkpoint.groovy, the writer's owner: this reader
-    // never restates the schema.
-    //
-    // Fail loudly here if the writer's schema drifts from what this reader indexes.
-    ['patient_id', 'id', 'registered_image', 'is_reference', 'channels',
-     'cell_mask', 'nuclei_mask'].each { col ->
-        if (!(col in Checkpoint.columns(Layout.SEGMENTED))) {
-            throw new IllegalStateException(
-                "READ_SEGMENTED_CHECKPOINT reads '${col}' from a 'segmented' checkpoint, " +
-                "which Checkpoint no longer declares")
-        }
-    }
+    // never restates the schema. Fail loudly here if the writer's schema drifts
+    // from what this reader indexes.
+    Checkpoint.requireColumns(Layout.SEGMENTED,
+        ['patient_id', 'id', 'registered_image', 'is_reference', 'channels',
+         'cell_mask', 'nuclei_mask'])
 
     // Everything Meta.fromCheckpointRow needs, pre-computed ONCE for the whole
     // checkpoint before any row is built -- the checkpoint-side twin of

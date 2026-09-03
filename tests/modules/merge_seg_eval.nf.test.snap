@@ -2,10 +2,10 @@
     "Should merge per-patient seg-eval JSONs into a CSV - stub": {
         "content": [
             [
-                "versions.yml:md5,619172b030c0e89b69321058a9f229dd"
+                "versions.yml:md5,12e0f3d1827ecb8e04928c9547c0120f"
             ]
         ],
-        "timestamp": "2026-08-25T21:17:19.423845",
+        "timestamp": "2026-09-03T00:10:38.865308",
         "meta": {
             "nf-test": "0.9.5",
             "nextflow": "25.04.7"

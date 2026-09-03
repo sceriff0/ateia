@@ -43,6 +43,11 @@ traces/
 conf/ieo.config
 conf/*_site.config
 
+# A site's own copy of conf/site.config.template. It carries cluster paths,
+# account names and node sizes; docs/installation.md tells every reader to make
+# one at the repository root.
+site.config
+
 # Generated docs
 site/
 
@@ -62,6 +67,7 @@ benchmarks/paper_data/
 benchmarks/analysis/figures/
 benchmarks/_handoff/
 illum_bench/
+challenge/
 
 # macOS
 *.DS_Store
@@ -101,17 +107,24 @@ docs/superpowers/
 # (re)writes these every run (CI regenerates before every test job — see
 # .github/workflows/ci.yml). Untracked so they don't show perpetual `M` churn
 # from embedded absolute paths / TIFF timestamps / RNG-seeded content that
-# differs by machine. Hand-authored fixtures the generator does NOT write
-# (P001_image.tiff, P001_merged_quant.csv, P001_nuclei_mask.tif,
-# P001_pyramid.ome.tiff, sample_size_log*.csv, sample_valis_summary.csv,
-# sample_versions.yml, sample_run_summary.json, sample_seg_qc.json) stay
-# tracked and are NOT listed here.
+# differs by machine. Hand-authored fixtures the generator does NOT write (sample_size_log*.csv,
+# sample_valis_summary.csv, sample_versions.yml, sample_run_summary.json,
+# sample_seg_qc.json, model_config_min.json, dummy_singularity.sif) stay tracked
+# and are NOT listed here. The four that USED to be on that list --
+# P001_image.tiff, P001_merged_quant.csv, P001_nuclei_mask.tif and
+# P001_pyramid.ome.tiff -- were tracked at ZERO BYTES, which is how
+# `nf-test --tag real` came to abort in EXTRACT_NUCLEI_PROPERTIES with
+# `tifffile.TiffFileError: not a TIFF file b''`. They are generated now.
 tests/testdata/P001_ref.ome.tiff
 tests/testdata/P001_mov1.ome.tiff
 tests/testdata/P001_mov2.ome.tiff
 tests/testdata/P002_ref.ome.tiff
 tests/testdata/P001_cell_mask.npy
 tests/testdata/P001_cell_mask.tif
+tests/testdata/P001_nuclei_mask.tif
+tests/testdata/P001_image.tiff
+tests/testdata/P001_pyramid.ome.tiff
+tests/testdata/P001_merged_quant.csv
 tests/testdata/P002_cell_mask.npy
 tests/testdata/P002_cell_mask.tif
 tests/testdata/valid_preprocessing.csv
@@ -171,17 +184,46 @@ tests/testdata/expected/reg_checkpoint_columns.txt
 # and the new-cycle samplesheet that pairs with it.
 tests/testdata/prior_run/
 tests/testdata/new_cycle.csv
+tests/testdata/new_cycle_extra_column.csv
 # Shipped-defaults smoke fixture -- the one image pair with a real OME
 # PhysicalSizeX/Y, and the samplesheet naming it (see generate_complete_testdata.py).
+# The SEGMENTATION fixture: separated, StarDist-shaped nuclei. Separate from
+# P001_ref.ome.tiff, whose 40 merged blobs form one connected component and are
+# unsegmentable by design -- see generate_complete_testdata.py section 10.
+tests/testdata/P001_seg_nuclei.ome.tiff
 tests/testdata/P900_ref_scaled.ome.tiff
 tests/testdata/P900_mov_scaled.ome.tiff
 tests/testdata/shipped_defaults_input.csv
+
+# Format-coverage fixtures (generate_complete_testdata.py section 11) -- the
+# formats the pipeline claims and could not previously test on real bytes.
+tests/testdata/fmt_pyramid.ome.tiff
+tests/testdata/fmt_bigtiff.ome.tiff
+tests/testdata/fmt_rgb.tiff
+tests/testdata/fmt_gray8.tiff
+tests/testdata/fmt_float32.tiff
+tests/testdata/fmt_truncated.ome.tiff
+tests/testdata/fmt_image.h5
+tests/testdata/fmt_cy5.ndpi
+tests/testdata/fmt_tritc.ndpi
+tests/testdata/fmt_set.ndpis
+
+# Samplesheet-shape fixtures (generate_complete_testdata.py section 10i).
+tests/testdata/crlf_input.csv
+tests/testdata/bom_input.csv
+tests/testdata/space_path_input.csv
+tests/testdata/unicode_input.csv
+tests/testdata/extra_column_input.csv
+tests/testdata/relative_paths_input.csv
+tests/testdata/P001_ünïcode.ome.tiff
+tests/testdata/with space/
 .superpowers/
 
 # Internal architecture/audit reviews published as Claude Artifacts, not repo docs.
 # Enumerated rather than a `*.html` glob so a future INTENDED root-level HTML is not
 # swallowed silently.
 /architecture-review-2026-08-24.html
+/architecture-review-2026-09-02.html
 /artifact-imageio-review.html
 /artifact-pipeline-review.html
 /dataflow-architecture-review.html
@@ -195,17 +237,22 @@ tests/testdata/shipped_defaults_input.csv
 /stare-accuracy-roadmap.html
 /PERF-PLAN.md
 
-# Draft figure, not part of the published supplementary set (docs/figures/*.html).
+# Draft figure, DELIBERATELY not part of the published supplementary set. Resolved
+# 2026-09-02 (release 1.0.0, spec Phase 6, plan 11 Task 1) after the figure audit:
+# it is linked from no docs page and from no sibling figure's `figset` nav, and it
+# claims "Supplementary Figure S4", a number zarr-schematic.html already holds. The
+# local copy was deleted. This line stays so a stray re-creation does not become a
+# tracked fifth figure by accident -- and because docs/figures/*.html is globbed off
+# the FILESYSTEM by tests/test_figures_match_the_pipeline.py, so an untracked file
+# there fails the guard locally while CI stays green.
 docs/figures/failure-schematic.html
 
 # Research notes and literature reviews (analysis inputs, not pipeline docs).
-# ENUMERATED, not a bare `research/` directory rule: research/tma-support-2026-07-01.md
-# is TRACKED, and a directory rule shadows it -- ignore-aware tooling (git clean, editors,
-# doc indexers) would then treat a real report as garbage. Same reason the root HTML files
-# are listed one by one.
-/research/implementation-section-revised.md
-/research/pipeline-memory-performance-and-algorithms-2026-08-07.md
-/research/sota-memory-efficient-packages-2026-08-06.md
+# A plain directory rule is safe again: the one tracked report that forced the previous
+# per-file enumeration (research/tma-support-2026-07-01.md, which a directory rule would
+# have shadowed so that git clean and doc indexers treated it as garbage) now lives in
+# docs/_archive/research/. Nothing under research/ is tracked.
+/research/
 
 # Git worktrees. Was ignored only via .git/info/exclude, which is LOCAL and never
 # committed -- so on a fresh clone the whole tree showed up untracked.

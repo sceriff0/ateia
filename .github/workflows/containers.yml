@@ -420,6 +420,12 @@ jobs:
           file: containers/${{ matrix.dir }}/Dockerfile
           # Pin to linux/amd64 — the pipeline runs on amd64 HPC nodes.
           platforms: linux/amd64
+          # OCI provenance, consumed by the ARG/LABEL pair at the end of every Dockerfile.
+          # Without these a published image cannot be traced back to the commit that built
+          # it -- the tag says which VERSION, never which TREE.
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            IMAGE_VERSION=${{ needs.resolve.outputs.version }}
           push: ${{ needs.resolve.outputs.push == 'true' }}
           # `load: true` is what makes the smoke step below possible: it exports the
           # built image into the runner's docker daemon so `docker run` can reach it.
@@ -431,8 +437,9 @@ jobs:
           # or a deleted git dependency fails here, which is the entire point of the
           # PR and nightly builds.
           #
-          # The exact immutable tag the modules pull, plus a moving major-line tag for humans.
-          # `:latest` is deliberately absent -- the pipeline never pulls it.
+          # THE ONE TAG THE MODULES PULL. `:latest` is deliberately absent -- nothing in
+          # the pipeline references it. (This comment used to promise "plus a moving
+          # major-line tag for humans"; there has only ever been one tag here.)
           tags: ${{ env.IMAGE_NAMESPACE }}/mirage-${{ matrix.dir }}:${{ needs.resolve.outputs.version }}
           # Per-image GitHub Actions layer cache. THE `scope=` IS LOAD-BEARING,
           # not decoration: without it all eleven images share one cache scope

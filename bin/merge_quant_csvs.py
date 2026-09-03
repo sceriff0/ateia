@@ -33,7 +33,7 @@ logger = get_logger(__name__)
 MORPHOLOGY_COLS = list(MORPHOLOGY_COLS)
 
 
-def load_intensity_csvs(
+def _load_intensity_csvs(
     csvs_dir: Path | None = None, csv_files_list: list[str] | None = None
 ) -> list[Path]:
     """Find and return sorted list of per-channel quantification CSVs.
@@ -141,9 +141,7 @@ def merge_intensities(
         logger.info("  + %s from %s", ", ".join(marker_cols), csv_file.name)
 
     if pending:
-        merged = pd.concat(
-            [merged, pd.DataFrame(pending, index=merged.index)], axis=1
-        )
+        merged = pd.concat([merged, pd.DataFrame(pending, index=merged.index)], axis=1)
 
     return merged
 
@@ -245,7 +243,7 @@ def main() -> None:
     )
 
     # Find and merge intensity CSVs
-    csv_files = load_intensity_csvs(
+    csv_files = _load_intensity_csvs(
         csvs_dir=args.csvs_dir, csv_files_list=args.csv_files
     )
     logger.info("Merging %d intensity CSVs with morphology...", len(csv_files))
@@ -294,4 +292,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

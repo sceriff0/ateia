@@ -61,8 +61,12 @@ def test_open_lazy_returns_a_fresh_store_per_call(tmp_path):
     arr1, _dtype1, close1 = open_lazy(path)
     arr2, _dtype2, close2 = open_lazy(path)
     try:
-        assert arr1 is not arr2, "open_lazy must build a fresh array/store on every call"
-        assert close1 is not close2, "each call's close callable must belong to its own store"
+        assert arr1 is not arr2, (
+            "open_lazy must build a fresh array/store on every call"
+        )
+        assert close1 is not close2, (
+            "each call's close callable must belong to its own store"
+        )
         # Not just distinct wrapper objects -- distinct underlying zarr stores, so closing one
         # cannot invalidate reads through the other.
         assert arr1._z is not arr2._z
@@ -76,7 +80,9 @@ def _write_single_channel(tmp_path, dtype, h, w, seed=0, name="plane"):
     rng = np.random.default_rng(seed)
     if np.issubdtype(dtype, np.integer):
         info = np.iinfo(dtype)
-        hi = min(info.max, 60000)  # keep uint16 fixtures away from tifffile edge cases at 65535
+        hi = min(
+            info.max, 60000
+        )  # keep uint16 fixtures away from tifffile edge cases at 65535
         arr = rng.integers(0, hi + 1, size=(1, h, w)).astype(dtype)
     else:
         arr = rng.random((1, h, w)).astype(dtype)
@@ -87,7 +93,9 @@ def _write_single_channel(tmp_path, dtype, h, w, seed=0, name="plane"):
 
 @pytest.mark.parametrize("factor", [1, 2, 3, 5])
 @pytest.mark.parametrize("source_dtype", [np.uint8, np.uint16, np.float32])
-def test_read_decimated_matches_independent_direct_slice(tmp_path, factor, source_dtype):
+def test_read_decimated_matches_independent_direct_slice(
+    tmp_path, factor, source_dtype
+):
     """``read_decimated`` must equal ``src[index, ::factor, ::factor]`` computed a DIFFERENT way
     than the function under test: via a direct step-sliced getitem on the lazy view (which goes
     through zarr's own indexing engine), not by re-running read_decimated's own banded loop. A
@@ -181,9 +189,8 @@ def test_autoscale_uint16_vs_float32_disagree_at_a_real_triple():
     # Pin the exact quotient this hinges on, independent of autoscale_for_display, so a
     # future numpy/platform change that happens to close the gap is caught precisely.
     exact_quotient = (value - lo) / (hi - lo)  # python float division == float64
-    float32_quotient = (
-        np.float32(sub_float32[idx] - sub_float32.min())
-        / np.float32(sub_float32.max() - sub_float32.min())
+    float32_quotient = np.float32(sub_float32[idx] - sub_float32.min()) / np.float32(
+        sub_float32.max() - sub_float32.min()
     )
     assert exact_quotient == pytest.approx(203.49998982975 / 255, abs=1e-12)
     assert float32_quotient * np.float32(255) == np.float32(203.5), (
@@ -194,7 +201,9 @@ def test_autoscale_uint16_vs_float32_disagree_at_a_real_triple():
     got_float32 = autoscale_for_display(sub_float32, method="minmax")
     assert got_uint16.dtype == np.uint8
     assert got_float32.dtype == np.uint8
-    assert got_uint16[idx] == 203, "float64 (uint16-input) path must round down, away from the tie"
+    assert got_uint16[idx] == 203, (
+        "float64 (uint16-input) path must round down, away from the tie"
+    )
     assert got_float32[idx] == 204, (
         "float32-input path must round the spurious tie up (round-half-to-even, 204 is even)"
     )

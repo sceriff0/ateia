@@ -54,7 +54,8 @@
         ch_transform          [patient_id, transform] per-PATIENT transform (valis branch)
         ch_stage_checkpoint   [patient_id, ckpt_dir]  REGISTER pre-micro checkpoint, may be empty
         ch_transform_by_slide [meta, transform]       per-MOVING-SLIDE transform (tiled branch)
-        method                String                  'tiled' | anything else = valis
+        method                String                  one of RegBackends.methods(); the join
+                                                        shape comes from RegBackends.segQcJoin
 
     Output:
         metrics   [meta, *_seg_qc.json]
@@ -132,9 +133,13 @@ workflow SEG_QC {
     // joined, because the methods' transforms are keyed differently (per-slide vs
     // per-patient) and only VALIS has a stage checkpoint at all.
     //
-    // Equality on 'tiled' rather than `!= 'valis'`, so a THIRD backend has to declare which
-    // of the two join shapes it has instead of silently inheriting the tiled one by default.
-    if (method == 'tiled') {
+    // BRANCHING ON THE JOIN SHAPE, NOT THE METHOD NAME. This used to read
+    // `method == 'tiled'` — equality rather than `!= 'valis'`, so that a THIRD backend
+    // had to declare which shape it had instead of inheriting the tiled one by default.
+    // RegBackends.segQcJoin is that declaration, moved into the table where a new
+    // backend is added: the shape is now a FIELD a backend must fill, not a name this
+    // file has to have heard of.
+    if (RegBackends.segQcJoin(method) == 'per_slide') {
         // Tiled: one transform per moving slide (meta-keyed). Join it to the moving GeoJSON by
         // (patient, sorted-channels) so each slide is scored against its own transform. No
         // stage checkpoint (stages are separable by construction) and no JVM — `[]` is the

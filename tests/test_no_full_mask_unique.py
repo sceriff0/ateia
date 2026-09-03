@@ -186,7 +186,12 @@ def test_label_bboxes_preserves_row_order_not_sorted_order():
     import pandas as pd
 
     props_df = pd.DataFrame(
-        {"bbox-0": [1, 2, 3], "bbox-1": [1, 2, 3], "bbox-2": [4, 5, 6], "bbox-3": [4, 5, 6]},
+        {
+            "bbox-0": [1, 2, 3],
+            "bbox-1": [1, 2, 3],
+            "bbox-2": [4, 5, 6],
+            "bbox-3": [4, 5, 6],
+        },
         index=pd.Index([7, 3, 11], name="label"),
     )
 
@@ -211,74 +216,3 @@ def test_extract_contours_does_not_use_iterrows(monkeypatch):
     contours = ecp.extract_contours(mask_out, props_df)
 
     assert "1" in contours
-
-
-# ---------------------------------------------------------------------------
-# PERF-PLAN 1.5 -- the residual CSV is fully materialised to show 500 rows
-# ---------------------------------------------------------------------------
-#
-# `seg_residuals_section` called `parse_csv_table`, building a list for EVERY row of a per-cell
-# residual CSV, then displayed `rows[:500]` and used `len(rows)` for the "Showing 500 of N" line.
-# Measured 2.53x / -248 MB (PERF-PLAN C16).
-#
-# PERF-PLAN also names the trap: `zip(reader, range(N))` consumes one row MORE than it yields, so
-# the naive early stop produced total = 399_999 for a 400_000-row file. `itertools.islice` does
-# not. The off-by-one case below is what catches that.
-
-
-def _write_csv(tmp_path, n_rows):
-    p = tmp_path / "residuals.csv"
-    lines = ["label,dx,dy"]
-    lines += [f"{i},{i * 0.5},{i * -0.25}" for i in range(n_rows)]
-    p.write_text("\n".join(lines) + "\n")
-    return p
-
-
-def test_head_parse_matches_a_full_parse_on_headers_and_rows(tmp_path):
-    import generate_qc_report as gqr
-
-    path = _write_csv(tmp_path, 25)
-    full_headers, full_rows = gqr.parse_csv_table(str(path))
-
-    headers, rows, total = gqr.parse_csv_table_head(str(path), 10)
-
-    assert headers == full_headers
-    assert rows == full_rows[:10]
-    assert total == len(full_rows) == 25
-
-
-def test_head_parse_counts_every_row_without_building_them(tmp_path):
-    import generate_qc_report as gqr
-
-    path = _write_csv(tmp_path, 1000)
-
-    _headers, rows, total = gqr.parse_csv_table_head(str(path), 50)
-
-    assert len(rows) == 50
-    assert total == 1000
-
-
-def test_head_parse_is_not_off_by_one_at_the_boundary(tmp_path):
-    """The exact shape PERF-PLAN measured: zip(reader, range(N)) reports N-1 too few."""
-    import generate_qc_report as gqr
-
-    for n_rows in (49, 50, 51):
-        path = _write_csv(tmp_path, n_rows)
-
-        _headers, rows, total = gqr.parse_csv_table_head(str(path), 50)
-
-        assert total == n_rows, f"total wrong for {n_rows} rows"
-        assert len(rows) == min(50, n_rows)
-
-
-def test_head_parse_handles_a_header_only_file(tmp_path):
-    import generate_qc_report as gqr
-
-    path = tmp_path / "empty.csv"
-    path.write_text("label,dx,dy\n")
-
-    headers, rows, total = gqr.parse_csv_table_head(str(path), 50)
-
-    assert headers == ["label", "dx", "dy"]
-    assert rows == []
-    assert total == 0

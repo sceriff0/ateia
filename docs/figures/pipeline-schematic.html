@@ -6,17 +6,18 @@
 <title>MIRAGE Supplementary Figure S1 — Pipeline</title>
 <style>
   /* ======================================================================
-     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4)
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4 · S5 · S6)
      ----------------------------------------------------------------------
      DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
      this set has to survive being detached from the repository — attached to
      a submission, mailed, opened from file:// — so it may not reference an
      external stylesheet, not even a sibling one. This block is therefore
      repeated verbatim in docs/figures/pipeline-schematic.html,
-     docs/figures/registration-schematic.html, docs/figures/qc-schematic.html
-     and docs/figures/zarr-schematic.html, and is ported (with the slate
+     docs/figures/registration-schematic.html, docs/figures/qc-schematic.html,
+     docs/figures/zarr-schematic.html, docs/figures/coarse-schematic.html and
+     docs/figures/accuracy-schematic.html, and is ported (with the slate
      counterpart the figures deliberately lack) to docs/stylesheets/extra.css.
-     Change one, change all five.
+     Change one, change all seven.
 
      SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
      paper ground.
@@ -260,6 +261,8 @@
     <a href="registration-schematic.html">S2 · registration</a>
     <a href="qc-schematic.html">S3 · quality control</a>
     <a href="zarr-schematic.html">S4 · lazy reads</a>
+    <a href="coarse-schematic.html">S5 · coarse alignment</a>
+    <a href="accuracy-schematic.html">S6 · accuracy measures</a>
   </nav>
   <p class="standfirst">A step-gated Nextflow DSL2 workflow that aligns multiplexed immunofluorescence slides,
     segments every cell, quantifies each marker per compartment, and exports QuPath-compatible GeoJSON, a
@@ -450,9 +453,9 @@
           <div class="mod"><div class="n">EXPORT_GEOJSON</div>
             <div class="x">QuPath/FlowPath <code>cells.geojson</code> with raw per-marker measurements, plus a
               lighter whole-cell-only variant. Its µm measurements — centroids, areas, perimeters, axis lengths —
-              are the FlowPath contract, and it is the one consumer that stages no image, so it needs an explicit
-              number and rejects <code>auto</code>.</div>
-            <div class="pp"><span>pixel_size <b>required</b></span></div></div>
+              are the FlowPath contract. It stages no image, so it cannot resolve <code>auto</code>
+              itself — INPUT_CHECK resolves it up front and passes the number in meta.</div>
+            <div class="pp"><span>pixel_size <b>auto</b></span></div></div>
           <div class="mod"><div class="n">MERGE_AND_PYRAMID</div>
             <div class="x">Pyramidal OME-TIFF preserving channel metadata; masks optionally embedded as a second series.</div>
             <div class="pp"><span>tilex <b>512</b></span><span>levels <b>8</b></span><span>zstd</span></div></div>
@@ -743,8 +746,8 @@
     <div class="sigs">
       <div class="sig"><h4>Resource scaling</h4><div class="src">← trace.txt + size_logs</div>
         <ul><li>Linear fit per stage: <code>peak_rss ~ input_gb</code>, <code>realtime ~ input_gb</code></li><li>Slope = marginal cost per input GiB</li><li>Intercept = fixed overhead</li></ul></div>
-      <div class="sig"><h4>Registration accuracy</h4><div class="src">← reg_qc=2 seg_qc.json · VALIS summary · public landmarks</div>
-        <ul><li>Seg-based Dice + centroid displacement per stage</li><li>Δ-vs-rigid isolates registration from segmentation noise</li><li>VALIS feature rTRE as an independent second signal</li><li>ANHIR / ACROBAT landmark TRE as an external check</li></ul></div>
+      <div class="sig"><h4>Registration accuracy</h4><div class="src">← reg_qc=2 seg_qc.json · VALIS summary · STARE intrinsic TRE</div>
+        <ul><li>Seg-based Dice + centroid displacement per stage</li><li>Δ-vs-rigid isolates registration from segmentation noise</li><li>VALIS feature rTRE and STARE intrinsic TRE as method-native second signals</li><li><b>No ground truth of any kind.</b> Every number here is a reference-free agreement measure on tissue: it ranks configurations against each other, and cannot say any of them is correct. See <a href="accuracy-schematic.html">S6</a>.</li></ul></div>
       <div class="sig"><h4>Segmentation stability</h4><div class="src">← cross-method agreement</div>
         <ul><li>Instance-F1 between backends on a shared cell population</li><li>Foreground IoU</li><li>instantseg / stardist / cellsam</li></ul></div>
     </div>
@@ -864,7 +867,7 @@
     incremental mode folds a new imaging cycle into a completed run, reusing the prior reference, masks, and
     quantification. <b>(h)</b> A separate branch benchmarks the unmodified pipeline by parameter sweep,
     harvesting resource, registration-accuracy, and segmentation-stability signals from QC the pipeline
-    already emits, plus external landmark datasets. <b>(i)</b> Default parameters.
+    already emits. No external ground-truth dataset is used. <b>(i)</b> Default parameters.
     Supplementary Figure <b>S2</b> takes registration apart backend by backend; Supplementary Figure <b>S3</b>
     does the same for the quality-control architecture summarised in <b>(c)</b> and <b>(f)</b>.
     <span class="footnote">Parameter defaults, published paths, and resource requests are taken verbatim from the

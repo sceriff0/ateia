@@ -1,5 +1,10 @@
 # Migration note — 2026-08-24 / 2026-08-25
 
+> **Archived 2026-09-02.** Its content is the Migration section of `CHANGELOG.md`,
+> which is where a released project keeps it. Kept for the per-item detail; not a
+> published page, because at 1.0.0 there is no earlier released version to migrate
+> from.
+
 <p class="standfirst">Six changes that alter what a run produces or what its outputs mean. None of
 them is a bug fix you can ignore: each one changes numbers, files, or invocations that something
 downstream already depends on. Read this before comparing any post-merge output against a

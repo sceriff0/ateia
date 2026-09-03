@@ -38,7 +38,7 @@ Entry point `subworkflows/local/registration.nf`. Steps, in order:
    (`registration.nf:182-188`). The adapter (`subworkflows/local/adapters/valis_adapter.nf`)
    reshapes patient-grouped data into one `REGISTER` invocation per patient (all slides at once)
    and matches registered outputs back to metas by **OME channel signature** read from a
-   `channels_manifest.json` (`valis_adapter.nf:58-130`) — no filename parsing.
+   `channels_manifest.json` (`lib/RegisteredMatch.groovy`) — no filename parsing.
 5. **QC generation** (see §2), **checkpoint CSV** (`registered.csv`, in
    `registration.nf`).
 
@@ -73,7 +73,7 @@ Other registration-subworkflow processes and their labels:
 | `REGISTER` | `process_high` | 8 CPU / 200+100·att GB / 12 h | VALIS rigid+non-rigid+micro, all slides/patient |
 | `SEG_QC_GEOJSON` | `process_high` + `gpu` container | 8 CPU / 200+100·att GB | StarDist DAPI seg on native slide → cell GeoJSON (reg_qc=2) |
 | `WARP_SEG_QC` | `process_medium` | 4 CPU / 100+100·att GB / 4 h | warp polygons through stages, score overlap (reg_qc=2) |
-| `GENERATE_REGISTRATION_QC` | `process_high` | 8 CPU / 200+100·att GB | RGB DAPI overlay (reg_qc≥1) |
+| `GENERATE_REGISTRATION_QC` | `process_high` | 8 CPU / 200+100·att GB | RGB before/after DAPI overlay (reg_qc≥1) |
 
 There is no `process_high_memory` label — `conf/modules.config` defines only `process_single`,
 `process_low`, `process_medium`, and `process_high` (8 CPU / 200+100·att GB / 12 h, the ceiling
@@ -149,7 +149,7 @@ CSV → meta parsing in `CsvUtils.parseMetadata` (`lib/CsvUtils.groovy:237-250`)
 branches on it repeatedly (`registration.nf:117, 202-205, 235-238, 280, 291`). Any replacement
 process must consume `[meta, files]` in and emit `[meta, registered_file]` out, preserving
 `patient_id`, `is_reference`, `channels`, and the OME channel names in the output OME-XML (the
-adapter matches outputs back by channel signature, `valis_adapter.nf:80-128`).
+adapter matches outputs back by channel signature, `lib/RegisteredMatch.groovy`).
 
 ---
 

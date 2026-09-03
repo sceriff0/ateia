@@ -68,6 +68,7 @@ import tifffile  # noqa: E402
 from fov_tiling import count_fovs, fov_positions, iter_padded_fovs  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
 from metadata import is_nuclear  # noqa: E402
+from ome_io import write_tiff  # noqa: E402
 from tiled_io import open_lazy  # noqa: E402
 
 logger = get_logger(__name__)
@@ -97,7 +98,9 @@ def _channel_axis_length(image_path, channel_names):
                 "slide has not been through them."
             )
         return shape[0], shape[1], shape[2], dtype
-    raise ValueError(f"{image_path}: expected a 2-D or 3-D (C, Y, X) image, got {shape}")
+    raise ValueError(
+        f"{image_path}: expected a 2-D or 3-D (C, Y, X) image, got {shape}"
+    )
 
 
 def _resolve_channel_names(channel_names, n_channels):
@@ -179,6 +182,7 @@ def tile_for_basic(
 
     arr, _dtype, close = open_lazy(image_path)
     try:
+
         def _read_region(source_index):
             """Lazy region reader bound to one source channel.
 
@@ -218,7 +222,7 @@ def tile_for_basic(
         # decoding. Its only reader is BASICPY's /opt/main.py, which loads the whole
         # (C, I, Y, X) stack into one ndarray regardless of tiling -- so a tile layout here
         # would add TIFF overhead for a windowed read that never happens.
-        tifffile.imwrite(
+        write_tiff(
             str(output_path),
             _planes(),
             shape=(len(profile_channels), n_tiles, tile_shape[0], tile_shape[1]),
@@ -259,6 +263,19 @@ def tile_for_basic(
 
 
 def parse_args(argv=None):
+    """Parse the pseudo-FOV tiling CLI.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argument vector; ``None`` reads ``sys.argv[1:]``.
+
+    Returns
+    -------
+    argparse.Namespace
+        ``image``, ``output``, ``sidecar``, ``channels``, ``fov_size``,
+        ``skip_nuclear``, ``nuclear_markers``, ``log_level``.
+    """
     parser = argparse.ArgumentParser(
         description="Write a slide's pseudo-FOV tiles as a multi-site CZYX OME-TIFF."
     )
@@ -286,6 +303,13 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    """CLI entry point: write the slide's pseudo-FOV tiles and their position sidecar.
+
+    Returns
+    -------
+    int
+        0 on success.
+    """
     args = parse_args(argv)
     configure_logging(getattr(logging, args.log_level.upper(), logging.INFO))
     tile_for_basic(

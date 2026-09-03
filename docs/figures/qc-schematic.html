@@ -6,17 +6,18 @@
 <title>MIRAGE Supplementary Figure S3 — Quality control</title>
 <style>
   /* ======================================================================
-     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4)
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4 · S5 · S6)
      ----------------------------------------------------------------------
      DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
      this set has to survive being detached from the repository — attached to
      a submission, mailed, opened from file:// — so it may not reference an
      external stylesheet, not even a sibling one. This block is therefore
      repeated verbatim in docs/figures/pipeline-schematic.html,
-     docs/figures/registration-schematic.html, docs/figures/qc-schematic.html
-     and docs/figures/zarr-schematic.html, and is ported (with the slate
+     docs/figures/registration-schematic.html, docs/figures/qc-schematic.html,
+     docs/figures/zarr-schematic.html, docs/figures/coarse-schematic.html and
+     docs/figures/accuracy-schematic.html, and is ported (with the slate
      counterpart the figures deliberately lack) to docs/stylesheets/extra.css.
-     Change one, change all five.
+     Change one, change all seven.
 
      SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
      paper ground.
@@ -229,6 +230,8 @@
     <a href="registration-schematic.html">S2 · registration</a>
     <span class="self">S3 · quality control</span>
     <a href="zarr-schematic.html">S4 · lazy reads</a>
+    <a href="coarse-schematic.html">S5 · coarse alignment</a>
+    <a href="accuracy-schematic.html">S6 · accuracy measures</a>
   </nav>
   <p class="standfirst">Every step of the pipeline emits quality-control artifacts, and every one of them reaches
     the end-of-run report through the <i>same</i> one-channel interface: a stream of <code>[kind, file]</code>
@@ -270,8 +273,9 @@
         <h3><span>REGISTRATION</span><span>2</span></h3>
         <div class="body">
           <div class="mod"><div class="n">GENERATE_REGISTRATION_QC <span class="tag tag-on">reg_qc ≥ 1</span></div>
-            <div class="x">Nuclear-channel RGB overlay, registered against reference — full-resolution TIFF plus a
-              downsampled PNG.</div>
+            <div class="x">Nuclear-channel RGB before/after: reference+native and reference+registered, two panels
+              side by side — full-resolution TIFF plus a downsampled PNG/TIFF pair, pixel size stamped on both
+              QC TIFFs.</div>
             <div class="pp"><span>qc_scale_factor <b>0.25</b></span></div></div>
           <div class="mod"><div class="n">SEG_QC <span class="tag tag-on">reg_qc = 2 · default</span></div>
             <div class="x">Three processes — panel <b>e</b>. Scores IoU and centroid residual per cell pair at
@@ -347,9 +351,13 @@
           &nbsp;&nbsp;+ UNIVERSAL_QC_KINDS<br>
           <span class="cm">&nbsp;&nbsp;→ 8 kinds, a fresh List every call; see panel c for the split</span></div>
         <div class="callout"><b>The vocabulary is derived, not restated.</b> The two <code>FINAL_QC</code> call
-          sites hand-write <b>21</b> tag literals between them — <b>16</b> on the standard path (across four
+          sites hand-write <b>25</b> <code>['kind', file]</code> tag literals between them, counted on one
+          basis — every literal in each site's channel-mix chain, unconditional pair included: <b>18</b> on
+          the standard path (the unconditional <code>INPUT_CHECK</code> pair, plus <b>16</b> across four
           <code>if</code> blocks, in which <code>versions</code> and <code>size_log</code> each appear five
-          times) and <b>5</b> in add_cycle — and nothing else checks that the two agree. <code>ParamUtils.knownArtifactKinds()</code> is that check, and it is
+          times) and <b>7</b> in add_cycle (<code>versions</code>×2, <code>size_log</code>×2, plus one each of
+          <code>registration_qc</code>, <code>seg_qc</code>, <code>seg_residuals</code> — 5 <i>distinct</i>
+          kinds, not 7 literals) — and nothing else checks that the two agree. <code>ParamUtils.knownArtifactKinds()</code> is that check, and it is
           computed from the same step table that fixes each step's required samplesheet columns and the values
           <code>--start</code>/<code>--stop</code> accept. It is a pure static accessor rather than file-level
           state on purpose — Nextflow 26's strict parser rejects a bare top-level <code>KNOWN_ARTIFACT_KINDS = ...</code>
@@ -376,8 +384,9 @@
               state (a static mutable Set in <code>lib/</code> would be shared across every run in the JVM), so it is
               threaded as a mandatory third argument into all eight <code>artifactsOf()</code> call sites and checked
               against the full vocabulary at the end of the workflow, and only when both outputs are enabled, because
-              <code>--skip_final_qc_report</code> or <code>--enable_trace false</code> legitimately leaves half
-              the vocabulary unconsumed.</div></div>
+              setting <code>skip_final_qc_report</code> — with the final report skipped — or setting
+              <code>enable_trace</code> off, via a profile or <code>-params-file</code>, legitimately leaves
+              half the vocabulary unconsumed.</div></div>
         </div>
       </div>
     </div>
@@ -436,7 +445,7 @@
           slide's own channel list.</p>
         <dl>
           <dt>container</dt><dd>…mirage-preprocess:1.0.0</dd>
-          <dt>resources</dt><dd>label process_medium — 4 cpu · 200 GB · 4 h × attempt</dd>
+          <dt>resources</dt><dd>label process_medium — 4 cpu · 100 + 100 GB × attempt · 4 h × attempt</dd>
           <dt>publishes</dt><dd>&lt;pid&gt;/qc/preprocess/qc/*.png</dd>
           <dt>kind</dt><dd>preprocess_qc</dd>
         </dl>
@@ -445,9 +454,15 @@
       <div class="rn">
         <h4>GENERATE_REGISTRATION_QC</h4>
         <div class="gate">gate · reg_qc ≥ 1</div>
-        <p class="x">Reads the registered slide <i>and</i> the reference together and writes an RGB overlay —
-          a full-resolution TIFF plus a scaled PNG. It is the one process whose memory tier is keyed on the
-          <b>combined</b> size of two inputs, because it holds both.</p>
+        <p class="x">Reads three images — the registered slide, the <b>native</b> pre-registration slide, and
+          the reference — and writes a two-panel before/after composite (a blue separator between panels):
+          left is the reference overlaid with the native slide, right is the reference overlaid with the
+          registered one, so a reader sees what registration corrected, not only what it produced. Both panels
+          are built on the reference's own canvas by <b>pad-or-crop, never rescale</b>. Rescaling the native
+          image to the reference's shape would absorb the scale component of the pre-registration mismatch
+          into the resampling, understating the "before" error and making registration look better than it
+          was. It is the one process whose memory tier is keyed on the <b>combined</b> size of all
+          <b>three</b> inputs, because it holds them at once.</p>
         <dl>
           <dt>container</dt><dd>…mirage-regqc:1.0.0</dd>
           <dt>resources</dt><dd>1 cpu (withName) · 100 / 200 / 300 GB × attempt, tiered · 12 h × attempt (label process_high)</dd>
@@ -463,7 +478,7 @@
           quantification overlays. Needing both is why this belongs to postprocessing and not to segmentation.</p>
         <dl>
           <dt>container</dt><dd>…mirage-quantify:1.0.0</dd>
-          <dt>resources</dt><dd>label process_medium — 4 cpu · 200 GB · 4 h × attempt</dd>
+          <dt>resources</dt><dd>label process_medium — 4 cpu · 100 + 100 GB × attempt · 4 h × attempt</dd>
           <dt>publishes</dt><dd>&lt;pid&gt;/qc/postprocessing/qc/*.png</dd>
           <dt>kind</dt><dd>postprocess_qc</dd>
         </dl>
@@ -537,6 +552,14 @@
           <td><i>none</i> — passed as <code>[]</code>, the null object</td></tr>
       </tbody>
     </table></div>
+    <p class="outnote"><b>The container cell above names the readable tag, not what actually runs.</b>
+      <code>cdgatenbee/valis-wsi:1.0.0</code> is the third-party base image; at runtime
+      <code>lib/WarpBackends.groovy</code> and <code>modules/local/register.nf</code> both pin it to a digest of
+      that same build (<code>@sha256:eac27cc5…</code>, resolved 2026-09-02) rather than the mutable tag — a
+      supply-chain hardening (R6). This cell keeps the human-readable tag because a bare digest is unreadable in
+      a supplement. <code>bolt3x/mirage-tiled:1.0.0</code>, and every <code>bolt3x/mirage-*</code> image named
+      elsewhere in this figure, are the pipeline's own published, content-descriptive tags and are not
+      digest-pinned — R6 pins only the externally-sourced base image.</p>
     <p class="outnote"><b>The per-cell residual CSV is never published.</b> <code>WARP_SEG_QC</code>'s
       <code>publishDir</code> carries <code>pattern: "*_seg_qc.json"</code> and replaces the process-level
       default, so <code>*_reg_residuals.csv</code> — an optional <code>output:</code> emit — reaches
@@ -576,8 +599,21 @@
         <div class="rn" style="border-top-width:2.5px">
           <h4>GENERATE_QC_REPORT</h4>
           <div class="gate">gate · !skip_final_qc_report</div>
-          <p class="x">One HTML report plus a data bundle, both timestamped. Its <code>versions.yml</code> is
-            dropped at publish time by a <code>saveAs</code> that returns null for it.</p>
+          <p class="x">One HTML report plus a data bundle, both timestamped, eight sections in order: Run
+            Summary, Pipeline Stages, Preprocessing QC, Registration QC, Feature-TRE vs Cell-Displacement
+            Reconciliation, Per-Cell Registration Residuals, Segmentation Overlays, Postprocessing QC. The
+            old Software Versions and Sample Manifest sections are cut from the rendered HTML — but
+            <code>collated_versions.yml</code> and <code>run_summary.json</code> still ship, copied into
+            <code>&lt;outdir&gt;/qc/mirage_qc_data_&lt;ts&gt;/</code>, so cutting the sections loses nothing.
+            Where the report used to print a per-slide TRE table, a row-by-row reconciliation table and a
+            head-of-CSV row dump, it now renders per-stage error-distribution plots, a feature-TRE vs
+            cell-displacement scatter (log-log, with the divergence ratio drawn as a diagonal band — see
+            <a href="accuracy-schematic.html">S6</a>) and a
+            per-cell residual histogram. The plots are hand-rolled inline SVG, <b>stdlib-only</b>, following
+            this same file's pre-existing <code>_tiled_tre_heatmap_svg()</code> precedent — a report that
+            needed matplotlib could not run inside the <code>preprocess</code> image it is published from.
+            Its own <code>versions.yml</code> (distinct from the collated copy in the data bundle) is dropped
+            at publish time by a <code>saveAs</code> that returns null for it.</p>
           <dl>
             <dt>container</dt><dd>…mirage-preprocess:1.0.0</dd>
             <dt>resources</dt><dd>label process_low — 2 cpu · 32 GB × attempt · 2 h × attempt</dd>
@@ -593,7 +629,7 @@
             identically-named logs, so staging them all into one directory would collide. Unlike the report, its
             <code>versions.yml</code> <i>is</i> published, and its single key is the fully-qualified process name.</p>
           <dl>
-            <dt>container</dt><dd>ubuntu:22.04</dd>
+            <dt>container</dt><dd>bolt3x/mirage-preprocess:1.0.0</dd>
             <dt>resources</dt><dd>label process_single — 1 cpu · 12 GB × attempt · 8 h × attempt</dd>
             <dt>publishes</dt><dd>&lt;outdir&gt;/size_logs/input_sizes.csv</dd>
           </dl>
@@ -703,6 +739,8 @@
           <tr><td class="k">seg_method</td><td class="v">instantseg</td><td class="d">SEG_QC_SEGMENT is SEGMENT aliased</td></tr>
           <tr><td class="k">simplify_tolerance</td><td class="v">1.0</td><td class="d">SEG_QC_GEOJSON <code>--tolerance</code>; must equal EXTRACT_CELL_PROPERTIES'</td></tr>
           <tr><td class="k">reg_micro_reg</td><td class="v">1</td><td class="d">WARP_SEG_QC <code>--micro-reg</code>: whether 'rigid' includes micro-rigid</td></tr>
+          <tr><td class="k">seg_qc_pairing</td><td class="v">lsa</td><td class="d">WARP_SEG_QC <code>--pairing</code>; backend-independent, a tunable in <code>ext.args</code></td></tr>
+          <tr><td class="k">seg_qc_match_radius_factor</td><td class="v">1.5</td><td class="d">WARP_SEG_QC <code>--match-radius-factor</code>; same <code>ext.args</code> line</td></tr>
           <tr><td class="k">registration_method</td><td class="v">valis</td><td class="d">read once, in registration.nf; reaches SEG_QC as an argument</td></tr>
         </table>
         <h4>Where the QC leaves the QC tree</h4>
@@ -729,12 +767,17 @@
     that no consumer reads. <b>(c)</b> The kind vocabulary is derived from <code>ParamUtils.STEPS</code>, the same
     table that fixes step order, required samplesheet columns and entry columns, plus a separate list of the
     cross-cutting kinds every step emits. <b>(d)</b> Three per-step renderers produce the QC images, each pinned to
-    a container and published under the patient's <code>qc/</code> tree. <b>(e)</b> At <code>reg_qc = 2</code> a
-    shared subworkflow segments each slide on its native image with the run's <i>own</i> segmenter — an alias of
+    a container and published under the patient's <code>qc/</code> tree; the registration renderer draws a
+    two-panel before/after composite from all three of its staged inputs, built by pad-or-crop rather than
+    rescale so the "before" panel cannot understate the pre-registration error. <b>(e)</b> At
+    <code>reg_qc = 2</code> a shared subworkflow segments each slide on its native image with the run's <i>own</i> segmenter — an alias of
     <code>SEGMENT</code>, so the QC cannot drift from what the run ships — traces the mask to polygons, and warps
     those polygons through every registration stage in one process that serves both registration backends from a
     table keyed on the method <i>argument</i>. <b>(f)</b> Aggregation is eight fixed, sorted input slots plus a
-    size-log rollup, both uncacheable by construction. <b>(g)</b> All seven QC processes retry the whole signal
+    size-log rollup, both uncacheable by construction; the report itself renders per-stage error-distribution
+    plots and a log-log feature-TRE-vs-cell-displacement scatter rather than per-slide tables, hand-rolled as
+    stdlib-only inline SVG so it stays runnable inside the <code>preprocess</code> container that publishes it.
+    <b>(g)</b> All seven QC processes retry the whole signal
     range and then <code>finish</code>: a broken QC step fails the run, so on the default path a green run does
     imply a complete QC tree. Only the two opt-in evaluators (<code>SEG_QUALITY_EVAL</code>,
     <code>MERGE_SEG_EVAL</code>) still fall back to <code>ignore</code>, and a drop is announced through

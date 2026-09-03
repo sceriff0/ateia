@@ -76,9 +76,7 @@ def foreground_fraction(tile):
     # CAVEAT: measured on synthetic tiles only. Real IF backgrounds are not Gaussian noise, so
     # re-measure before relying on this on real slides -- which is what Phase 1 emitting the
     # value, rather than gating on it, is for.
-    within = np.sqrt(
-        (below.var() * below.size + above.var() * above.size) / a.size
-    )
+    within = np.sqrt((below.var() * below.size + above.var() * above.size) / a.size)
     separation = (above.mean() - below.mean()) / (within + 1e-12)
     if separation < BIMODAL_MIN_SEPARATION:
         return 0.0

@@ -167,7 +167,7 @@ def test_the_vendored_modules_version_emit_is_still_the_hardcoded_literal():
     which is the point.
     """
     text = MODULE.read_text()
-    assert "val(\"1.2.0\"), emit: versions_basicpy, topic: versions" in text
+    assert 'val("1.2.0"), emit: versions_basicpy, topic: versions' in text
     assert "WARN: Version information not provided by tool on CLI" in text
 
 

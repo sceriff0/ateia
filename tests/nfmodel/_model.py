@@ -9,6 +9,7 @@ name or a `withName: 'X' {` selector cannot be counted as the real thing.
 from the RAW text, because the reason to read them is usually to inspect the
 rendered command, and the stripped view has blanked every string in it.
 """
+
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -77,12 +78,9 @@ def _section(body: str, name: str) -> str:
     m = re.search(rf"^\s*{name}\s*:", body, re.M)
     if not m:
         return ""
-    rest = body[m.end():]
+    rest = body[m.end() :]
     nxt = [
-        n.start()
-        for k in keys
-        for n in [re.search(rf"^\s*{k}\s*:", rest, re.M)]
-        if n
+        n.start() for k in keys for n in [re.search(rf"^\s*{k}\s*:", rest, re.M)] if n
     ]
     return rest[: min(nxt)] if nxt else rest
 
@@ -188,7 +186,9 @@ def include_aliases(root: Path = REPO_ROOT) -> Dict[str, str]:
     reports a real, running task as nonexistent.
     """
     out: Dict[str, str] = {}
-    for f in nf_files(("modules", "workflows", "subworkflows"), root) + [root / "main.nf"]:
+    for f in nf_files(("modules", "workflows", "subworkflows"), root) + [
+        root / "main.nf"
+    ]:
         clean = strip_comments_and_strings(f.read_text())
         for m in re.finditer(r"include\s*\{([^}]*)\}", clean):
             for a in _ALIAS_RE.finditer(m.group(1)):
@@ -209,7 +209,7 @@ def param_refs(text: str) -> set:
     them first -- this function does not know about comments."""
     found = set()
     for m in _PARAM_RE.finditer(text):
-        if text[m.end():].lstrip().startswith("("):
+        if text[m.end() :].lstrip().startswith("("):
             continue
         found.add(m.group(1))
     return found

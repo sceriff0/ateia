@@ -36,29 +36,64 @@ include { MIRAGE } from './workflows/mirage'
       * `log` resolves normally inside a script-level function, which is why the
         warn/info calls live here rather than in the handler closure.
 
-    `cfg` deliberately carries only raw params (outdir, trace_dir, project_dir):
-    every Layout call stays inside the try below, so a Layout failure is still
-    caught and downgraded to a warning exactly as before, rather than being
-    hoisted to DAG-construction time where it would fail the run.
+    `cfg` deliberately carries only raw params and plain Strings (outdir, trace_dir,
+    launch_dir, project_dir): every Layout call stays inside the try below, so a
+    Layout failure is still caught and downgraded to a warning exactly as before,
+    rather than being hoisted to DAG-construction time where it would fail the run.
+
+    launch_dir is captured for the same reason the others are, and used because
+    Nextflow resolves `trace.file` against launchDir while cmd.execute() resolves a
+    relative path against the JVM's working directory. lib/ResourceReport.groovy owns
+    that arithmetic so tests/lib_probe.nf can assert it -- a script-level function in
+    this file has no unit-test surface of its own.
 */
 def generateResourceReport(Map cfg) {
-    if (!cfg.enable_trace) {
+    // The path Nextflow's trace scope actually wrote to. lib/ResourceReport.groovy
+    // owns the resolution rule and the diagnostic text; see its header for why a
+    // relative trace_dir resolved against the JVM's working directory was wrong, and
+    // why the previous silence was worse than the wrong path.
+    def trace_txt
+    try {
+        trace_txt = ResourceReport.tracePath(cfg.trace_dir, cfg.launch_dir)
+    } catch (Exception e) {
+        log.warn "Could not resolve the trace path (non-fatal): ${e.message}"
         return
     }
+
+    if (!cfg.enable_trace) {
+        log.warn ResourceReport.missingTraceMessage(trace_txt, false)
+        return
+    }
+    if (!new File(trace_txt).exists()) {
+        // Deliberately do NOT invoke the script here. bin/generate_resource_report.py
+        // renders "Trace data not available" and exits 0 for a missing trace, so
+        // running it would produce a page that LOOKS like a report and a log line
+        // that says the report was written. An absent file plus this warning is the
+        // honest outcome.
+        log.warn ResourceReport.missingTraceMessage(trace_txt, true)
+        return
+    }
+
     try {
         def script    = "${cfg.project_dir}/bin/generate_resource_report.py"
-        def trace_txt = "${cfg.trace_dir}/trace.txt"
         def size_log  = "${Layout.runDir(cfg.outdir, 'size_logs')}/input_sizes.csv"
         def qc_dir    = Layout.runDir(cfg.outdir, 'qc')
         def out_html  = "${qc_dir}/mirage_resource_report.html"
         new File(qc_dir).mkdirs()
+        // Derived from trace_txt's own resolved parent, not the raw cfg.trace_dir:
+        // trace_txt is already the RESOLVED absolute path (ResourceReport.tracePath
+        // above), so its parent is unambiguous regardless of whether trace_dir was
+        // passed relative or absolute. Building these two from the raw param instead
+        // silently pointed at the wrong directory under the exact relative-trace_dir
+        // launch this class's header describes.
+        def trace_dir_resolved = new File(trace_txt).parent
         def cmd = [
             'python3', script,
             '--trace', trace_txt,
             '--size-log', size_log,
             '--output', out_html,
-            '--native-report', "${cfg.trace_dir}/report.html",
-            '--native-timeline', "${cfg.trace_dir}/timeline.html",
+            '--native-report', "${trace_dir_resolved}/report.html",
+            '--native-timeline', "${trace_dir_resolved}/timeline.html",
         ]
         def proc = cmd.execute()
         proc.waitForProcessOutput(System.out, System.err)
@@ -168,6 +203,7 @@ workflow {
         enable_trace : params.enable_trace,
         outdir       : params.outdir,
         trace_dir    : params.trace_dir,
+        launch_dir   : "${workflow.launchDir}",
         project_dir  : "${projectDir}",
         cleanup_level: params.cleanup_level,
     ]

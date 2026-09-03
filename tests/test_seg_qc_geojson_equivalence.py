@@ -153,7 +153,15 @@ def test_cli_defaults_match_the_pipeline_tolerance(tmp_path, monkeypatch):
     monkeypatch.setattr(
         sys,
         "argv",
-        ["mask_to_geojson.py", "--mask", str(path), "--out", str(out), "--tolerance", "1.0"],
+        [
+            "mask_to_geojson.py",
+            "--mask",
+            str(path),
+            "--out",
+            str(out),
+            "--tolerance",
+            "1.0",
+        ],
     )
     mask_to_geojson.main()
 

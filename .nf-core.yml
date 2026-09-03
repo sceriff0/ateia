@@ -1,11 +1,19 @@
 # nf-core/tools configuration.
 #
 # THE `nf-core pipelines lint` JOB WAS DELETED FROM CI ON 2026-09-01 (CI redesign,
-# Phase 7). This file stays because `repository_type` and the `lint:` opt-outs are
-# still the honest record of which nf-core conventions MIRAGE has decided not to
-# follow, and because the tool's OTHER subcommands read it. But the lint block below
-# has never been evaluated by anything, and the next person to try should know why
-# before spending an afternoon on it.
+# Phase 7), and the `lint:` block that used to sit below it was deleted for release
+# 1.0. That block had NEVER been evaluated by anything -- see the measurement below --
+# so it was a configuration file for a run that could not happen, which is worse than
+# no configuration at all: a reader takes it as evidence the linter ran.
+#
+# What it opted out of, recorded here as prose so the record survives its deletion:
+# files_exist (seven nf-core template artefacts MIRAGE has none of -- CODE_OF_CONDUCT.md,
+# two logo PNGs, and the four lib/ files the template ships), files_unchanged,
+# pipeline_name_conventions, modules_structure, pipeline_todos, actions_awstest and
+# actions_awsfulltest. Six rule families in total. Anyone re-adding a lint step should
+# expect to need every one of them again, and should read the measurement first.
+#
+# `repository_type` and `nf_core_version` stay: the tool's OTHER subcommands read them.
 #
 # MEASURED, against a clean `nextflow config` cache, on this tree:
 #
@@ -20,8 +28,9 @@
 # in `nf_core/utils.py` on
 #     self.pipeline_prefix, self.pipeline_name = manifest.name.split("/")
 # because MIRAGE's `manifest.name` is `mirage` and the tool requires `<org>/<name>`.
-# It is not the `lint:` block below, and it is not the 3.0 `nf-core lint` ->
-# `nf-core pipelines lint` rename.
+# It is not the `lint:` block that used to sit below (see the deletion note at the
+# top of this file), and it is not the 3.0 `nf-core lint` -> `nf-core pipelines lint`
+# rename.
 #
 # Forced past it (manifest.name temporarily set to `bolt3x/mirage`), 3.4.1 then:
 #   * needs `pre-commit` on PATH, and crashes with FileNotFoundError without it;
@@ -35,18 +44,3 @@
 # the slot.
 repository_type: pipeline
 nf_core_version: "2.14.1"
-lint:
-  files_exist:
-    - CODE_OF_CONDUCT.md
-    - assets/nf-core-mirage_logo_light.png
-    - assets/nf-core-mirage_logo_dark.png
-    - lib/NfcoreTemplate.groovy
-    - lib/Utils.groovy
-    - lib/WorkflowMain.groovy
-    - lib/nfcore_external_java_deps.jar
-  files_unchanged: false
-  pipeline_name_conventions: false
-  modules_structure: false
-  pipeline_todos: false
-  actions_awstest: false
-  actions_awsfulltest: false

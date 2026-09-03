@@ -59,7 +59,9 @@ import sys
 import numpy as np
 import pytest
 
-BIN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin")
+BIN_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin"
+)
 UTILS_DIR = os.path.join(BIN_DIR, "utils")
 for _dir in (BIN_DIR, UTILS_DIR):
     if _dir not in sys.path:
@@ -96,9 +98,7 @@ def _write_stack(
             rng.integers(lo, info.max, size=(h, w), dtype=dtype) for _ in channel_names
         ]
     else:
-        planes = [
-            rng.random(size=(h, w)).astype(dtype) * 1000.0 for _ in channel_names
-        ]
+        planes = [rng.random(size=(h, w)).astype(dtype) * 1000.0 for _ in channel_names]
     stack = np.stack(planes, axis=0)  # (C, H, W)
 
     if neg_channel_pixels:
@@ -211,7 +211,10 @@ def _assert_pixels_and_tags_equivalent(old_path, new_path):
     np.testing.assert_array_equal(old_arr, new_arr)
     assert old_arr.dtype == new_arr.dtype
 
-    with tifffile.TiffFile(str(old_path)) as old_tif, tifffile.TiffFile(str(new_path)) as new_tif:
+    with (
+        tifffile.TiffFile(str(old_path)) as old_tif,
+        tifffile.TiffFile(str(new_path)) as new_tif,
+    ):
         old_tags, new_tags = old_tif.pages[0].tags, new_tif.pages[0].tags
         assert new_tags["XResolution"].value == old_tags["XResolution"].value
         assert new_tags["YResolution"].value == old_tags["YResolution"].value
@@ -266,7 +269,8 @@ def test_split_multichannel_reads_one_channel_at_a_time(tmp_path, monkeypatch):
         str(out_dir),
         is_reference=True,
         channel_names=list(channel_names),
-        nuclear_markers=["DAPI"], pixel_size=0.325
+        nuclear_markers=["DAPI"],
+        pixel_size=0.325,
     )
 
     assert str(image_path) in seen_open_paths, "image never went through open_lazy"
@@ -392,14 +396,19 @@ def test_split_multichannel_negative_clip_stats_logged_once_for_whole_image(
             str(out_dir),
             is_reference=False,
             channel_names=list(channel_names),
-            nuclear_markers=["DAPI"], pixel_size=0.325
+            nuclear_markers=["DAPI"],
+            pixel_size=0.325,
         )
 
     clipped_lines = [
-        r for r in caplog.records if "Clipped" in r.message and "negative pixels" in r.message
+        r
+        for r in caplog.records
+        if "Clipped" in r.message and "negative pixels" in r.message
     ]
     detected_lines = [
-        r for r in caplog.records if r.message.startswith("Detected") and "negative pixels" in r.message
+        r
+        for r in caplog.records
+        if r.message.startswith("Detected") and "negative pixels" in r.message
     ]
 
     assert len(clipped_lines) == 1, (

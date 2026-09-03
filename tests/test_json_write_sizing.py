@@ -75,12 +75,16 @@ def test_the_streaming_writers_do_not_build_the_document_first():
         text = (REPO / rel).read_text()
         if "_stream_collection" not in text:
             offenders.append(f"{rel} ({why}): no _stream_collection")
-        if re.search(r'json\.dump\(\s*\{?\s*"type"', text) or "features\": features" in text:
+        if (
+            re.search(r'json\.dump\(\s*\{?\s*"type"', text)
+            or 'features": features' in text
+        ):
             offenders.append(f"{rel} ({why}): serialises the whole FeatureCollection")
 
     assert not offenders, (
         "the per-cell GeoJSON must be written one feature at a time; building the collection "
-        "first is the -1004 MB regression PERF-PLAN C11 removes:\n  " + "\n  ".join(offenders)
+        "first is the -1004 MB regression PERF-PLAN C11 removes:\n  "
+        + "\n  ".join(offenders)
     )
 
 
@@ -113,7 +117,9 @@ def test_the_two_forms_produce_identical_bytes(tmp_path):
     """The whole premise: this is a speed/memory trade, never an output change."""
     import json
 
-    obj = {"cells": [{"id": i, "poly": [[float(i), float(i + 1)]] * 4} for i in range(50)]}
+    obj = {
+        "cells": [{"id": i, "poly": [[float(i), float(i + 1)]] * 4} for i in range(50)]
+    }
 
     a, b = tmp_path / "a.json", tmp_path / "b.json"
     with open(a, "w") as f:

@@ -74,7 +74,9 @@ def _load_helper(name: str, namespace: dict):
     source = REGISTER_PY.read_text()
     func_src = _extract_function_source(source, name)
     exec(  # noqa: S102 - intentional: isolates one function from a valis-only module
-        compile("from __future__ import annotations\n" + func_src, str(REGISTER_PY), "exec"),
+        compile(
+            "from __future__ import annotations\n" + func_src, str(REGISTER_PY), "exec"
+        ),
         namespace,
     )
     return namespace[name]

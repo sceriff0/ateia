@@ -67,10 +67,14 @@ def test_preflight_scale_resolves_auto_against_the_real_fixture(tmp_path):
     output = tmp_path / "report.json"
     proc = subprocess.run(
         [
-            sys.executable, str(PREFLIGHT_SCRIPT),
-            "--images", *[str(p) for p in FIXTURES],
-            "--pixel-size", "auto",
-            "--output", str(output),
+            sys.executable,
+            str(PREFLIGHT_SCRIPT),
+            "--images",
+            *[str(p) for p in FIXTURES],
+            "--pixel-size",
+            "auto",
+            "--output",
+            str(output),
         ],
         capture_output=True,
         text=True,

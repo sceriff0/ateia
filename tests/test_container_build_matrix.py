@@ -8,6 +8,7 @@ cluster with "manifest unknown" -- long after the change looked done.
 The list is also read by the workflow's `only` filter, so a name here that has no
 directory produces a dispatch option that always fails.
 """
+
 from __future__ import annotations
 
 import json
@@ -33,8 +34,11 @@ def _entries() -> list[dict]:
 
 
 def _build_context_dirs() -> set[str]:
-    return {d.name for d in CONTAINERS.iterdir()
-            if d.is_dir() and (d / "Dockerfile").exists()}
+    return {
+        d.name
+        for d in CONTAINERS.iterdir()
+        if d.is_dir() and (d / "Dockerfile").exists()
+    }
 
 
 def test_every_build_context_is_in_the_matrix():
@@ -44,15 +48,20 @@ def test_every_build_context_is_in_the_matrix():
         f"containers/ has build context(s) absent from images.json: {missing}. "
         "An unlisted image is never built or pushed -- the run stays green and the "
         "tag simply does not exist on Docker Hub. Add it, or add it to "
-        "NOT_BUILT_HERE with the reason.")
+        "NOT_BUILT_HERE with the reason."
+    )
 
 
 def test_every_matrix_entry_has_a_dockerfile():
-    missing = sorted(e["dir"] for e in _entries()
-                     if not (CONTAINERS / e["dir"] / "Dockerfile").exists())
+    missing = sorted(
+        e["dir"]
+        for e in _entries()
+        if not (CONTAINERS / e["dir"] / "Dockerfile").exists()
+    )
     assert not missing, (
         f"images.json names dirs with no Dockerfile: {missing}. The matrix job "
-        "would fail, and the `only` filter would offer a name that cannot build.")
+        "would fail, and the `only` filter would offer a name that cannot build."
+    )
 
 
 def test_tags_are_unique_and_descriptive():
@@ -69,13 +78,16 @@ def test_workflow_reads_the_json_rather_than_repeating_it():
     in the workflow is the drift this file exists to prevent."""
     wf = WORKFLOW.read_text()
     assert "fromJson(needs.resolve.outputs.matrix)" in wf, (
-        "containers.yml no longer builds its matrix from containers/images.json")
+        "containers.yml no longer builds its matrix from containers/images.json"
+    )
     assert "containers/images.json" in wf, (
-        "containers.yml does not read containers/images.json")
+        "containers.yml does not read containers/images.json"
+    )
     # No inline per-image list left behind.
     assert not re.search(r"^\s*- \{ dir: \w+", wf, re.M), (
         "containers.yml still carries an inline image list; images.json is the "
-        "single source and a second copy will drift")
+        "single source and a second copy will drift"
+    )
 
 
 # A `container` directive, in either of the two forms this repo actually uses:
@@ -89,10 +101,11 @@ _CONTAINER_DIRECTIVE_RE = re.compile(r"container\s*:?\s*[\"']([^\"']+)[\"']")
 # First-party images are one Docker Hub repository per component --
 # bolt3x/mirage-<component>:<version> -- since the containers/ rename
 # (see tests/test_container_image_naming.py's header). Only the component name
-# is captured; the version segment is deliberately ignored here, because it is
-# sometimes a literal (1.0.0) and sometimes a params interpolation
-# (${params.segeval_tag}, modules/local/merge_seg_eval.nf), and either way the
-# component is the only part that must agree with containers/images.json.
+# is captured; the version segment is deliberately ignored here, because it
+# is a literal x.y.z in every reference (a `${params.segeval_tag}` interpolation used to
+# be the one exception; the param was deleted 2026-09-02 and segeval joined
+# manifest.version with the other ten images), and the component is the only part that
+# must agree with containers/images.json anyway.
 _MIRAGE_COMPONENT_RE = re.compile(r"^bolt3x/mirage-([a-z0-9]+(?:-[a-z0-9]+)*):")
 
 
@@ -169,4 +182,5 @@ def test_modules_pull_only_tags_the_matrix_publishes():
     assert not unknown, (
         f"modules/lib pull component(s) this workflow never builds: {unknown}. "
         f"Either add a build context + images.json entry, or fix the reference. "
-        f"Published: {sorted(published)}")
+        f"Published: {sorted(published)}"
+    )

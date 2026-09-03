@@ -53,7 +53,9 @@ def test_the_stub_control_json_is_gated_not_legacy_accepted(caplog):
     control = _stub_control()
 
     with caplog.at_level(logging.WARNING, logger="tiled_solve"):
-        tiled_solve._grid_from_controls([control], gate_tre=1.0, max_error=0.99, max_disp=256)
+        tiled_solve._grid_from_controls(
+            [control], gate_tre=1.0, max_error=0.99, max_disp=256
+        )
 
     assert "carry no 'error' key" not in caplog.text
 
@@ -77,4 +79,6 @@ def test_the_stub_carries_every_key_the_consumer_reads():
 
 def test_the_parser_would_notice_if_the_stub_stopped_emitting_a_control_json():
     """A guard that silently finds nothing checks nothing."""
-    assert _stub_control(), "parsed an empty control JSON -- the extraction regex has rotted"
+    assert _stub_control(), (
+        "parsed an empty control JSON -- the extraction regex has rotted"
+    )

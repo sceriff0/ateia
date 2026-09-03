@@ -166,7 +166,16 @@ def test_fanout_scripts_chain_into_a_registered_slide(tmp_path):
 
     reg_f = tmp_path / "mov_registered.ome.tiff"
     tiled_stitch.main(
-        ["--moving", str(mov_f), "--manifest", str(man_f), "--out", str(reg_f), "--pixel-size", "0.325"]
+        [
+            "--moving",
+            str(mov_f),
+            "--manifest",
+            str(man_f),
+            "--out",
+            str(reg_f),
+            "--pixel-size",
+            "0.325",
+        ]
     )
 
     registered = tifffile.imread(str(reg_f))

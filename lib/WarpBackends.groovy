@@ -55,8 +55,9 @@ class WarpBackends {
     private static final Map<String, Map> BACKENDS = [
         valis: [
             // Same image as REGISTER's classic path, so the registrar pickle loads and
-            // scikit-image/scipy are present.
-            container   : 'cdgatenbee/valis-wsi:1.0.0',
+            // scikit-image/scipy are present. DIGEST-PINNED (R6) to the same digest
+            // modules/local/register.nf uses: cdgatenbee/valis-wsi:1.0.0 @ 2026-09-02.
+            container   : 'cdgatenbee/valis-wsi@sha256:eac27cc599ae0e54aa01c1bef97538301994ce1abd4da44be3f3130ab85a40e6',
             stages      : ['native', 'rigid', 'non_rigid', 'micro'],
             versionTools: ['valis', 'skimage', 'scipy'],
             flags       : { ctx ->
@@ -93,10 +94,27 @@ class WarpBackends {
         ],
     ].asImmutable()
 
+    /**
+     * The registration methods WARP_SEG_QC can score, in BACKENDS order.
+     *
+     * Must equal the set of methods nextflow_schema.json's `registration_method`
+     * enum accepts (currently 'valis' and 'tiled') and lib/RegBackends.groovy's
+     * `methods()`: a method that registers but cannot be warp-scored would fail
+     * only at reg_qc=2, on a real run.
+     */
     static List<String> methods() {
         return BACKENDS.keySet() as List
     }
 
+    /**
+     * The backend row for `method` -- container, stages, versionTools, flags, stubExtras.
+     *
+     * Keyed on the `method` ARGUMENT, never params.registration_method: SEG_QC takes
+     * the method as a parameter so there is one decision site rather than two reads
+     * that can drift.
+     *
+     * @throws IllegalArgumentException naming `method` and listing methods().
+     */
     static Map of(String method) {
         def backend = BACKENDS[method]
         if (!backend)

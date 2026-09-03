@@ -29,6 +29,7 @@ launching Nextflow twice from pytest, which the Python CI job has no engine for;
 CI's own two-leg matrix is the real check, and this is what fails fast in the
 suite the author runs first.
 """
+
 import re
 from pathlib import Path
 
@@ -39,9 +40,7 @@ SRC = strip_comments(PROBE.read_text())
 
 # `assert <anything>, <quoted message>` at end of line, or with the message on
 # the following line. Both are the comma form.
-_COMMA_ASSERT = re.compile(
-    r"^\s*assert\s+.*,\s*(?:'[^']*'|\"[^\"]*\")\s*$", re.M
-)
+_COMMA_ASSERT = re.compile(r"^\s*assert\s+.*,\s*(?:'[^']*'|\"[^\"]*\")\s*$", re.M)
 _COMMA_ASSERT_CONTINUED = re.compile(
     r"^\s*assert\s+[^\n]*,\s*\n\s*(?:'[^']*'|\"[^\"]*\")\s*$", re.M
 )
@@ -69,8 +68,8 @@ def test_no_def_bound_closure_is_invoked_as_a_function():
         for m in re.finditer(rf"(?<![.\w]){re.escape(name)}\s*\(", SRC):
             offenders.append(
                 f"`{name}(...)` at offset {m.start()} -- a def-bound closure "
-                f"invoked as a function; NF26 reports \"`{name}` is not "
-                f"defined\". Use {name}.call(...)"
+                f'invoked as a function; NF26 reports "`{name}` is not '
+                f'defined". Use {name}.call(...)'
             )
     assert not offenders, "\n".join(offenders)
 

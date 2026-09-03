@@ -39,21 +39,53 @@ NAMESPACE = "bolt3x"
 PREFIX = "mirage-"
 
 # Third-party images the pipeline pulls as-is. VALIS is upstream-maintained and deliberately not
-# re-hosted (its from-source libvips build is heavy); ubuntu is a plain base for a trivial task.
-# basicpy-docker-mcmicro is the vendored nf-core BASICPY module's own container (mcmicro-maintained);
-# BASICPY is a vendored module (modules/nf-core/basicpy/), not a bolt3x/mirage-<component> build, so
-# re-hosting it would mean maintaining a fork of the vendored image too.
+# re-hosted (its from-source libvips build is heavy). basicpy-docker-mcmicro is the vendored
+# nf-core BASICPY module's own container (mcmicro-maintained); BASICPY is a vendored module
+# (modules/nf-core/basicpy/), not a bolt3x/mirage-<component> build, so re-hosting it would mean
+# maintaining a fork of the vendored image too.
+#
+# `ubuntu:22.04` USED TO BE HERE, for AGGREGATE_SIZE_LOGS. It is gone because that base ships no
+# procps, so with params.enable_trace=true (the shipped default) Nextflow's task-metrics wrapper
+# hard-exited before the script block and the process failed on every real run. It now uses
+# bolt3x/mirage-preprocess, which six other modules already pull.
 EXTERNAL_ALLOWED = {
-    "cdgatenbee/valis-wsi:1.0.0",
-    "ubuntu:22.04",
+    "cdgatenbee/valis-wsi@sha256:eac27cc599ae0e54aa01c1bef97538301994ce1abd4da44be3f3130ab85a40e6",
+    "docker.io/labsyspharm/basicpy-docker-mcmicro@sha256:355b14e2ec80b7b152272f333afd47234f007d0d37633b3ec948e87ec2c8e9b4",
+    # The vendored module (modules/nf-core/basicpy/main.nf) stays byte-for-byte upstream and
+    # so still carries this tagged reference; the R6 digest pin lives in conf/modules.config's
+    # `withName: 'BASICPY'` override instead. See modules/nf-core/basicpy/MIRAGE-NOTES.md.
     "docker.io/labsyspharm/basicpy-docker-mcmicro:1.2.0-patch5",
 }
 
 # The retired single-repository name. Nothing may reference it again.
 LEGACY_REPO = "attend_image_analysis"
 
-_IMAGE_REF = re.compile(r"""['"]([A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9][A-Za-z0-9._-]*)['"]""")
-_FIRST_PARTY = re.compile(rf"^{NAMESPACE}/{PREFIX}([a-z0-9]+(?:-[a-z0-9]+)*):(\d+\.\d+\.\d+)$")
+# THE TAG MAY BE INTERPOLATED, AND THE REFERENCE MAY CARRY A DIGEST. Both forms were
+# invisible to the previous pattern, which required an alphanumeric right after the ":".
+#
+#   * `bolt3x/mirage-segeval:${params.segeval_tag}` matched NOTHING, so both segeval
+#     modules were silently exempt from every assertion in this file -- including the
+#     manifest-version pin. Measured 2026-09-02: 29 references found before widening the
+#     pattern, 31 after, and the two new ones are exactly that pair.
+#   * `cdgatenbee/valis-wsi@sha256:<64 hex>` is the digest-pinned form ruling R6 requires
+#     for an external image (see tests/test_base_images_are_digest_pinned.py).
+#
+# A tag or a digest is REQUIRED -- the alternation has no "neither" branch. Without that
+# the pattern would match any quoted path on a line containing the word "container",
+# e.g. a publishDir `"${params.outdir}/${meta.patient_id}/qc"`.
+_IMAGE_REF = re.compile(
+    r"""['"]("""
+    r"""[A-Za-z0-9][A-Za-z0-9._/-]*"""
+    r"""(?::[A-Za-z0-9$][A-Za-z0-9._${}-]*(?:@sha256:[0-9a-f]{64})?"""
+    r"""|@sha256:[0-9a-f]{64})"""
+    r""")['"]"""
+)
+# A first-party image is pinned by TAG, never by digest: the digest does not exist until
+# the image has been built and pushed, and the tag is what release.yml publishes. The
+# published digests are recorded in containers/README.md's mapping table instead.
+_FIRST_PARTY = re.compile(
+    rf"^{NAMESPACE}/{PREFIX}([a-z0-9]+(?:-[a-z0-9]+)*):(\d+\.\d+\.\d+)$"
+)
 
 
 def _manifest_version():
@@ -108,10 +140,14 @@ def test_no_source_references_the_legacy_single_repository():
     ``bolt3x/attend_image_analysis:bioformats_v1`` in its build/push comments after the rename.
     """
     offenders = []
-    containers_files = sorted(p for p in (REPO / "containers").rglob("*") if p.is_file())
-    for path in _searched_files() + containers_files + [
-        REPO / "CLAUDE.md", REPO / ".github/workflows/containers.yml"
-    ]:
+    containers_files = sorted(
+        p for p in (REPO / "containers").rglob("*") if p.is_file()
+    )
+    for path in (
+        _searched_files()
+        + containers_files
+        + [REPO / "CLAUDE.md", REPO / ".github/workflows/containers.yml"]
+    ):
         if not path.is_file():
             continue
         for i, line in enumerate(path.read_text().splitlines(), 1):
@@ -124,7 +160,8 @@ def test_no_source_references_the_legacy_single_repository():
 
 def test_every_image_reference_is_either_first_party_or_an_allowed_external():
     bad = [
-        (f, r) for f, r in _image_refs()
+        (f, r)
+        for f, r in _image_refs()
         if r not in EXTERNAL_ALLOWED and not _FIRST_PARTY.match(r)
     ]
     assert not bad, (
@@ -137,7 +174,8 @@ def test_first_party_images_are_pinned_to_the_manifest_version():
     """An image set and the pipeline that pulls it must not drift apart silently."""
     want = _manifest_version()
     wrong = [
-        (f, r) for f, r in _image_refs()
+        (f, r)
+        for f, r in _image_refs()
         if (m := _FIRST_PARTY.match(r)) and m.group(2) != want
     ]
     assert not wrong, (
@@ -236,7 +274,9 @@ def test_the_build_workflow_preflights_the_registry_credentials():
     """
     text = (REPO / ".github/workflows/containers.yml").read_text()
     assert "DOCKERHUB_USERNAME" in text and "DOCKERHUB_TOKEN" in text
-    preflight = re.search(r"name: Preflight.*?(?=\n      - name:|\n  [a-z])", text, re.S)
+    preflight = re.search(
+        r"name: Preflight.*?(?=\n      - name:|\n  [a-z])", text, re.S
+    )
     assert preflight, (
         "containers.yml has no preflight step, so a publish with missing secrets fans out "
         "into one opaque failure per image instead of failing once with a readable reason."

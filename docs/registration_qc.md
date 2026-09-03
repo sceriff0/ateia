@@ -18,6 +18,78 @@ segmenter** (`--seg_method`, default `instantseg`) rather than with a second, fi
     [quality control](figures/qc-schematic.html){ target=_blank }, which places it in the
     pipeline-wide QC architecture.
 
+    **Supplementary Figure S6** — [accuracy measures](figures/accuracy-schematic.html){ target=_blank } —
+    places this chain against the pipeline's two other accuracy numbers and says which of
+    them can be read as independent evidence.
+
+## The `reg_qc = 1` overlay is a before/after pair
+
+Below the staged metrics sits the cheaper answer, on at every level from
+`reg_qc = 1` up: one image per moving slide showing what registration
+corrected.
+
+`GENERATE_REGISTRATION_QC` takes the tuple `[meta, registered, native, reference]` —
+the registered moving slide, its **native** (pre-registration) counterpart, and
+the patient's reference — and renders **two composites side by side**, separated
+by a blue band:
+
+| Panel | Green | Red |
+|---|---|---|
+| **Before** (left) | reference | the native moving slide, un-registered |
+| **After** (right) | reference | the registered moving slide |
+
+Perfect alignment is yellow (red + green); misalignment shows red/green
+fringing. **Fringing that shrinks from the left panel to the right one is the
+correction registration applied.** The single "after" composite this used to
+render showed what registration *produced* and gave a reader nothing to compare
+it against — an unregistered pair and a perfectly registered one both look
+plausible on their own.
+
+**Both panels are drawn on the reference canvas, origin-aligned, reconciling
+differing dimensions by pad-or-crop — never by rescaling.** Rescaling the native
+image onto the reference's shape would absorb the scale component of the
+misalignment into the resampling, so the "before" panel would understate the
+pre-registration error and make registration look better than it was. Padding
+and cropping preserve every pixel's original position in the reference frame,
+which is what a reader of the figure is entitled to assume they are seeing.
+(`bin/utils/qc.py:compose_on_reference_canvas`.)
+
+**Channel selection is fail-fast.** The nuclear/fiducial channel in every panel is
+resolved from `nuclear_markers` (`metadata.pick_nuclear_index`); if no configured
+marker matches a slide's OME channel names, `create_registration_qc` raises rather
+than silently falling back to channel 0.
+
+**The CLI keeps `--native` optional; the pipeline never exercises that path.**
+`bin/generate_registration_qc.py --native` is `nargs="+", default=None` — a
+caller who omits it gets the old single "after" panel
+(`bin/generate_registration_qc.py:151-158`, `bin/utils/qc.py`'s `native_nuc`
+guarded on `if native_path is not None`, ~line 599) — that flexibility exists
+because the same script also has callers outside this process. But
+`GENERATE_REGISTRATION_QC` (`modules/local/generate_registration_qc.nf:38,64`)
+declares `native_image` as a **required** path in its input tuple and always
+passes `--native ${native_image}`, so a pipeline run never takes the
+single-panel branch. If the file that path names does not resolve,
+`create_registration_qc` raises `FileNotFoundError`
+(`bin/utils/qc.py:479-480`) rather than silently falling back to one panel.
+
+The published names are unchanged —
+`<outdir>/<patient>/qc/registration/<slide>_QC_RGB.png`, `_QC_RGB.tif` and
+`_QC_RGB_fullres.tif` — so `GENERATE_QC_REPORT` and anything reading the output
+tree sees one artifact per moving slide exactly as before. It is simply twice as
+wide.
+
+The native image costs nothing extra to obtain: it is the stream that entered
+registration (`REGISTER_PATIENT.out.images_multi` on the linear path,
+`PREPROCESSING.out.preprocessed` under `--mode add_cycle`), joined back in on
+`meta.id`. It does cost memory — the process now holds three full-resolution
+planes instead of two — which is why its request is tiered on the combined size
+of all three inputs (see [Resources](resources.md#registration-qc)).
+
+Under `--mode add_cycle` the pair reads the same way, with one asymmetry worth
+knowing: the reference is the **frozen prior** reference read out of
+`--prior_outdir`, so the "before" panel measures the new cycle against a frame
+established in an earlier run. That is the drift the mode exists to detect.
+
 ## Why the correspondence is fixed, and fixed *there*
 
 VALIS applies four transform states in this order:
@@ -151,3 +223,30 @@ pairing itself is thin — check the rigid stage before trusting the later numbe
 - **Vertices are not clipped to the aligned frame by default**, unlike `Slide.warp_geojson`.
   Clipping flattens boundary-straddling cells onto the crop edge in both slides, inflating their
   IoU for reasons unrelated to registration. Pass `--clip-to-frame` to reproduce VALIS exactly.
+
+## In the HTML QC report
+
+`GENERATE_QC_REPORT` renders these JSONs twice over, both as plots:
+
+- **Registration QC → Warp-Segmentation QC** — one error-distribution plot per
+  registration stage, over the stages' `displacement_um_p50` (or
+  `displacement_px_p50` when no pixel size was available), **one point per slide**.
+  A directory holding both calibrated (µm) and uncalibrated (px) slides for the
+  same stage is never mixed into one histogram: it is split into up to two plots,
+  one per unit actually present, each titled with its own unit — the STARE
+  (tiled) backend is the common source of px-only slides, not an edge case. The
+  JSON carries summary statistics, not per-cell values, so the distribution is
+  across slides; a single-slide run renders a single bar and says `n=1`. The
+  caption also reports the matched-cell count (`matching.n_pairs`) across slides,
+  min and median, so a p50 measured over 12 matched cells reads differently from
+  one measured over 40 000 — the histogram shape alone cannot tell the two apart.
+- **Feature-TRE vs Cell-Displacement Reconciliation** — a log-log scatter of the
+  registration method's own intrinsic TRE (x) against these cell displacements (y),
+  one point per slide-stage, with the 3× divergence band drawn as two diagonals.
+  A point outside the band is a slide-stage where the registrar's own keypoints and
+  the independently segmented nuclei disagree about whether the slide is aligned;
+  that disagreement is the failure neither measure catches alone.
+
+The per-slide records themselves are not re-tabulated in the page — they are copied
+verbatim into `qc/mirage_qc_data_<timestamp>/seg_qc/`, which is where a per-slide
+number belongs.

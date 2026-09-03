@@ -11,6 +11,7 @@ conf/*.config cannot see lib/*.groovy (CLAUDE.md). What Layout owns is the
 DECISION -- which kinds are final -- and this file is what stops the inlined
 copies drifting from it.
 """
+
 import json
 import re
 from pathlib import Path

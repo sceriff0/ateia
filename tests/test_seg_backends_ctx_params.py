@@ -25,7 +25,9 @@ SEG_BACKENDS = ROOT / "lib" / "SegBackends.groovy"
 
 def _ctx_params_reads() -> set:
     """Keys SegBackends actually reads off ctx.params."""
-    return set(re.findall(r"ctx\.params\.([a-zA-Z_][a-zA-Z0-9_]*)", SEG_BACKENDS.read_text()))
+    return set(
+        re.findall(r"ctx\.params\.([a-zA-Z_][a-zA-Z0-9_]*)", SEG_BACKENDS.read_text())
+    )
 
 
 def _ctx_params_supplied() -> set:
@@ -42,7 +44,9 @@ def _ctx_params_supplied() -> set:
 def test_every_ctx_params_read_is_supplied():
     reads = _ctx_params_reads()
     supplied = _ctx_params_supplied()
-    assert reads, "Found no ctx.params.* reads in lib/SegBackends.groovy - the regex has drifted."
+    assert reads, (
+        "Found no ctx.params.* reads in lib/SegBackends.groovy - the regex has drifted."
+    )
     missing = reads - supplied
     assert not missing, (
         f"lib/SegBackends.groovy reads ctx.params.{sorted(missing)} but CTX_PARAM_KEYS "

@@ -22,11 +22,7 @@ process GENERATE_POSTPROCESSING_QC {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.patient_id}"
     """
-    # Log input sizes for tracing (-L follows symlinks)
-    mask_bytes=\$(stat -L --printf="%s" ${cell_mask} 2>/dev/null || echo 0)
-    csv_bytes=\$(stat -L --printf="%s" ${merged_csv} 2>/dev/null || echo 0)
-    total_bytes=\$((mask_bytes + csv_bytes))
-    echo "${task.process},${meta.patient_id},${cell_mask.name}+${merged_csv.name},\${total_bytes}" > ${meta.patient_id}.GENERATE_POSTPROCESSING_QC.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, meta.patient_id, ["${cell_mask}", "${merged_csv}"], "${meta.patient_id}.GENERATE_POSTPROCESSING_QC.size.csv")}
 
     mkdir -p qc
 
@@ -37,7 +33,7 @@ process GENERATE_POSTPROCESSING_QC {
         --prefix ${prefix} \\
         ${args}
 
-    ${ProcessEnvelope.versions(task.process, ['numpy', 'pandas', 'matplotlib', 'skimage'])}
+    ${ProcessEnvelope.versions(task.process, ['numpy', 'pandas', 'matplotlib', 'skimage'], task.container)}
     """
 
     stub:
@@ -47,8 +43,8 @@ process GENERATE_POSTPROCESSING_QC {
     touch qc/${prefix}_seg_overlay.png
     touch qc/${prefix}_cell_stats.png
     touch qc/${prefix}_intensity_distributions.png
-    echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.GENERATE_POSTPROCESSING_QC.size.csv
+    ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${meta.patient_id}.GENERATE_POSTPROCESSING_QC.size.csv")}
 
-    ${ProcessEnvelope.versionsStub(task.process, ['numpy', 'pandas', 'matplotlib', 'skimage'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['numpy', 'pandas', 'matplotlib', 'skimage'], task.container)}
     """
 }

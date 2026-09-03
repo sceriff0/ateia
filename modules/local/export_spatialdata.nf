@@ -52,8 +52,7 @@ process EXPORT_SPATIALDATA {
     // consumer of the same defect, found auditing this fix -- not one of the three the
     // originating review named.
     """
-    input_bytes=\$(stat -L --printf="%s" ${quant_csv} 2>/dev/null || echo 0)
-    echo "${task.process},${meta.patient_id},${quant_csv.name},\${input_bytes}" > ${meta.patient_id}.EXPORT_SPATIALDATA.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, meta.patient_id, ["${quant_csv}"], "${meta.patient_id}.EXPORT_SPATIALDATA.size.csv")}
 
     mkdir -p spatialdata
     export_spatialdata.py \\
@@ -71,15 +70,15 @@ process EXPORT_SPATIALDATA {
         -o spatialdata/${meta.patient_id}.zarr \\
         ${args}
 
-    ${ProcessEnvelope.versions(task.process, ['spatialdata', 'anndata', 'geopandas', 'zarr'])}
+    ${ProcessEnvelope.versions(task.process, ['spatialdata', 'anndata', 'geopandas', 'zarr'], task.container)}
     """
 
     stub:
     """
     mkdir -p spatialdata/${meta.patient_id}.zarr
     echo '{"zarr_format":2}' > spatialdata/${meta.patient_id}.zarr/.zgroup
-    echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.EXPORT_SPATIALDATA.size.csv
+    ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${meta.patient_id}.EXPORT_SPATIALDATA.size.csv")}
 
-    ${ProcessEnvelope.versionsStub(task.process, ['spatialdata', 'anndata', 'geopandas', 'zarr'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['spatialdata', 'anndata', 'geopandas', 'zarr'], task.container)}
     """
 }

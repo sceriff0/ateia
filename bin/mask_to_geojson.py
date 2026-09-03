@@ -12,8 +12,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import sys
+from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).parent / "utils"))
+from logger import configure_logging, get_logger  # noqa: E402
+
+logger = get_logger(__name__)
 
 
 def mask_to_feature_collection(mask, simplify_tolerance: float = 1.0) -> dict:
@@ -70,6 +78,7 @@ def write_geojson(mask_path, out_path, simplify_tolerance: float = 1.0) -> int:
 
 def main():
     """CLI entry point: convert a StarDist cell-mask TIFF into a cell GeoJSON."""
+    configure_logging(level=logging.INFO)
     ap = argparse.ArgumentParser(description="StarDist cell-mask TIFF -> cell GeoJSON.")
     ap.add_argument("--mask", required=True)
     ap.add_argument("--out", required=True)
@@ -80,8 +89,8 @@ def main():
     ap.add_argument("--tolerance", type=float, default=1.0)
     a = ap.parse_args()
     n = write_geojson(a.mask, a.out, simplify_tolerance=a.tolerance)
-    print(f"Wrote {n} cells to {a.out}")
+    logger.info("Wrote %d cells to %s", n, a.out)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

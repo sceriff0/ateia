@@ -308,7 +308,26 @@ ALLOWED_LINES = {
         # Composition check: 1253 + 12 = 1265, and `wc -l conf/modules.config` rose
         # 1340 -> 1352, the same 12. Re-pinned directly from the file, not computed:
         #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1265
-        1265: (
+        # 1265 -> 1256 on 2026-09-02 (release/p02-cleanliness, Task 11): -9 lines
+        # compressing four refactor-diary comments above this line (in the
+        # TILED_REG_TILE, TILED_COARSE, TILED_STITCH and SPLIT_CHANNELS blocks) down to
+        # their trap-guarding content -- the measurements and mechanisms stayed, the
+        # "this used to be"/"previously said" framing did not. Composition check:
+        # 1265 - 9 = 1256, and `wc -l conf/modules.config` fell 1352 -> 1343, the same 9.
+        # Re-pinned directly from the file, not computed:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1256
+        # 1256 -> 1260 on 2026-09-03 (release/p08-dapi-overlay, Task 6): +4 lines --
+        # GENERATE_REGISTRATION_QC's memory closure gained a comment explaining why its
+        # tier now sums THREE inputs (registered + native_image + reference).
+        # 1260 -> 1269 at the plan-06 rebase onto dev-with-08 (2026-09-03): +9 more lines
+        # ABOVE this line, in the `withName: 'BASICPY'` block -- a `container = '...'`
+        # digest pin (ruling R6) plus its 8-line rationale comment, added there rather
+        # than in the vendored modules/nf-core/basicpy/main.nf so that file stays
+        # byte-for-byte upstream. Composition: 1256 + 4 + 9 = 1269, and
+        # `wc -l conf/modules.config` rose 1343 -> 1347 -> 1356. Re-pinned directly
+        # from the merged file, not computed:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1269
+        1269: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."
@@ -347,7 +366,9 @@ def test_scan_actually_finds_the_consumers():
     sites = _read_sites()
     files = {str(path.relative_to(ROOT)) for path, _no, _line in sites}
     lines = {(str(path.relative_to(ROOT)), no) for path, no, _line in sites}
-    assert len(sites) >= 4, f"only {len(sites)} read site(s) found -- globs may be stale"
+    assert len(sites) >= 4, (
+        f"only {len(sites)} read site(s) found -- globs may be stale"
+    )
     for expected in ALLOWED_FILES:
         assert expected in files, (
             f"{expected} no longer reads any of the three compartment params "

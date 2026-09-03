@@ -189,21 +189,32 @@ nextflow_workflow {
                 // Preprocessed outputs exist with real data (> 1000 bytes each)
                 { with(workflow.out.preprocessed) {
                     assert size() == 2
-                    get(0).get(1).with { assert it.size() > 1000 }
-                    get(1).get(1).with { assert it.size() > 1000 }
+                    assert file(get(0).get(1)).size() > 1000
+                    assert file(get(1).get(1)).size() > 1000
                 }},
                 // Metadata preserved
-                { with(workflow.out.preprocessed) {
-                    def patient_ids = collect { it[0].patient_id }
+                // Explicit receiver on the collect, NOT `with(...) { collect { ... } }`.
+                // Unqualified, `collect` inside a `with` block does not reach the
+                // delegate List: the closure is handed the WHOLE list as `it`, so
+                // `it[0]` is the first [meta, path] tuple and `.patient_id` spreads over
+                // it, giving `MissingPropertyException ... for java.util.ArrayList,
+                // Reason: No such property: patient_id for class: java.lang.String`.
+                // Measured on nightly runs 33633986188 and 33740335196. `get(n)` in a
+                // `with` block is fine (it is a real List method); it is the Groovy
+                // extension methods that miss. The stub cases in this file already use
+                // the explicit form and are green.
+                {
+                    def patient_ids = workflow.out.preprocessed.collect { it[0].patient_id }
+                    assert patient_ids.size() == 2
                     assert patient_ids.every { it == 'P001' }
-                }},
+                },
                 // Checkpoint CSV exists and has correct structure
                 { with(workflow.out.checkpoint_csv) {
                     assert size() == 1
                     def csv = get(0)
                     assert file(csv).exists()
                     assert file(csv).name == 'preprocessed.csv'
-                    def lines = csv.readLines()
+                    def lines = file(csv).readLines()
                     // Header + at least 2 data rows
                     assert lines.size() >= 3
                     // Validate header columns

@@ -113,11 +113,16 @@ def test_tiled_stitch_stamps_the_configured_scale(tmp_path):
     out = tmp_path / "registered.ome.tiff"
     tiled_stitch.main(
         [
-            "--moving", str(mov),
-            "--manifest", str(man),
-            "--out", str(out),
-            "--out-tile", "16",
-            "--pixel-size", "0.2125",
+            "--moving",
+            str(mov),
+            "--manifest",
+            str(man),
+            "--out",
+            str(out),
+            "--out-tile",
+            "16",
+            "--pixel-size",
+            "0.2125",
         ]
     )
     assert _resolution_um_per_px(out) == pytest.approx(0.2125, rel=1e-6)

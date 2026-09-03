@@ -32,11 +32,19 @@ cleanup() { rm -rf "$(dirname "$WORK")" "$(dirname "$OUT")"; }
 trap cleanup EXIT
 
 echo "baseline run..."
-nextflow -q run . -profile test -stub -w "$WORK" --outdir "$OUT" >/dev/null
+# UNCHECKED USED TO MEAN VACUOUS. A failed baseline (e.g. no `nextflow` on PATH,
+# or a crash before any process runs) previously fell straight through into the
+# resume loop with an EMPTY log: `names` derived from a log that was never
+# produced is empty, the per-name loop below never executes, `status` never
+# leaves 0, and the script prints "OK" having checked nothing. Reproduced with a
+# fake `nextflow` that `exit 1`s: CACHED=0 RESUBMITTED=0 [] ... OK ... exit 0.
+nextflow -q run . -profile test -stub -w "$WORK" --outdir "$OUT" >/dev/null \
+    || { echo "FAIL: baseline run did not complete" >&2; exit 1; }
 
 status=0
 for i in $(seq 1 "$RUNS"); do
-    log=$(nextflow run . -profile test -stub -w "$WORK" --outdir "$OUT" -resume -ansi-log false 2>&1)
+    log=$(nextflow run . -profile test -stub -w "$WORK" --outdir "$OUT" -resume -ansi-log false 2>&1) \
+        || { echo "FAIL: resume $i did not complete" >&2; echo "$log" >&2; exit 1; }
     # `|| cached=0`, not `|| true`: `grep -c` exits 1 to mean ZERO MATCHES, which
     # here is data rather than an error -- a resume that cached nothing is exactly
     # what this script is looking for. Written as the assignment it actually is, so
@@ -45,6 +53,18 @@ for i in $(seq 1 "$RUNS"); do
     rerun=$(grep -c 'Submitted process' <<<"$log") || rerun=0
     names=$(grep 'Submitted process' <<<"$log" | sed 's/.*> //' | sed 's/ (.*//' | sed 's/.*://' | sort -u | tr '\n' ' ')
     echo "resume $i: CACHED=$cached RESUBMITTED=$rerun  [$names]"
+
+    # A resume that completed but cached NOTHING is not a pass by omission: this
+    # pipeline's stub run always has cacheable processes upstream of the two
+    # declared-uncacheable reports, so CACHED=0 on a successful resume means the
+    # cache was never consulted (e.g. a fresh -w, or a hash that changes every
+    # run) rather than that nothing needed re-running.
+    if [[ "$cached" -eq 0 ]]; then
+        echo "  FAIL: resume $i cached nothing (CACHED=0). A successful resume of" >&2
+        echo "        this pipeline can never report CACHED=0 -- either the work" >&2
+        echo "        directory was not actually reused, or every task's hash changed." >&2
+        status=1
+    fi
 
     for n in $names; do
         if [[ ! " ${EXPECTED_UNCACHEABLE[*]} " =~ [[:space:]]${n}[[:space:]] ]]; then

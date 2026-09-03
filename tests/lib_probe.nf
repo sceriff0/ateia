@@ -21,8 +21,504 @@
     APPENDING: later tasks add their own assert blocks under a clearly commented
     section header, following the pattern below. Keep each class's assertions in
     its own banner-delimited section.
+
+    THE workflow{} BLOCK HAS A HARD SIZE CEILING. Nextflow's DSL2 parser captures
+    a top-level workflow{} block's body whole, as a single Groovy string constant,
+    and the JVM class-file format caps any one String constant at 65535 UTF-16
+    code units (org.codehaus.groovy.classgen.ClassCompletionVerifier
+    #checkStringExceedingMaximumLength) -- confirmed empirically 2026-09-02: at
+    60e5a2e the workflow{} block was already 64072 bytes, ~1.4KB below that
+    ceiling, and appending a normally-commented section pushed it over with
+    "String too long. The given string is N Unicode code units long...". A
+    top-level `def` FUNCTION is not subject to this capture -- only the workflow{}
+    block's own text counts against the limit. So a new section with any real
+    amount of prose goes in its own top-level `def checkX() { ... }` function
+    below, called as ONE statement from inside workflow{}; only add assertions
+    directly inline in workflow{} if they are genuinely a one- or two-liner.
 ========================================================================================
 */
+
+/**
+ * ResourceReport — trace-path resolution and the missing-trace diagnostic.
+ * Kept as a top-level function (see the header note above) so its assertions can
+ * carry normal comments without threatening the workflow{} block's size ceiling.
+ */
+def checkResourceReport() {
+
+    // ------------------------------------------------------------------ //
+    // ResourceReport — where the trace file is looked for
+    // ------------------------------------------------------------------ //
+    // Nextflow resolves trace.file (nextflow.config's "${params.trace_dir}/trace.txt")
+    // against launchDir. main.nf's onComplete handler used to hand the RAW param to
+    // cmd.execute(), which resolves against the JVM's working directory instead --
+    // the same thing only when the pipeline happened to be launched from the
+    // directory it runs in. These four assertions pin the resolution rule.
+    assert ResourceReport.tracePath('/abs/trace', '/launch')  == '/abs/trace/trace.txt'
+    assert ResourceReport.tracePath('.trace', '/launch')      == '/launch/.trace/trace.txt'
+    assert ResourceReport.tracePath('./.trace/', '/launch')   == '/launch/.trace/trace.txt'
+    assert ResourceReport.tracePath('a/b', '/launch/')        == '/launch/a/b/trace.txt'
+
+    // A blank trace_dir must throw rather than produce a literal 'null/trace.txt'.
+    def blankTraceDir = false
+    try { ResourceReport.tracePath('  ', '/launch') }
+    catch (IllegalArgumentException ignored) { blankTraceDir = true }
+    assert blankTraceDir : 'ResourceReport.tracePath must reject a blank trace_dir'
+
+    // A relative trace_dir with no launchDir cannot be resolved and must say so,
+    // rather than silently returning the relative path it was given.
+    def blankLaunchDir = false
+    try { ResourceReport.tracePath('.trace', '') }
+    catch (IllegalArgumentException ignored) { blankLaunchDir = true }
+    assert blankLaunchDir : 'ResourceReport.tracePath must reject a relative trace_dir with no launchDir'
+
+    // The diagnostic must NAME the path and state whether tracing was on. A message
+    // that says only "could not generate resource report" leaves an operator with no
+    // way to tell a misconfigured trace_dir from a deliberately disabled trace.
+    def traceOn  = ResourceReport.missingTraceMessage('/launch/.trace/trace.txt', true)
+    def traceOff = ResourceReport.missingTraceMessage('/launch/.trace/trace.txt', false)
+
+    assert traceOn.contains('/launch/.trace/trace.txt')  : 'the ON message must name the path'
+    assert traceOff.contains('/launch/.trace/trace.txt') : 'the OFF message must name the path'
+    assert traceOn  != traceOff : 'the two cases must be distinguishable'
+    assert traceOn.contains('enable_trace')  : 'the ON message must name the parameter'
+    assert traceOff.contains('enable_trace') : 'the OFF message must name the parameter'
+    // No CLI flag form anywhere: Nextflow 26 delivers every --param as a String, so
+    // a message telling an operator to pass one would be advice that cannot work.
+    assert !traceOn.contains('--enable_trace')  : 'must not suggest a CLI boolean'
+    assert !traceOff.contains('--enable_trace') : 'must not suggest a CLI boolean'
+}
+
+/**
+ * ProcessEnvelope — the size-log row and container identity in versions.yml.
+ *
+ * Lives outside `workflow { ... }` deliberately: see "THE WORKFLOW BLOCK HAS A HARD
+ * SIZE CEILING" above. Called once from the workflow block, before the final println.
+ */
+def checkProcessEnvelope() {
+    // ------------------------------------------------------------------ //
+    // ProcessEnvelope — the size-log row
+    // ------------------------------------------------------------------ //
+    // The rendered strings are asserted BYTE FOR BYTE, because they are shell
+    // text that no `-stub` run and no snapshot ever evaluates: `-stub` skips
+    // script: entirely, and the aggregated CSV records only the row's VALUES.
+    // If the `$(`/`${` escaping is wrong here, .command.sh gets the literal
+    // command text instead of a byte count and nothing downstream notices --
+    // the exact failure that shipped once in versions() (see probe()'s comment).
+    assert ProcessEnvelope.SIZE_LOG_COLUMNS == ['process', 'sample_id', 'filename', 'bytes']
+
+    def oneFile = ProcessEnvelope.sizeLog('MIRAGE:PRE:CONVERT_IMAGE', 'P001',
+                                          ['P001_slide.ome.tiff'], 'P001_slide.CONVERT_IMAGE.size.csv')
+    assert oneFile == 'size_bytes=$(stat -L --printf="%s\\n" P001_slide.ome.tiff 2>/dev/null | awk \'{s+=$1} END {print s+0}\')\n' +
+                      'echo "MIRAGE:PRE:CONVERT_IMAGE,P001,P001_slide.ome.tiff,${size_bytes}" > P001_slide.CONVERT_IMAGE.size.csv'
+
+    // A staged path keeps only its BASENAME in the filename column -- `mov/x.ome.tiff`
+    // is stageAs positioning, not part of the file's identity.
+    def staged = ProcessEnvelope.sizeLog('MIRAGE:REG:TILED_STITCH', 'P001',
+                                         ['mov/x.ome.tiff'], 'P001.TILED_STITCH.size.csv')
+    assert staged.contains('MIRAGE:REG:TILED_STITCH,P001,x.ome.tiff,${size_bytes}')
+    assert staged.contains('stat -L --printf="%s\\n" mov/x.ome.tiff ')
+
+    // More than one path -> the literal `inputs/`, and every path is stat'ed in ONE call.
+    def many = ProcessEnvelope.sizeLog('MIRAGE:REG:REGISTER', 'P001',
+                                       ['ref/*', 'input_*/*'], 'P001.REGISTER.size.csv')
+    assert many.contains('stat -L --printf="%s\\n" ref/* input_*/* 2>/dev/null')
+    assert many.contains('MIRAGE:REG:REGISTER,P001,inputs/,${size_bytes}')
+
+    // A SOLE path that is a glob is `inputs/` too: a glob is by construction more
+    // than one path, so naming it after its own wildcard ('*') would be a lie.
+    def glob = ProcessEnvelope.sizeLog('MIRAGE:POST:MERGE_AND_PYRAMID', 'P001',
+                                       ['channels/*'], 'P001.MERGE_AND_PYRAMID.size.csv')
+    assert glob.contains('MIRAGE:POST:MERGE_AND_PYRAMID,P001,inputs/,${size_bytes}')
+
+    // The stub row carries the SAME process name as the real row. That is the whole
+    // point: `STUB` as a process name made a stub CSV structurally incomparable with
+    // a real one, and bin/generate_resource_report.py had to special-case it.
+    assert ProcessEnvelope.sizeLogStub('MIRAGE:PRE:CONVERT_IMAGE', 'P001', 'P001_slide.CONVERT_IMAGE.size.csv') ==
+           'echo "MIRAGE:PRE:CONVERT_IMAGE,P001,stub,0" > P001_slide.CONVERT_IMAGE.size.csv'
+
+    // An empty path list is a caller bug, not an empty measurement: `stat` with no
+    // operands would report 0 bytes for a task that certainly read something.
+    def noPaths = false
+    try { ProcessEnvelope.sizeLog('P', 'S', [], 'x.size.csv') }
+    catch (IllegalArgumentException ignored) { noPaths = true }
+    assert noPaths : 'ProcessEnvelope.sizeLog must reject an empty shellPaths list'
+
+    // ------------------------------------------------------------------ //
+    // ProcessEnvelope — container identity in versions.yml
+    // ------------------------------------------------------------------ //
+    // WHY versions.yml AND NOT THE TRACE. The trace records what Nextflow was told
+    // to run; versions.yml is what the RUN ITSELF reports, and it is the artifact
+    // that ships with the results. Ruling R6 makes the image a first-class part of
+    // 1.0.0's reproducibility claim, and an image tag in this repo is descriptive
+    // (:preprocess, :tiled), not immutable -- so "which image produced this" is a
+    // question the outputs must answer for themselves.
+    def withContainer = ProcessEnvelope.versions('MIRAGE:POST:MERGE_AND_PYRAMID',
+                                                 ['tifffile'], 'bolt3x/mirage-merge:1.0.0')
+    def containerLines = withContainer.readLines()
+    assert containerLines[0] == 'cat <<-END_VERSIONS > versions.yml'
+    assert containerLines[1] == '"MIRAGE:POST:MERGE_AND_PYRAMID":'
+    assert containerLines[2].startsWith('    python: $(python --version')
+    // Immediately after python:, before the tool probes -- the position is asserted,
+    // not just the presence, because bin/generate_qc_report.py renders the block in
+    // file order into a published table.
+    assert containerLines[3] == '    container: bolt3x/mirage-merge:1.0.0'
+    assert containerLines[4].startsWith('    tifffile: $(python -c ')
+
+    // A null container renders NO line: an absent container must not become the
+    // string 'null' in a published report.
+    assert !ProcessEnvelope.versions('P', ['tifffile'], null).contains('container:')
+    assert !ProcessEnvelope.versions('P', ['tifffile']).contains('container:')
+
+    // The stub reports `stub`, never the real image name: a stub run produced no
+    // evidence about any image, and claiming one would be a fabricated provenance
+    // record in exactly the artifact that exists to carry provenance.
+    def stubContainer = ProcessEnvelope.versionsStub('MIRAGE:POST:MERGE_AND_PYRAMID',
+                                                     ['tifffile'], 'bolt3x/mirage-merge:1.0.0')
+    assert stubContainer.readLines()[3] == '    container: stub'
+    assert !stubContainer.contains('bolt3x')
+
+    // The bash-only pair, for a module with no Python interpreter at all.
+    // AGGREGATE_SIZE_LOGS runs in bolt3x/mirage-preprocess:1.0.0; routing it through
+    // versions() would run `python --version 2>&1` and write the SHELL'S ERROR MESSAGE
+    // ("bash: python: command not found") into a published report as a version
+    // number, because that heredoc pipes stderr into the value.
+    def bashVersions = ProcessEnvelope.versionsBash('MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS', 'bolt3x/mirage-preprocess:1.0.0')
+    assert bashVersions.readLines() == [
+        'cat <<-END_VERSIONS > versions.yml',
+        '"MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS":',
+        '    bash: $(bash --version | head -n1 | sed \'s/GNU bash, version //\')',
+        '    container: bolt3x/mirage-preprocess:1.0.0',
+        'END_VERSIONS',
+    ]
+    assert !bashVersions.contains('python:')
+    def bashStub = ProcessEnvelope.versionsBashStub('MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS', 'bolt3x/mirage-preprocess:1.0.0')
+    assert bashStub.readLines() == [
+        'cat <<-END_VERSIONS > versions.yml',
+        '"MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS":',
+        '    bash: stub',
+        '    container: stub',
+        'END_VERSIONS',
+    ]
+}
+
+/**
+ * RegisteredMatch — pairing VALIS's outputs back to their slide metas.
+ *
+ * Lives outside `workflow { ... }` deliberately: see "THE WORKFLOW BLOCK HAS A HARD
+ * SIZE CEILING" above. Called once from the workflow block, before the final println.
+ */
+def checkRegisteredMatch() {
+    // ------------------------------------------------------------------ //
+    // RegisteredMatch — pairing VALIS's outputs back to their slide metas
+    // ------------------------------------------------------------------ //
+    // WHY BY CHANNEL SIGNATURE AND NOT BY FILENAME. VALIS renames its outputs; the
+    // only thing carried through registration that identifies a slide is its OME
+    // channel set, which bin/create_channels_manifest.py writes out as
+    // filename -> [channel names]. Getting this wrong does not fail -- it silently
+    // attaches the wrong patient's metadata to a registered image.
+    assert RegisteredMatch.signature(['PANCK', 'dapi', 'CD3']) == 'cd3|dapi|panck'
+    // Lower-case FIRST, then sort: 'CD3' and 'cd3' must land in the same place.
+    assert RegisteredMatch.signature(['cd3', 'DAPI']) == RegisteredMatch.signature(['CD3', 'dapi'])
+
+    // toSorted(), never sort(): meta.channels is a SHARED List reference across
+    // every meta built with `meta + [k: v]` (Map.plus is a SHALLOW clone), so an
+    // in-place sort here would silently reorder a sibling meta's channel list --
+    // and channel ORDER is what --dapi-channel and the pyramid writer index on.
+    def sharedChannels = ['PANCK', 'DAPI']
+    RegisteredMatch.signature(sharedChannels)
+    assert sharedChannels == ['PANCK', 'DAPI'] : 'RegisteredMatch.signature must not mutate its argument'
+
+    def refMeta = [patient_id: 'P1', id: 'P1_ref', channels: ['DAPI', 'PANCK', 'SMA']]
+    def movMeta = [patient_id: 'P1', id: 'P1_mov', channels: ['DAPI', 'CD3']]
+    def refFile = file('/tmp/P1_DAPI_PANCK_SMA_registered.ome.tiff')
+    def movFile = file('/tmp/P1_DAPI_CD3_registered.ome.tiff')
+    def manifest = [
+        'P1_DAPI_PANCK_SMA_registered.ome.tiff': ['DAPI', 'PANCK', 'SMA'],
+        'P1_DAPI_CD3_registered.ome.tiff'      : ['CD3', 'DAPI'],
+    ]
+
+    // Files deliberately in the OPPOSITE order to metas: the pairing is by
+    // signature, and the RESULT is in metas order.
+    def paired = RegisteredMatch.pair([refMeta, movMeta], [movFile, refFile], manifest)
+    assert paired.size() == 2
+    assert paired[0][0].id == 'P1_ref'
+    assert paired[0][1].name == 'P1_DAPI_PANCK_SMA_registered.ome.tiff'
+    assert paired[1][0].id == 'P1_mov'
+    assert paired[1][1].name == 'P1_DAPI_CD3_registered.ome.tiff'
+
+    // The manifest's channel ORDER is irrelevant -- it comes from OME-XML, the meta's
+    // comes from the samplesheet, and neither is authoritative over the other.
+    def reordered = RegisteredMatch.pair([movMeta], [movFile],
+                                         ['P1_DAPI_CD3_registered.ome.tiff': ['DAPI', 'CD3']])
+    assert reordered[0][1].name == 'P1_DAPI_CD3_registered.ome.tiff'
+
+    // Exception 1: count mismatch. VALIS returning fewer files than slides is a
+    // partial failure, and pairing what arrived would publish a short run as a
+    // complete one.
+    def countMismatch = ''
+    try { RegisteredMatch.pair([refMeta, movMeta], [refFile], manifest) }
+    catch (IllegalStateException e) { countMismatch = e.message }
+    assert countMismatch.startsWith('RegisteredMatch: count mismatch') : "got: ${countMismatch}"
+
+    // Exception 1b: count mismatch where one meta's channels is null. Building the
+    // diagnostic itself must not throw IllegalArgumentException from signature() --
+    // that would replace "count mismatch" with a confusing "channels is null".
+    def nullChannelsMeta = [patient_id: 'P1', id: 'P1_null', channels: null]
+    def countMismatchNullChannels = ''
+    try { RegisteredMatch.pair([refMeta, nullChannelsMeta], [refFile], manifest) }
+    catch (IllegalStateException e) { countMismatchNullChannels = e.message }
+    assert countMismatchNullChannels.startsWith('RegisteredMatch: count mismatch') : "got: ${countMismatchNullChannels}"
+
+    // Exception 2: duplicate signature. Two slides with the same channel set are
+    // indistinguishable to this rule, and a map keyed on the signature would
+    // silently keep only the last one.
+    def dupMeta = [patient_id: 'P1', id: 'P1_dup', channels: ['PANCK', 'DAPI', 'SMA']]
+    def dupSig = ''
+    try { RegisteredMatch.pair([refMeta, dupMeta], [refFile, movFile], manifest) }
+    catch (IllegalStateException e) { dupSig = e.message }
+    assert dupSig.startsWith('RegisteredMatch: duplicate signature') : "got: ${dupSig}"
+
+    // Exception 3a: a registered file the manifest says nothing about.
+    def noManifestEntry = ''
+    try { RegisteredMatch.pair([refMeta], [refFile], [:]) }
+    catch (IllegalStateException e) { noManifestEntry = e.message }
+    assert noManifestEntry.startsWith('RegisteredMatch: unmatched') : "got: ${noManifestEntry}"
+    // Distinguish 3a from 3b by message substring, not merely by shared prefix -- see
+    // lib/RegisteredMatch.groovy's two distinct 'unmatched' throw sites.
+    assert noManifestEntry.contains('the channels manifest has no entry for') : "3a message: ${noManifestEntry}"
+
+    // Exception 3b: a meta whose channel set no registered file carries.
+    def noFileForMeta = ''
+    try {
+        RegisteredMatch.pair([refMeta], [refFile],
+                             ['P1_DAPI_PANCK_SMA_registered.ome.tiff': ['CD8', 'FOXP3']])
+    }
+    catch (IllegalStateException e) { noFileForMeta = e.message }
+    assert noFileForMeta.startsWith('RegisteredMatch: unmatched') : "got: ${noFileForMeta}"
+    assert noFileForMeta.contains('no registered file carries the channel') : "3b message: ${noFileForMeta}"
+
+    // Exception 3c: a duplicate FILE signature (as opposed to 3b's duplicate META
+    // signature, already rejected earlier). refMeta and movMeta have DISTINCT
+    // signatures, so the meta-side duplicate check does not fire -- but both
+    // manifest entries below name refMeta's channel set, so fileBySignature
+    // collapses them to one map slot and movFile's entry is overwritten. This is
+    // the third behaviour change documented in lib/RegisteredMatch.groovy's
+    // docstring: the old closure would have silently paired the surviving file to
+    // both metas, whereas here movMeta's signature has no file left and the
+    // "unmatched" throw below is fatal.
+    def dupFileSig = ''
+    try {
+        RegisteredMatch.pair([refMeta, movMeta], [refFile, movFile],
+                             ['P1_DAPI_PANCK_SMA_registered.ome.tiff': ['DAPI', 'PANCK', 'SMA'],
+                              'P1_DAPI_CD3_registered.ome.tiff'      : ['DAPI', 'PANCK', 'SMA']])
+    }
+    catch (IllegalStateException e) { dupFileSig = e.message }
+    assert dupFileSig.startsWith('RegisteredMatch: unmatched') : "got: ${dupFileSig}"
+}
+
+/**
+ * Checkpoint — requireColumns, the drift guard three readers copied.
+ *
+ * Lives outside `workflow { ... }` deliberately: see "THE WORKFLOW BLOCK HAS A HARD
+ * SIZE CEILING" above. Called once from the workflow block, before the final println.
+ */
+def checkCheckpoint() {
+    // ------------------------------------------------------------------ //
+    // Checkpoint — requireColumns, the drift guard three readers copied
+    // ------------------------------------------------------------------ //
+    // Three readers each carried a hand-copied 7-line `.each { col -> if (!(col in
+    // Checkpoint.columns(...))) throw ... }` block: add_cycle.nf twice and
+    // segmentation.nf once. Three copies of one rule, each free to word its message
+    // differently and to fall behind. This is that rule, once.
+    //
+    // `assert cond : 'msg'`, never `assert cond, 'msg'`, and `closure.call(x)`, never
+    // `closure(x)` — the second spelling of each does not parse under Nextflow 26 and
+    // silently skipped every assertion in this file in CI's latest-everything leg.
+    // Guarded by tests/test_lib_probe_parses_on_nf26.py.
+
+    // The satisfied case returns quietly.
+    Checkpoint.requireColumns('registered', ['patient_id', 'registered_image', 'channels'])
+    Checkpoint.requireColumns('postprocessed', ['patient_id', 'merged_csv', 'cell_mask', 'pyramid'])
+
+    // A column the step does not declare must throw, and the message must name BOTH the
+    // missing column and what IS declared — a reader that indexes a column the writer
+    // stopped emitting reads an empty field, which is a path that does not resolve.
+    def missingCol = false
+    def missingColMsg = ''
+    try {
+        Checkpoint.requireColumns('registered', ['patient_id', 'no_such_column'])
+    } catch (IllegalStateException e) {
+        missingCol = true
+        missingColMsg = e.message
+    }
+    assert missingCol : 'Checkpoint.requireColumns must reject a column the step does not declare'
+    assert missingColMsg.contains('no_such_column') : 'the message must name the missing column'
+    assert missingColMsg.contains('registered') : 'the message must name the step'
+    assert missingColMsg.contains('patient_id') : 'the message must list the declared columns'
+
+    // Every missing column at once, not just the first: a reader that lost two columns
+    // should learn both in one run rather than one per edit-and-rerun cycle.
+    def bothNamed = ''
+    try {
+        Checkpoint.requireColumns('registered', ['alpha_gone', 'beta_gone'])
+    } catch (IllegalStateException e) {
+        bothNamed = e.message
+    }
+    assert bothNamed.contains('alpha_gone') && bothNamed.contains('beta_gone') :
+        'Checkpoint.requireColumns must name every missing column, not only the first'
+
+    // An unknown STEP is Checkpoint's own exception type, not the missing-column one:
+    // a caller can tell "this schema changed" from "this step never existed".
+    def badCkptStep = false
+    try { Checkpoint.requireColumns('nonsense', ['patient_id']) }
+    catch (Checkpoint.UnknownStepException ignored) { badCkptStep = true }
+    assert badCkptStep : 'Checkpoint.requireColumns must reject an unknown step'
+
+    // An empty request is a caller that checks nothing, which is worse than no call at
+    // all — it reads as covered.
+    def emptyCols = false
+    try { Checkpoint.requireColumns('registered', []) }
+    catch (IllegalArgumentException ignored) { emptyCols = true }
+    assert emptyCols : 'Checkpoint.requireColumns must reject an empty column list'
+}
+
+/**
+ * RegBackends — the registration backend's identity, in one table.
+ *
+ * Lives outside `workflow { ... }` deliberately: see "THE WORKFLOW BLOCK HAS A HARD
+ * SIZE CEILING" above. Called once from the workflow block, before the final println.
+ *
+ * The method name was re-decided in five places: nextflow_schema.json's
+ * registration_method enum, workflows/mirage.nf's add_cycle allowlist,
+ * register_patient.nf's three-arm dispatch, seg_qc.nf's join-shape branch, and
+ * lib/WarpBackends.groovy's own two-key map. Adding a backend meant finding all
+ * five; missing one was silent, and the silence had a direction -- the
+ * register_patient dispatch used to read `if (tiled) ... else VALIS`, so a method
+ * the schema gained but that file did not know about registered with VALIS and
+ * REPORTED SUCCESS. A whole benchmark arm would have measured VALIS twice under
+ * two labels.
+ */
+def checkRegBackends() {
+    assert RegBackends.methods() == ['valis', 'tiled'] :
+        'RegBackends.methods() must be the BACKENDS keys in declaration order'
+
+    // The adapter each method dispatches to. A String, not a workflow reference: a
+    // Nextflow workflow cannot be invoked by name out of a map, so register_patient.nf
+    // keeps a two-arm `if` -- what this replaces is the DECISION, not the call.
+    assert RegBackends.of('valis').adapter == 'VALIS_ADAPTER'
+    assert RegBackends.of('tiled').adapter == 'TILED_ADAPTER'
+
+    // The seg-QC join shape. VALIS produces ONE registrar pickle per patient; the
+    // tiled backend produces one transform manifest per moving SLIDE. seg_qc.nf branches
+    // on this rather than on the method name, so a third backend has to DECLARE which of
+    // the two shapes it has instead of silently inheriting one by falling through.
+    assert RegBackends.segQcJoin('valis') == 'per_patient'
+    assert RegBackends.segQcJoin('tiled') == 'per_slide'
+
+    // The optional emits, as a null-object contract: an adapter for a method that
+    // produces no TRE, or no pre-micro checkpoint, emits Channel.empty() and consumers
+    // tolerate zero artifacts. Recorded here so a third backend answers both questions
+    // in the table rather than in a consumer's if-chain.
+    assert RegBackends.of('valis').hasStageCheckpoint
+    assert !RegBackends.of('valis').hasIntrinsicTre
+    assert !RegBackends.of('tiled').hasStageCheckpoint
+    assert RegBackends.of('tiled').hasIntrinsicTre
+
+    // Which run modes each backend supports. add_cycle re-registers the new cycle
+    // through the classic VALIS adapter only.
+    assert RegBackends.supportsMode('valis', 'linear') :
+        'valis must support the linear (default registration) run mode'
+    assert RegBackends.supportsMode('valis', 'add_cycle') :
+        'valis must support add_cycle -- it is the only backend add_cycle re-registers through'
+    assert RegBackends.supportsMode('tiled', 'linear') :
+        'tiled must support the linear (default registration) run mode'
+    assert !RegBackends.supportsMode('tiled', 'add_cycle') :
+        'tiled must NOT support add_cycle -- workflows/mirage.nf rejects it at launch'
+
+    // An unknown method throws, and the message names the valid ones. This is the
+    // property that makes the dispatch's fall-through loud instead of a silent VALIS.
+    def badRegMethod = false
+    def badRegMsg = ''
+    try { RegBackends.of('ashlar') }
+    catch (IllegalArgumentException e) { badRegMethod = true; badRegMsg = e.message }
+    assert badRegMethod : 'RegBackends.of must reject an unknown method'
+    assert badRegMsg.contains('ashlar') : 'the message must name what was asked for'
+    assert badRegMsg.contains('valis') && badRegMsg.contains('tiled') :
+        'the message must list the valid methods'
+
+    // supportsMode and segQcJoin go through of(), so they reject the same way rather
+    // than answering false/null for a name that does not exist -- a false here reads as
+    // "that backend does not support add_cycle", which is a different statement.
+    def badModeLookup = false
+    try { RegBackends.supportsMode('ashlar', 'linear') }
+    catch (IllegalArgumentException ignored) { badModeLookup = true }
+    assert badModeLookup : 'RegBackends.supportsMode must reject an unknown method'
+
+    def badJoinLookup = false
+    try { RegBackends.segQcJoin('ashlar') }
+    catch (IllegalArgumentException ignored) { badJoinLookup = true }
+    assert badJoinLookup : 'RegBackends.segQcJoin must reject an unknown method'
+
+    // The two backend tables must agree on WHICH backends exist. WarpBackends keys the
+    // reg_qc=2 warp; RegBackends keys the registration itself. A method in one and not
+    // the other is a run that registers and then cannot be scored, or vice versa.
+    assert RegBackends.methods().toSorted() == WarpBackends.methods().toSorted() :
+        'RegBackends and WarpBackends declare different backend sets'
+
+    // ... and on which WARP each method uses, which is the one field they share.
+    RegBackends.methods().each { m ->
+        assert RegBackends.of(m).warp == m :
+            "RegBackends.of('${m}').warp must name the WarpBackends key for that method"
+        assert WarpBackends.of(RegBackends.of(m).warp) != null
+    }
+
+    // The table is immutable: a caller mutating it would silently rewrite every later
+    // lookup in the run.
+    def regTableImmutable = false
+    try { RegBackends.BACKENDS.put('ashlar', [:]) }
+    catch (UnsupportedOperationException ignored) { regTableImmutable = true }
+    assert regTableImmutable : 'RegBackends.BACKENDS must be immutable'
+}
+
+// CsvUtils.unknownColumns — report, never reject. Out-of-band like the other
+// check*() functions above: the workflow{} block is already within ~160 bytes
+// of DSL2's 65535-UTF-16-code-unit single-String-constant ceiling (see the file
+// header note), so a new assertion block cannot be inlined there.
+def checkCsvUtilsUnknownColumns() {
+    def unkCsv = File.createTempFile('unknowncols', '.csv')
+    unkCsv.text = '''patient_id,path_to_file,is_reference,channels,operator,scan_date
+P1,/x/a.tiff,true,DAPI|CD3,AB,2026-01-31
+'''
+    assert CsvUtils.unknownColumns(unkCsv.path, 'preprocessing') == ['operator', 'scan_date'] :
+        'unknownColumns must report the unknown columns in header order'
+
+    // A legitimate CHECKPOINT header must warn about nothing: a csv/registered.csv
+    // read by --start segmentation carries id and pixel_size beyond that step's
+    // four required columns. Rejecting -- or even warning about -- those would make
+    // every re-entry noisy, which is how a real warning stops being read.
+    def ckptCsv = File.createTempFile('ckptcols', '.csv')
+    ckptCsv.text = '''patient_id,id,registered_image,is_reference,channels,pixel_size
+P1,P1_ref,/x/a.tiff,true,DAPI|CD3,0.325
+'''
+    assert CsvUtils.unknownColumns(ckptCsv.path, 'segmentation') == [] :
+        'a legitimate checkpoint header must produce no unknown columns'
+
+    // The typo case this exists for: `channles` is unknown, and `channels` being
+    // absent is validateInputCSV's job -- two different messages for two different
+    // mistakes.
+    def typoCsv = File.createTempFile('typocols', '.csv')
+    typoCsv.text = '''patient_id,path_to_file,is_reference,channles
+P1,/x/a.tiff,true,DAPI|CD3
+'''
+    assert CsvUtils.unknownColumns(typoCsv.path, 'preprocessing') == ['channles'] :
+        'unknownColumns must name a mistyped column'
+
+    // An empty file is not a crash: validateInputCSV owns that error.
+    def emptyCsv = File.createTempFile('emptycols', '.csv')
+    emptyCsv.text = ''
+    assert CsvUtils.unknownColumns(emptyCsv.path, 'preprocessing') == [] :
+        'unknownColumns must tolerate an empty file rather than throwing over it'
+}
 
 workflow {
 
@@ -687,7 +1183,7 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     // tool and that no real run ever emits. `-stub` never evaluates script:, so nothing
     // in the blocking gate could see the two key sets were disjoint.
     assert SegBackends.methods().toSorted() == ['cellsam', 'instantseg', 'stardist']
-    assert SegBackends.of('stardist').versionTools   == ['deepcell', 'tensorflow']
+    assert SegBackends.of('stardist').versionTools   == ['tensorflow']
     assert SegBackends.of('instantseg').versionTools == ['instanseg', 'torch']
     assert SegBackends.of('cellsam').versionTools    == ['cellSAM', 'torch']
 
@@ -719,7 +1215,8 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     // WarpBackends — one seam for the reg_qc=2 warp
     // ------------------------------------------------------------------ //
     assert WarpBackends.methods().toSorted() == ['tiled', 'valis']
-    assert WarpBackends.container('valis') == 'cdgatenbee/valis-wsi:1.0.0'
+    // Digest-pinned (ruling R6): no tag, see tests/test_base_images_are_digest_pinned.py.
+    assert WarpBackends.container('valis') == 'cdgatenbee/valis-wsi@sha256:eac27cc599ae0e54aa01c1bef97538301994ce1abd4da44be3f3130ab85a40e6'
     assert WarpBackends.container('tiled') == 'bolt3x/mirage-tiled:1.0.0'
     assert WarpBackends.of('valis').stages == ['native', 'rigid', 'non_rigid', 'micro']
     assert WarpBackends.of('tiled').stages == ['native', 'rigid', 'refined']
@@ -1028,6 +1525,34 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     try { Meta.fromCheckpointRow([patient_id: 'P1', id: 'x'], '  ', [:]) }
     catch (IllegalArgumentException ignored) { blankStep = true }
     assert blankStep : 'Meta.fromCheckpointRow must reject a blank step'
+
+    // ------------------------------------------------------------------ //
+    // ResourceReport — see checkResourceReport() above workflow{}; kept out of
+    // this block because it is close to the JVM class-file string-constant
+    // ceiling (see the file header note above).
+    // ------------------------------------------------------------------ //
+    checkResourceReport()
+
+    // ProcessEnvelope — size-log row + container identity in versions.yml.
+    // See checkProcessEnvelope() above the workflow block, and the header
+    // comment's "HARD SIZE CEILING" note for why it lives outside this block.
+    checkProcessEnvelope()
+
+    // RegisteredMatch — pairing VALIS's outputs back to their slide metas.
+    // See checkRegisteredMatch() above the workflow block.
+    checkRegisteredMatch()
+
+    // Checkpoint.requireColumns — the drift guard three readers copied.
+    // See checkCheckpoint() above the workflow block.
+    checkCheckpoint()
+
+    // RegBackends — the registration backend's identity, in one table.
+    // See checkRegBackends() above the workflow block.
+    checkRegBackends()
+
+    // CsvUtils.unknownColumns — report, never reject.
+    // See checkCsvUtilsUnknownColumns() above the workflow block.
+    checkCsvUtilsUnknownColumns()
 
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info

@@ -31,6 +31,7 @@ tests/checkpoint_manifest.nf.test's mode=add_cycle case asserts the resulting
 files exist and that every path in them resolves; the two together are the
 evidence.
 """
+
 import re
 from pathlib import Path
 
@@ -82,14 +83,21 @@ def _reachable_from(entry: Path):
     return seen
 
 
+# `CHECKPOINT_WRITER(Layout.<CONST>, ...)` -- the call that commits a file to writing a
+# given manifest. Before subworkflows/local/checkpoint_writer.nf existed this was found
+# by looking for a `collectFile(` and a `Layout.checkpointCsvName(Layout.<CONST>)` in the
+# SAME file, because every writer carried both. Now exactly one file carries the
+# collectFile and it takes the step as a parameter, so what identifies a writer is the
+# call site that names the step.
+_CKPT_CALL = re.compile(r"CHECKPOINT_WRITER\s*\(\s*Layout\.(\w+)")
+
+
 def _writers():
-    """constant name -> the .nf files that collectFile() a manifest for it."""
+    """constant name -> the .nf files that commission a manifest for it."""
     out = {}
     for f in sorted(ROOT.rglob("*.nf")):
         src = strip_comments(f.read_text())
-        if "collectFile(" not in src:
-            continue
-        for const in re.findall(r"Layout\.checkpointCsvName\(Layout\.(\w+)\)", src):
+        for const in _CKPT_CALL.findall(src):
             out.setdefault(const, set()).add(f.resolve())
     return out
 
@@ -110,8 +118,8 @@ def test_add_cycle_writes_every_checkpoint_a_follow_on_cycle_requires():
             )
     assert not missing, "\n".join(missing) + (
         "\n\nMake the writer mode-independent and call it from add_cycle.nf -- "
-        "see subworkflows/local/registered_checkpoint.nf and "
-        "postprocessed_checkpoint.nf, which exist for exactly this."
+        "see subworkflows/local/register_patient.nf and postprocessed_checkpoint.nf, "
+        "which call CHECKPOINT_WRITER for exactly this reason."
     )
 
 
@@ -141,18 +149,26 @@ def test_the_scan_is_not_vacuous():
         f"include regex is stale, not the pipeline"
     )
     writers = _writers()
-    assert writers, "no checkpoint writers found anywhere -- the collectFile scan is stale"
+    assert writers, (
+        "no checkpoint writers found anywhere -- the collectFile scan is stale"
+    )
     # And the transitive walk really is transitive: add_cycle.nf does not include
-    # registered_checkpoint.nf directly. If this stops holding, the walk has
-    # silently become one-level and would report a false pass.
+    # checkpoint_writer.nf directly -- it reaches it through REGISTER_PATIENT and
+    # through POSTPROCESSED_CHECKPOINT, both of which it does include. If this stops
+    # holding, the walk has silently become one-level and would report a false pass.
+    # (The anchor used to be registered_checkpoint.nf, which was deleted once the write
+    # moved into checkpoint_writer.nf and it had nothing left to own.)
     direct = {
-        (SUBWORKFLOWS / "add_cycle.nf").parent.joinpath(rel).resolve().with_suffix(".nf")
+        (SUBWORKFLOWS / "add_cycle.nf")
+        .parent.joinpath(rel)
+        .resolve()
+        .with_suffix(".nf")
         for rel in _INCLUDE.findall(
             strip_comments((SUBWORKFLOWS / "add_cycle.nf").read_text())
         )
     }
-    reg_writer = (SUBWORKFLOWS / "registered_checkpoint.nf").resolve()
-    assert reg_writer not in direct and reg_writer in reachable, (
-        "registered_checkpoint.nf is now a DIRECT include of add_cycle.nf, so the "
+    ckpt_writer = (SUBWORKFLOWS / "checkpoint_writer.nf").resolve()
+    assert ckpt_writer not in direct and ckpt_writer in reachable, (
+        "checkpoint_writer.nf is now a DIRECT include of add_cycle.nf, so the "
         "transitive walk is no longer exercised by this repo's own layout"
     )

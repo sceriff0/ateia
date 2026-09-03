@@ -30,6 +30,7 @@ Two properties are asserted here:
      is. The review's requirement is that 'ignore' stops being a default that
      nobody chose and becomes a decision someone has to write down.
 """
+
 import re
 
 from tests.nfmodel import block_extent, strip_comments, with_name_blocks
@@ -38,8 +39,22 @@ from tests.nfmodel import block_extent, strip_comments, with_name_blocks
 # ConfigObject and throws only when the closure RUNS -- which is why this is a
 # static guard and not something a green pipeline run would have caught.
 BOUND = {
-    "task", "params", "workflow", "meta", "Math", "System", "it", "file",
-    "true", "false", "null", "def", "return", "if", "else", "in",
+    "task",
+    "params",
+    "workflow",
+    "meta",
+    "Math",
+    "System",
+    "it",
+    "file",
+    "true",
+    "false",
+    "null",
+    "def",
+    "return",
+    "if",
+    "else",
+    "in",
 }
 
 _IDENT = re.compile(r"\b([a-zA-Z_]\w*)\s*\.")
@@ -55,16 +70,14 @@ _IDENT = re.compile(r"\b([a-zA-Z_]\w*)\s*\.")
 # selector on attempt 1.
 CANONICAL = {
     # retry-then-fail: signals are transient, anything else is a real bug.
-    "retry-then-fail":
-        "task.exitStatus in ((130..145) + 104) && task.attempt <= 3 "
-        "? 'retry' : 'finish'",
+    "retry-then-fail": "task.exitStatus in ((130..145) + 104) && task.attempt <= 3 "
+    "? 'retry' : 'finish'",
     # retry-exit1-then-fail: this process's known-transient failures surface as
     # a plain exit 1 (VALIS tile reads, a JVM OOM inside a wrapper that exits
     # 1), so the cause selector cannot be narrowed to signals. The artifact is
     # still required, so the terminal branch fails the run.
-    "retry-exit1-then-fail":
-        "task.exitStatus in [1, 104, 134, 135, 137, 139, 140, 143] "
-        "? 'retry' : 'finish'",
+    "retry-exit1-then-fail": "task.exitStatus in [1, 104, 134, 135, 137, 139, 140, 143] "
+    "? 'retry' : 'finish'",
     # retry-then-drop: the artifact is optional; losing it degrades QC only.
     # Retries regardless of cause -- the common failure IS resource exhaustion
     # and the memory ramp is what fixes it.
@@ -105,8 +118,8 @@ def _error_strategy_closures():
             yield (
                 block.selector,
                 block.start_line,
-                block.body[start:end - 1],
-                commentless[start:end - 1],
+                block.body[start : end - 1],
+                commentless[start : end - 1],
             )
 
 

@@ -111,7 +111,7 @@ nextflow_process {
         }
     }
 
-    test("Should emit versions.yml with tifffile/aicsimageio - stub") {
+    test("Should emit versions.yml with tifffile/bioio - stub") {
 
         tag "stub"
         options "-stub"
@@ -238,11 +238,18 @@ nextflow_process {
                 { assert process.out.ome_tiff.get(0).get(0).is_reference == true },
                 { assert process.out.ome_tiff.get(0).get(0).channels == ['DAPI', 'PANCK', 'SMA'] },
                 // OME-TIFF output is non-trivial
-                { assert process.out.ome_tiff.get(0).get(1).size() > 1000 },
-                // channels.txt content matches expected channel names
+                { assert file(process.out.ome_tiff.get(0).get(1)).size() > 1000 },
+                // channels.txt content matches expected channel names. COMMA-separated:
+                // bin/convert_image.py:658 writes `",".join(output_channels)` and the
+                // stub block writes `meta.channels.join(',')`, so both paths agree. This
+                // asserted newline-separated and could not have been observed failing --
+                // `.text` on the unwrapped output threw MissingPropertyException first
+                // (family 4), which is what hid it. Not to be confused with
+                // tests/testdata/sample_channels.txt / expected/channels_3ch.txt, which
+                // are one-per-line and belong to a different artifact.
                 {
-                    def channelsContent = process.out.ome_tiff.get(0).get(2).text.trim()
-                    assert channelsContent == "DAPI\nPANCK\nSMA"
+                    def channelsContent = file(process.out.ome_tiff.get(0).get(2)).text.trim()
+                    assert channelsContent == 'DAPI,PANCK,SMA'
                 }
             )
         }

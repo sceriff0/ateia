@@ -107,4 +107,4 @@ def test_the_output_tuple_is_darkfield_then_flatfield():
         'tuple val(meta), path("*-dfp.ome.tif"), path("*-ffp.ome.tif"), emit: profiles'
         in text
     )
-    assert text.index('*-dfp.ome.tif') < text.index('*-ffp.ome.tif')
+    assert text.index("*-dfp.ome.tif") < text.index("*-ffp.ome.tif")

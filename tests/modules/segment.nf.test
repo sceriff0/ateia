@@ -63,12 +63,14 @@ nextflow_process {
             // through ProcessEnvelope from SegBackends' one `versionTools` list, so this
             // stub run is direct evidence about what a REAL run reports.
             with(path(process.out.versions.get(0)).text) {
-                assert contains('deepcell: stub')
                 assert contains('tensorflow: stub')
                 assert contains('python: stub')
-                // The old hand-written key, and the OTHER backends' tools: a stub that
-                // names either is reporting a stack this task never loaded.
+                // The old hand-written key, `deepcell` (a phantom -- no image installs
+                // it, and it was removed from SegBackends' versionTools 2026-09-02), and
+                // the OTHER backends' tools: a stub that names any of these is reporting
+                // a stack this task never loaded.
                 assert !contains('seg_method')
+                assert !contains('deepcell')
                 assert !contains('torch')
                 assert !contains('instanseg')
                 assert !contains('cellSAM')
@@ -111,6 +113,18 @@ nextflow_process {
         tag "real"
         tag "slow"
 
+        // Segments P001_seg_nuclei.ome.tiff, NOT the P001_ref.ome.tiff the rest of
+        // this file uses. P001_ref's DAPI channel is 40 gaussian blobs of radius
+        // 6-13 packed into 128x128 and merged with np.maximum: measured on the
+        // generated file, 37.7% of the frame is foreground and it forms exactly ONE
+        // connected component. There are no separate nuclei in it to find, so
+        // StarDist's 2D_versatile_fluo returned nothing and this case got a 145-byte
+        // (all-zero) mask on nightly 33633986188. That density is deliberate -- it is
+        // what gives VALIS the shared texture the REGISTER cases need -- so
+        // segmentation got its own image instead (generate_complete_testdata.py
+        // section 10: 45 nuclei, 10-18 px across, none touching, asserted at
+        // generation time).
+
         when {
             params {
                 segmentation_model     = "2D_versatile_fluo"
@@ -124,7 +138,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_seg_nuclei.ome.tiff', checkIfExists: true),
                     SegBackends.ctxParams(params)
                 ]
                 """
@@ -136,9 +150,19 @@ nextflow_process {
                 { assert process.success },
                 { assert process.out.nuclei_mask },
                 { assert process.out.cell_mask },
-                // Validate files are not empty (have actual size > 100 bytes)
-                { assert process.out.nuclei_mask.get(0).get(1).size() > 100 },
-                { assert process.out.cell_mask.get(0).get(1).size() > 100 },
+                // > 1000, not > 100: an EMPTY 256x256 zlib-compressed mask is 624
+                // bytes (measured), so > 100 would pass on the exact all-zero
+                // failure mode this fixture exists to catch. Matches the sibling
+                // "Should detect cells in synthetic image with DAPI signal -
+                // regression" case below.
+                {
+                    def maskSize = file(process.out.nuclei_mask.get(0).get(1)).size()
+                    assert maskSize > 1000, "Nuclei mask should be > 1KB (got ${maskSize} bytes), indicating actual segmentation"
+                },
+                {
+                    def maskSize = file(process.out.cell_mask.get(0).get(1)).size()
+                    assert maskSize > 1000, "Cell mask should be > 1KB (got ${maskSize} bytes), indicating actual segmentation"
+                },
                 // Metadata preserved
                 { assert process.out.nuclei_mask.get(0).get(0).patient_id == 'P001' },
                 { assert process.out.cell_mask.get(0).get(0).patient_id == 'P001' },
@@ -404,9 +428,25 @@ nextflow_process {
         tag "slow"
         tag "regression"
 
+        // Segments P001_seg_nuclei.ome.tiff, NOT the P001_ref.ome.tiff the rest of
+        // this file uses. P001_ref's DAPI channel is 40 gaussian blobs of radius
+        // 6-13 packed into 128x128 and merged with np.maximum: measured on the
+        // generated file, 37.7% of the frame is foreground and it forms exactly ONE
+        // connected component. There are no separate nuclei in it to find, so
+        // StarDist's 2D_versatile_fluo returned nothing and this case got a 145-byte
+        // (all-zero) mask on nightly 33633986188. That density is deliberate -- it is
+        // what gives VALIS the shared texture the REGISTER cases need -- so
+        // segmentation got its own image instead (generate_complete_testdata.py
+        // section 10: 45 nuclei, 10-18 px across, none touching, asserted at
+        // generation time).
+        //
+        // `seg_model` was set here and is not a parameter this pipeline has -- the
+        // model name comes from `segmentation_model`, which conf/test.config already
+        // pins to the same built-in. The line selected nothing; it is spelled
+        // correctly now so the case says what it runs on.
         when {
             params {
-                seg_model = "2D_versatile_fluo"
+                segmentation_model = "2D_versatile_fluo"
                 seg_gpu = false
                 seg_n_tiles_y = 1
                 seg_n_tiles_x = 1
@@ -418,7 +458,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_seg_nuclei.ome.tiff', checkIfExists: true),
                     SegBackends.ctxParams(params)
                 ]
                 """
@@ -430,12 +470,12 @@ nextflow_process {
                 { assert process.success },
                 // Cell mask should have non-trivial size (actual segmentation, not empty)
                 {
-                    def maskSize = process.out.cell_mask.get(0).get(1).size()
+                    def maskSize = file(process.out.cell_mask.get(0).get(1)).size()
                     assert maskSize > 1000, "Cell mask should be > 1KB (got ${maskSize} bytes), indicating actual segmentation"
                 },
                 // Nuclei mask should also be non-trivial
                 {
-                    def maskSize = process.out.nuclei_mask.get(0).get(1).size()
+                    def maskSize = file(process.out.nuclei_mask.get(0).get(1)).size()
                     assert maskSize > 1000, "Nuclei mask should be > 1KB (got ${maskSize} bytes)"
                 },
                 // Size log should have been generated
@@ -457,7 +497,7 @@ nextflow_process {
         // SEGMENT is not runnable without its container, and that is fine: the assertions
         // read the rendered .command.sh, which Nextflow writes before it executes
         // anything, so this case holds whether the task succeeds or dies importing
-        // deepcell. It asserts nothing about process outcome for exactly that reason.
+        // tensorflow. It asserts nothing about process outcome for exactly that reason.
         tag "stub"
 
         when {
@@ -489,12 +529,12 @@ nextflow_process {
                     "no rendered SEGMENT .command.sh found under the task work dir" },
 
                 // The `test` profile pins seg_method='stardist', so the rendered command
-                // must carry StarDist's two probes -- the rows ProcessEnvelope built from
+                // must carry StarDist's one probe -- the row ProcessEnvelope built from
                 // SegBackends' versionTools list, byte-for-byte what the hand-written
-                // heredoc used to contain.
-                { assert rendered.every {
-                    it.contains('deepcell: $(python -c "import deepcell; print(deepcell.__version__)" 2>/dev/null || echo "unknown")') },
-                    "rendered command: " + rendered.join(' --- ') },
+                // heredoc used to contain. `deepcell` was removed from that list
+                // 2026-09-02 (it was a phantom -- no image installs it, and StarDist has
+                // nothing to do with DeepCell); its absence is asserted below, alongside
+                // `torch`, as one of the "negative with teeth" checks.
                 { assert rendered.every {
                     it.contains('tensorflow: $(python -c "import tensorflow; print(tensorflow.__version__)" 2>/dev/null || echo "unknown")') },
                     "rendered command: " + rendered.join(' --- ') },
@@ -520,7 +560,10 @@ nextflow_process {
                 { assert rendered.every { !it.contains('seg_method:') },
                     "rendered command carries the stub-only seg_method row: " + rendered.join(' --- ') },
                 { assert rendered.every { !it.contains('import torch') },
-                    "StarDist run reports a torch version it never loaded: " + rendered.join(' --- ') }
+                    "StarDist run reports a torch version it never loaded: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('import deepcell') },
+                    "StarDist run reports a deepcell version -- a phantom no image " +
+                    "installs and StarDist has nothing to do with: " + rendered.join(' --- ') }
             )
         }
     }

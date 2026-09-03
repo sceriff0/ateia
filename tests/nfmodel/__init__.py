@@ -7,6 +7,7 @@ constructs that defeated the old parses.
 
 Guards assert against this model, never against raw text.
 """
+
 from ._lex import (
     block_extent,
     skip_non_code,

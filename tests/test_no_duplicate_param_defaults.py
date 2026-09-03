@@ -124,7 +124,9 @@ def find_fallback_sites() -> list[tuple[Path, int, str, str]]:
             clean_lines = _strip_comments_and_strings(text).splitlines()
             for line_no, clean_line in enumerate(clean_lines, start=1):
                 for m in FALLBACK_RE.finditer(clean_line):
-                    sites.append((path, line_no, m.group(1), raw_lines[line_no - 1].strip()))
+                    sites.append(
+                        (path, line_no, m.group(1), raw_lines[line_no - 1].strip())
+                    )
     return sites
 
 
@@ -474,7 +476,9 @@ _DEF_ALIAS_RE = re.compile(
 # characters, hence `\\*` rather than `\\?`). This is how this check learns
 # "which script is this text talking about" -- e.g. `tile_for_basic.py \\` in
 # modules/local/tile_for_basic.nf.
-_SCRIPT_LINE_RE = re.compile(r"^[ \t]*([A-Za-z_][A-Za-z0-9_]*\.py)[ \t]*\\*[ \t]*$", re.MULTILINE)
+_SCRIPT_LINE_RE = re.compile(
+    r"^[ \t]*([A-Za-z_][A-Za-z0-9_]*\.py)[ \t]*\\*[ \t]*$", re.MULTILINE
+)
 # A backend-table entry in a `lib/*.groovy` file shaped like SegBackends.groovy's
 # `stardist: [container: '...', entrypoint: 'segment.py', ...]`: a bare
 # identifier key, immediately opening a list whose first two fields are
@@ -610,7 +614,11 @@ def build_flag_param_maps() -> tuple[dict[tuple[str, str], str], dict[str, str]]
             (None, text[: script_matches[0].start()] if script_matches else text)
         ]
         for i, sm in enumerate(script_matches):
-            end = script_matches[i + 1].start() if i + 1 < len(script_matches) else len(text)
+            end = (
+                script_matches[i + 1].start()
+                if i + 1 < len(script_matches)
+                else len(text)
+            )
             segments.append((sm.group(1), text[sm.end() : end]))
         for script, segment_text in segments:
             resolved, mv = _extract_atoms(segment_text, aliases)
@@ -648,9 +656,7 @@ def build_flag_param_maps() -> tuple[dict[tuple[str, str], str], dict[str, str]]
     for flag, key in resolved:
         record(None, flag, key)
 
-    per_script = {
-        k: next(iter(v)) for k, v in per_script_raw.items() if len(v) == 1
-    }
+    per_script = {k: next(iter(v)) for k, v in per_script_raw.items() if len(v) == 1}
     flag_only = {
         f: next(iter(v))
         for f, v in flag_only_raw.items()
@@ -859,8 +865,7 @@ def test_argparse_default_allowlist_entries_have_reasons():
             "a 'reason' key."
         )
         assert isinstance(entry["reason"], str) and entry["reason"].strip(), (
-            f"ARGPARSE_DEFAULT_ALLOWLIST[{key!r}]['reason'] must be a "
-            "non-empty string."
+            f"ARGPARSE_DEFAULT_ALLOWLIST[{key!r}]['reason'] must be a non-empty string."
         )
 
 

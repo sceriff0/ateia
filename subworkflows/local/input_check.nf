@@ -94,7 +94,15 @@ workflow INPUT_CHECK {
 
     ch_samples = Channel
         .fromPath(samplesheet, checkIfExists: true)
-        .splitCsv(header: true)
+        // quote: '"' -- WITHOUT it, Nextflow's splitCsv keeps the literal quote
+        // characters in a quoted field's value (measured: a quoted path came back
+        // as the string `"/abs/path/with space/file.tiff"`, quotes included).
+        // file() then sees a value that does not start with '/', treats it as
+        // RELATIVE, and stages a symlink whose target is silently wrong -- `find
+        // -L ... -type f` in PREFLIGHT_SCALE then sees a dangling link and finds
+        // nothing, which surfaces three steps downstream as
+        // "--images: expected at least one argument", not as a path error here.
+        .splitCsv(header: true, quote: '"')
         .map { row ->
             def raw_image  = row[image_column]?.toString()?.trim()
             def patient_id = row.patient_id?.toString()?.trim()

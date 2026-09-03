@@ -20,6 +20,21 @@ Two images take no constraints file and say so in their own header:
 `tests/test_ci_stack_pinned.py` derives its exception list from that table rather than
 from a hand-written name list.
 
+**How a container's requirements are checked.** `tests/test_container_harmonisation.py`'s
+`test_container_installs_what_its_scripts_import` walks each image's own `bin/` scripts
+(and the local modules they import) with `ast`, at MODULE SCOPE only — an `import` nested
+inside a `def` executes only if something calls it, so it is a runtime dependency, not a
+module one, and the walker does not report it. A `class` body is excluded too, for
+symmetry rather than the same reason: it DOES execute at import time, but no script in
+`bin/` imports anything inside a class body, so the exclusion costs nothing. A container
+whose scripts reach a package ONLY through such a lazy import declares it explicitly in that file's
+`REQUIRED_RUNTIME_IMPORTS` table (`{container: {import_name: reason}}`), read alongside the
+walker's own module-scope findings before the installed-package check runs. Each entry is
+paired with `test_required_runtime_imports_are_actually_reached`, which walks the container's
+scripts unrestricted (`ast.walk`) to prove the lazy import still exists somewhere reachable —
+an entry whose import has since been removed fails there rather than silently letting the
+container drop a dependency nothing in it needs any more.
+
 Images are built and published to **Docker Hub**, one public repository per image,
 tagged with the pipeline version:
 
@@ -52,10 +67,6 @@ To rebuild ONE image without republishing the other ten:
 gh workflow run containers.yml --ref <branch> -f version=<tag> -f only=segeval
 ```
 
-> `<tag>` is a content-descriptive tag (e.g. `preprocess`,
-> `convert_bioformats_2`, `tiled`) — not a release version. The modules pin
-> these tags directly and never use `:latest`.
-
 > The tag is the pipeline version from `manifest.version`, and the modules pin it
 > directly. `:latest` is never used.
 >
@@ -65,26 +76,30 @@ gh workflow run containers.yml --ref <branch> -f version=<tag> -f only=segeval
 > `version` input it then never applied to the tag — every publish overwrote one mutable name,
 > leaving no earlier image to roll back to.
 >
-> **Remaining reproducibility caveat:** a version tag is still mutable if it is re-pushed. For a
-> hard guarantee, pin by immutable digest (`@sha256:…`). The version tag makes rollback
-> *possible*; only a digest makes a checkout byte-for-byte reproducible.
+> **Reproducibility.** Every `FROM` in this directory, and both external images the pipeline
+> pulls (`cdgatenbee/valis-wsi`, `docker.io/labsyspharm/basicpy-docker-mcmicro`), are pinned
+> by content digest (`@sha256:…`) as of 2026-09-02 — ruling R6, guarded by
+> `tests/test_base_images_are_digest_pinned.py`. The first-party images themselves are pinned
+> by tag, because a digest cannot exist before `release.yml` has pushed them; their published
+> digests are recorded in this table by the release step (`release.yml` → plan 14) once the
+> images are pushed; until then the tag is the identifier.
 
 ## Image mapping
 
-| Build context (`containers/<name>/`) | Docker Hub image:tag | Pipeline process(es) that use it | Source / base image |
+| Build context (`containers/<name>/`) | Docker Hub image:tag | Pipeline process(es) that use it | Base image and stack |
 | --- | --- | --- | --- |
-| `convert` | `bolt3x/mirage-convert:1.0.0` | `CONVERT_IMAGE` | `eclipse-temurin:21-jre-jammy` + Glencoe `bioformats2raw` 0.12.0 / `raw2ometiff` 0.10.0 + `tifffile`/`numpy` |
-| `preprocess` | `bolt3x/mirage-preprocess:1.0.0` | `PREPROCESS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT`, `SPLIT_CHANNELS` (4 modules) | `ubuntu:22.04` + Python 3.11 + BaSiCPy/JAX(cpu)/scikit-image illumination-correction stack |
-| `quantify` | `bolt3x/mirage-quantify:1.0.0` | `QUANTIFY`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC` (+ `quantify.nf` second container directive) (6 modules) | `nvidia/cuda:12.2.2-devel-ubuntu22.04` + numpy/scipy/scikit-image quantification stack |
-| `stardist` | `bolt3x/mirage-stardist:1.0.0` | `SEGMENT` (default backend, `params.seg_method` = stardist) | `tensorflow/tensorflow:2.15.0-gpu-jupyter` + StarDist 0.9.1 |
-| `cellsam` | `bolt3x/mirage-cellsam:1.0.0` | `SEGMENT` (`params.seg_method` = `cellsam`) | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + `cellSAM` (git) |
-| `instanseg` | `bolt3x/mirage-instanseg:1.0.0` | `SEGMENT` (`params.seg_method` = `instantseg`) | `pytorch/pytorch:2.5.1-cuda11.8-cudnn9-runtime` + `instanseg-torch` |
-| `merge` | `bolt3x/mirage-merge:1.0.0` | `MERGE_AND_PYRAMID` | `pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime` + tifffile/imagecodecs pyramid stack |
-| `regqc` | `bolt3x/mirage-regqc:1.0.0` | `GENERATE_REGISTRATION_QC` | `nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04` + Miniconda/bftools + StarDist diffeo QC stack |
-| `tiled` | `bolt3x/mirage-tiled:1.0.0` | `TILED_COARSE`, `TILED_REG_TILE`, `TILED_SOLVE`, `TILED_STITCH`, `WARP_SEG_QC` (tiled backend, STARE `registration_method='tiled'`) | `python:3.11-slim` + numpy/scipy/scikit-image/tifffile/zarr + `torch` 2.3.1 (**CPU wheel**) and `kornia` 0.7.3 for the DISK+LightGlue COARSE front-end, with **both pretrained checkpoints baked in** under `TORCH_HOME=/opt/torch` (`depth-save.pth`, `disk_lightglue_v0-1_arxiv-pth`) so a read-only-`$HOME` / air-gapped cluster never has to download them — **still no JVM/BioFormats/libvips/CUDA runtime**. Carrying torch here retires the earlier "lean, torch-free" claim on purpose: it replaces the separate `stare-ml` image, which was built but never pushed and so failed on image pull for everyone who did not manually dispatch its build. |
-| `spatialdata` | `bolt3x/mirage-spatialdata:1.0.0` | `EXPORT_SPATIALDATA` (+ the out-of-band `bin/join_flowpath.py` cohort join) | `python:3.12-slim` + spatialdata/anndata/geopandas/zarr 3 — CPU only, no JVM/GPU |
-| `segeval` | `bolt3x/mirage-segeval:${params.segeval_tag}` | `SEG_QUALITY_EVAL`, `MERGE_SEG_EVAL` (opt-in, `-params-file params/seg_quality_eval.json`) | `python:3.11-slim` + numpy/scipy/pandas/scikit-image/scikit-learn/aicsimageio/tifffile/xmltodict (vendored CSE 1.5.19 subset under `bin/utils/cse/`) — the one image whose tag stays a parameter, because it is opt-in and published separately |
-| VALIS (not vendored) | `cdgatenbee/valis-wsi:1.0.0` (upstream) | `REGISTER` | upstream maintained image — **not rebuilt or published by us** (see note below) |
+| `convert` | `bolt3x/mirage-convert:1.0.0` | `CONVERT_IMAGE` | `eclipse-temurin:21-jre-jammy` + Python 3.10 + `bioio` 3.5.0 with **six** reader plugins (`bioio-ome-tiff`, `-tifffile`, `-nd2`, `-czi`, `-lif`, `-bioformats`), and the Bio-Formats jars + JVM cache **baked under `/root`** so a read-only-`$HOME` / air-gapped cluster never fetches them. `BIOFORMATS_VERSION` pins `ome:formats-gpl:8.1.1`. Takes no `constraints.txt` (documented exception: `bioio` caps `tifffile` and forces `numpy` 2.x). |
+| `preprocess` | `bolt3x/mirage-preprocess:1.0.0` | `APPLY_PROFILES`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT`, `SPLIT_CHANNELS`, `TILE_FOR_BASIC`, `PREFLIGHT_SCALE`, `AGGREGATE_SIZE_LOGS` (7 modules) | `ubuntu:22.04` + Python 3.11 + numpy/scipy/scikit-image/tifffile/zarr. **No BaSiCPy** — illumination correction runs in the vendored nf-core `BASICPY` module's own image. |
+| `quantify` | `bolt3x/mirage-quantify:1.0.0` | `QUANTIFY`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC`, `SEG_QC_GEOJSON`, `MERGE_QUANT_CSVS` (7 modules, one `container` directive each) | `nvidia/cuda:12.2.2-devel-ubuntu22.04` + numpy/pandas/scipy/scikit-image/matplotlib/tifffile |
+| `stardist` | `bolt3x/mirage-stardist:1.0.0` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method stardist` | `tensorflow/tensorflow:2.15.0-gpu-jupyter` + StarDist 0.9.1 + csbdeep 0.8.2, with `gputools` 0.3.1 / `edt` 3.1.2 as StarDist's optional OpenCL and EDT accelerators. TensorFlow comes from the base, not from pip. |
+| `cellsam` | `bolt3x/mirage-cellsam:1.0.0` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method cellsam` | `pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime` + `cellSAM` pinned to a git commit. torch 2.6.0 is the first release carrying the CVE-2025-32434 (`torch.load`) fix, and cellSAM downloads weights, so that path is reachable. |
+| `instanseg` | `bolt3x/mirage-instanseg:1.0.0` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method instantseg` *(default)* | `pytorch/pytorch:2.6.0-cuda11.8-cudnn9-runtime` + `instanseg-torch` 0.1.1 |
+| `merge` | `bolt3x/mirage-merge:1.0.0` | `MERGE_AND_PYRAMID`, `EXTRACT_MASK_SERIES` (2 modules) | `cdgatenbee/valis-wsi:1.0.0` — the **same upstream VALIS image** `REGISTER` runs in, which is what lets this image reuse its libvips build — plus numpy/tifffile/imagecodecs/opencv-python/zarr for the pyramid write. |
+| `regqc` | `bolt3x/mirage-regqc:1.0.0` | `GENERATE_REGISTRATION_QC` | `nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04` + numpy/scipy/scikit-image/tifffile/zarr and the **non-headless** `opencv-python` (`ffmpeg`/`libsm6`/`libxext6` are its runtime libraries). Nothing else: the TensorFlow/StarDist stack, Miniconda and `bftools` were removed 2026-09-02, having been imported by nothing. |
+| `tiled` | `bolt3x/mirage-tiled:1.0.0` | `TILED_COARSE`, `TILED_REG_TILE`, `TILED_SOLVE`, `TILED_STITCH`, and `WARP_SEG_QC`'s tiled backend (STARE, `registration_method='tiled'`) | `python:3.11-slim` + numpy/scipy/scikit-image/tifffile/zarr + `torch` 2.3.1 (**CPU wheel**) and `kornia` 0.7.3 for the DISK+LightGlue COARSE front-end, with **both pretrained checkpoints baked in** under `TORCH_HOME=/opt/torch` (`depth-save.pth`, `disk_lightglue_v0-1_arxiv-pth`). No JVM, no BioFormats, no libvips, no CUDA runtime. |
+| `spatialdata` | `bolt3x/mirage-spatialdata:1.0.0` | `EXPORT_SPATIALDATA` (+ the out-of-band `bin/join_flowpath.py` cohort join) | `python:3.12-slim` + spatialdata/anndata/geopandas/shapely/pyarrow/**zarr 3** — CPU only, no JVM, no GPU. Takes no `constraints.txt` (documented `python:3.12` / `zarr>=3` island); `requirements/spatialdata.txt` is exact-pinned. |
+| `segeval` | `bolt3x/mirage-segeval:1.0.0` | `SEG_QUALITY_EVAL`, `MERGE_SEG_EVAL` (opt-in, `-params-file params/seg_quality_eval.json`) | `python:3.11-slim` + numpy/scipy/pandas/scikit-image/scikit-learn/matplotlib/tifffile/xmltodict, for the vendored CellSegmentationEvaluator 1.5.19 subset under `bin/utils/cse/`. **No `aicsimageio`** — it is on the forbidden list and cannot coexist with the harmonised `tifffile`. |
+| VALIS (not vendored) | `cdgatenbee/valis-wsi:1.0.0` (upstream) | `REGISTER`, and `WARP_SEG_QC`'s VALIS backend | upstream maintained image — **not rebuilt or published by us** (see the note below). Referenced by content digest, not by tag. |
 
 > **zarr major versions differ on purpose.** `spatialdata` pins `zarr>=3.0.0`
 > (required by `spatialdata>=0.8.0`, which writes NGFF `"0.5-dev-spatialdata"`),
@@ -125,9 +140,16 @@ command -v ps &>/dev/null || { >&2 echo "Command 'ps' required by nextflow to co
 It runs **before** the process's `script:` block, so a missing `ps` fails the task with
 **exit status 1, empty stdout and no traceback** — the failure looks like the tool
 crashed silently, not like a missing system package. Debian/Ubuntu bases do **not** ship
-`procps`: `python:*-slim` and `ubuntu:22.04` both lack it, which is why `preprocess`,
-`spatialdata` and `tiled` install it explicitly. Bases derived from the CUDA/PyTorch/
-TensorFlow images happen to carry it already.
+`procps`: `python:*-slim` and `ubuntu:22.04` both lack it. Rather than reason about which
+bases happen to have it — a claim nothing checked, and one this file previously got wrong
+— **all eleven install it explicitly**, and every `containers/<name>/smoke.sh` ends with a
+`ps -e` assertion that runs at build time and again through `containers.yml`'s `docker
+run`. `apt-get install procps` is a no-op where the base already provides it. Guarded by
+`tests/test_container_smoke_tests.py::test_every_smoke_script_proves_ps_exists`.
+
+`AGGREGATE_SIZE_LOGS` is why this is not theoretical: it ran in bare `ubuntu:22.04` until
+2026-09-02, so with the shipped `enable_trace` default it failed with exit status 1 and
+empty stdout on every real run. It now uses `bolt3x/mirage-preprocess`.
 
 When adding a new build context, either install `procps` or verify the base has it, and
 add a build-time assertion so a regression fails the **build** rather than a cluster run:
@@ -137,26 +159,18 @@ RUN ps -e -o pid= -o ppid= > /dev/null && echo "procps OK"
 ```
 
 
-## Orphaned / legacy contexts NOT vendored
+## Contexts that are NOT vendored
 
-The external `Docker images/` working directory contained additional build
-contexts that are **not** part of the current Mirage pipeline. They were
-intentionally **not** vendored because no pipeline process references their
-image tag, and bundling them would bloat the repo and the release build matrix.
-They remain available in the author's working tree if ever needed again.
+Only the eleven directories above are built and published. Two images the pipeline pulls are
+not built here at all:
 
-| Legacy context | Why it was not vendored |
+| Image | Why it is not vendored |
 | --- | --- |
-| `R` | R/Bioconductor scratch image; no Mirage process uses it. |
-| `conversion` | Superseded by the `bioformats` context for `CONVERT_IMAGE`. |
-| `convert_bioformats` | Earlier conversion image; superseded by `bioformats` (`convert_bioformats_2` tag is built from the `bioformats` context). |
-| `convert_to_tiff` | One-off TIFF conversion experiment; not wired into any module. |
-| `copy` | Trivial passthrough/utility image; not referenced. |
-| `deep_cell_types` | DeepCell cell-typing experiment; not part of the current workflow. |
-| `diffeo` | Predecessor of `debug_diffeo`, itself superseded by the vendored `regqc` context (`bolt3x/mirage-regqc:1.0.0`), which the pipeline now uses for `GENERATE_REGISTRATION_QC`. |
-| `fastmorph` | Morphology experiment; no module references it. |
-| `jupyter` | Interactive notebook image for local exploration; not a pipeline runtime. |
-| `pixie` | Pixie clustering experiment; not part of the current pipeline (a stray `containers/pixie/Dockerfile` may exist locally but is not built or published by the release workflow). |
+| `cdgatenbee/valis-wsi` | Upstream-maintained; its from-source libvips build is heavy and an earlier vendored attempt failed in CI on a missing `meson`. `containers/merge` builds **from** it, so the two can never disagree about libvips. |
+| `docker.io/labsyspharm/basicpy-docker-mcmicro` | The vendored nf-core `BASICPY` module's own image (`modules/nf-core/basicpy/main.nf`). Re-hosting it would mean maintaining a fork of the vendored image too. |
+
+Both are referenced by content digest; `tests/test_container_image_naming.py`'s
+`EXTERNAL_ALLOWED` is the list of externals the pipeline is permitted to pull at all.
 
 ## `container` directives
 

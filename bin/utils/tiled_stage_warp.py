@@ -80,7 +80,9 @@ def make_warper(manifest):
             return xy.copy()
         if stage not in (STAGE_RIGID, STAGE_REFINED):
             raise ValueError(f"unknown stage {stage!r}; expected one of {STAGES}")
-        warped = _apply_affine(affines[slide_name], xy)  # rigid position in the reference frame
+        warped = _apply_affine(
+            affines[slide_name], xy
+        )  # rigid position in the reference frame
         if stage == STAGE_REFINED:
             mesh = meshes.get(slide_name)
             if mesh is not None:

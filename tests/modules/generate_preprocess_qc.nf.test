@@ -242,7 +242,7 @@ nextflow_process {
                     assert size() == 1
                     assert get(0).get(0).patient_id == 'P001'
                     assert get(0).get(1).every { it.toString().endsWith('.png') }
-                    assert get(0).get(1).every { it.toFile().size() > 100 }
+                    assert get(0).get(1).every { file(it).size() > 100 }
                 }}
             )
         }

@@ -1,20 +1,23 @@
 # The container build context is the REPOSITORY ROOT (.github/workflows/containers.yml
-# passes `context: .`), because every Dockerfile under containers/ COPYs its pins from
-# requirements/ — the same files the workflows install. A per-directory context cannot
-# reach outside itself, so the context had to widen; this file keeps what is actually
-# uploaded to the builder small.
+# passes `context: .`), because ten of the eleven Dockerfiles COPY their pins from
+# requirements/ — the same files the workflows install — and all eleven COPY their own
+# containers/<dir>/smoke.sh. That is 22 COPY lines in total: 11 smoke scripts, 10
+# requirements-file COPYs, and one bin/utils script (bin/utils/jvm_cache.py, into
+# containers/convert, for the JVM-cache redirect on the bioio-bioformats route) — and
+# nothing else. A per-directory context cannot reach outside itself, so the context had
+# to widen; this file keeps the upload small.
+#
+# THE TRACKED TREE IS ~10 MB. A DEVELOPER'S WORKING TREE IS NOT. Everything under
+# "Gitignored scratch" below is untracked local scratch — measured 2026-09-02 on one
+# checkout at ~13 GB, of which challenge/ alone was 12 GB. CI never sees any of it (its
+# checkout is clean), so a green CI build says nothing about this class of bloat.
+# tests/test_dockerignore_covers_gitignore.py is what keeps the two lists in step.
 #
 # EXCLUSIONS ONLY, no `*` + re-include pair. The inverted form is one typo away from
-# excluding a file some Dockerfile COPYs, and the whole tree is ~10 MB, so there is nothing
-# to win by being clever. Add a directory here when it grows, not pre-emptively.
+# excluding a file some Dockerfile COPYs, and there is nothing to win by being clever.
 .git
 .github
-.nextflow
-.nf-test
 docs
-site
-# 4.5 MB of the ~8.5 MB tracked tree, COPY'd by no Dockerfile (all 10 COPY/ADD lines across
-# the 11 Dockerfiles name requirements/ only).
 assets
 research
 work
@@ -24,3 +27,42 @@ tests/testdata
 **/__pycache__
 **/*.pyc
 **/.DS_Store
+
+# Gitignored scratch. Kept in step with .gitignore by
+# tests/test_dockerignore_covers_gitignore.py, which fails on a gitignored top-level
+# directory that is missing here.
+.citadel
+.claude
+.eggs
+.idea
+.nextflow
+.nextflow-plugins
+.nf-test
+.planning
+.pytest_cache
+.ruff_cache
+.superpowers
+.trace
+.venv-bench
+.vscode
+.worktrees
+bench_matrix
+bench_runs
+build
+challenge
+csv
+dist
+htmlcov
+illum_bench
+legacy
+mirage_app
+notebooks
+null
+pixie-main
+site
+traces
+valis_lib
+
+# The root-level architecture/audit reviews (gitignored one by one, so a future
+# INTENDED root HTML is not swallowed silently). No directory rule covers them.
+/*.html

@@ -1,7 +1,7 @@
 # Parameters
 
-<p class="standfirst">The complete parameter surface — all 90 operator-settable parameters of the
-92 that <code>nextflow.config</code> declares (the two omitted are the nf-core
+<p class="standfirst">The complete parameter surface — all 89 operator-settable parameters of the
+91 that <code>nextflow.config</code> declares (the two omitted are the nf-core
 <code>config_profile_name</code> / <code>config_profile_description</code> identity strings, which
 a site profile sets, not a run), grouped by pipeline
 stage, each with the default that ships in <code>nextflow.config</code>. That file is the single
@@ -9,9 +9,17 @@ source of truth: <code>tests/test_no_duplicate_param_defaults.py</code> forbids 
 declaration of any default in the pipeline code it scans (<code>main.nf</code>,
 <code>modules/local/</code>, <code>conf/</code>, <code>workflows/</code>,
 <code>subworkflows/</code>, <code>lib/</code>), and <code>tests/check_param_consistency.py</code>
-holds <code>nextflow_schema.json</code> to the same defaults. This page is <em>not</em>
-machine-checked against either — update it by hand when a default changes, and read
-<code>nextflow config -flat</code> for the values a specific run actually resolved.</p>
+holds <code>nextflow_schema.json</code> to the same defaults.
+<code>tests/test_parameters_doc_matches_schema.py</code> holds this page's
+<em>parameter list</em> to <code>nextflow_schema.json</code> in both directions, so a
+parameter cannot be added or removed without this page moving, and checks that
+every <em>literal</em> default cell (most of them) agrees with
+<code>nextflow.config</code>. A narrative cell — a per-tier default, or
+<em>required, no default</em> — documents a <code>null</code> config default in
+prose instead of restating <code>null</code>, and that prose is <em>not</em> machine-checked;
+neither are the descriptions below. Update those by hand when behaviour changes,
+and read <code>nextflow config -flat</code> for the values a specific run
+actually resolved.</p>
 
 !!! abstract "Canonical sources"
     - **Defaults** — `nextflow.config` (`params { … }`)
@@ -66,7 +74,7 @@ owned outright by `conf/modules.config`. See `docs/basic_illumination.md`.
 
 Two backends, selected by `--registration_method`: **VALIS** (default, graph-based
 whole-slide alignment) and **STARE tiled** (JVM-free, fully parallel). STARE is **not**
-laptop-sized at its shipped tier — see the memory note under [Tiled / STARE](#tiled--stare-registration_methodtiled).
+laptop-sized at its shipped tier — see the memory note under [Tiled / STARE](#tiled-stare-registration_methodtiled).
 
 ### Common
 
@@ -98,7 +106,7 @@ laptop-sized at its shipped tier — see the memory note under [Tiled / STARE](#
 | `reg_max_image_dim` | `4000` | Max cached image dimension during registration. |
 | `reg_micro_reg` | `1` | Micro-registration depth (nested, default `1`): `0` = none, `1` = micro-rigid only (refines `slide.M`) — default, `2` = + micro non-rigid (`register_micro`). At `>=1` the QC `rigid` stage means affine ∘ micro-rigid. |
 | `reg_jvm_heap_gb` | `null` | Explicit JVM heap (GB) for VALIS. `null` auto-estimates from input size. |
-| `reg_qc` | `2` | Registration QC depth: `0` = none, `1` = DAPI overlay only, `2` = DAPI overlay + [staged segmentation-overlap metrics](registration_qc.md). |
+| `reg_qc` | `2` | Registration QC depth: `0` = none, `1` = the [before/after DAPI overlay](registration_qc.md#the-reg_qc-1-overlay-is-a-beforeafter-pair) only, `2` = that overlay + [staged segmentation-overlap metrics](registration_qc.md). |
 
 At `reg_qc = 2` the pipeline segments each slide's DAPI on its **native** image, pairs the
 nuclei once after rigid registration, and then re-scores those same pairs after every later
@@ -254,7 +262,7 @@ Per-cell marker intensity.
 | Parameter | Default | Description |
 |---|---|---|
 | `quantify_compartments` | `true` | Emit per-compartment signal (Nucleus / Cytoplasm / Cell) by routing the nuclear mask into quantification. |
-| `expanded_quantification` | `true` | Also emit Mean and Sum per compartment (per-compartment Median is always emitted). **Requires** `quantify_compartments=true`. |
+| `expanded_quantification` | `false` | Also emit Mean and Sum per compartment (per-compartment Median is always emitted). **Requires** `quantify_compartments=true`. Off by default: Median is the statistic FlowPath's selector defaults to, and Mean+Sum triple the column count of every quantification table for a statistic most gating never reads. |
 
 !!! danger "Validation rule"
     Setting `expanded_quantification = true` without `quantify_compartments = true`
@@ -286,7 +294,7 @@ the same masks, polygons, measurements and QC. Full store layout:
 | `spatialdata_include_image` | `false` | Also embed the pyramid image in the store. Off by default because `spatialdata.write()` materializes every element, so including it duplicates the largest artifact the run produces. Turn on for a self-contained, depositable object. |
 | `spatialdata_residual_join_max_px` | `15.0` | Max centroid distance (px) when joining `WARP_SEG_QC`'s per-cell registration residuals onto `cell_mask`. The QC segmentation is a separate native-image run and shares no label space with `cell_mask`, so the join is **spatial**, not by label. |
 
-## Quality control & reports { #quality-control--reports }
+## Quality control & reports
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -298,7 +306,6 @@ the same masks, polygons, measurements and QC. Full store layout:
 | `skip_seg_quality_eval` | `true` | Skip reference-free cell-segmentation quality scoring (CSE). **Opt-in:** set `false` to enable. |
 | `cse_pixel_size_um` | `null` | Pixel size (µm) passed to CSE. `null` = infer from image metadata. |
 | `cse_max_pixels` | `50000000` | Bin image+masks so CSE scores at most this many pixels. `null` = full resolution. |
-| `segeval_tag` | `1.0.1` | Container tag for the CSE image, `bolt3x/mirage-segeval`. `1.0.1` harmonised the pins and dropped `aicsimageio`; `1.0.0` could not be built. |
 | `skip_final_qc_report` | `false` | Skip the aggregated HTML QC report. |
 | `seg_qc_pairing` | `lsa` | Cell correspondence backend for `reg_qc=2`'s fixed anchor pairing: `lsa` = optimal one-to-one assignment (exact, per connected component), `mutual_nn` = the older mutual-nearest-centroid rule. See [Staged registration QC](registration_qc.md). |
 | `seg_qc_match_radius_factor` | `1.5` | Match radius for `reg_qc=2` pairing, in median nuclear radii. |
@@ -306,10 +313,18 @@ the same masks, polygons, measurements and QC. Full store layout:
 ### Reports
 
 - **`qc/mirage_qc_report_<timestamp>.html`** — aggregated QC report: run summary,
-  pipeline-stage status, sample manifest, preprocessing / registration (overlays,
-  VALIS rTRE, STARE tiled TRE, warp-seg QC) / segmentation overlays /
-  postprocessing QC, and software versions.
+  pipeline-stage status, preprocessing QC images, registration QC (overlays, the
+  VALIS rTRE summary, per-stage STARE TRE distributions with the per-tile spatial
+  heatmap, and per-stage cell-displacement distributions from the warp-seg QC),
+  the feature-TRE vs cell-displacement reconciliation scatter, the per-cell
+  residual distribution, segmentation overlays, and postprocessing QC.
   Controlled by `skip_final_qc_report`.
+- **`qc/mirage_qc_data_<timestamp>/`** — the report's inputs, copied verbatim:
+  `collated_versions.yml`, `run_summary.json` (which carries the sample manifest),
+  and the `registration_tre/`, `seg_qc/`, `seg_residuals/`, `*_qc/` folders. The
+  report renders plots; this folder is what a script reads. Software versions and
+  the sample manifest are **here**, not in the HTML — a 200-row version table and a
+  per-patient count table were two renderings of files that already existed.
 
 ### Reference-free segmentation quality (CSE) — opt-in
 
@@ -328,7 +343,8 @@ would fail every run of a fresh clone.
 ```bash
 # publish the image once (Actions -> Build & Push Container Images -> Run workflow),
 # then:
-nextflow run . -params-file params/seg_quality_eval.json --cse_max_pixels 50000000 ...
+# not-runnable: the trailing `...` elides more flags -- illustrative, not paste-ready
+nextflow run . --input samplesheet.csv --outdir results -c site.config -params-file params/seg_quality_eval.json --cse_max_pixels 50000000 ...
 ```
 
 Two things to know before reading the numbers:
@@ -344,11 +360,12 @@ Two things to know before reading the numbers:
 
 [cse]: https://doi.org/10.1091/mbc.E22-08-0364
 - **`qc/mirage_resource_report.html`** — computational-resource report built from
-  the per-task size logs and Nextflow `trace.txt`: run totals, per-process
-  rollup, resource-vs-input-size, top-N heaviest/slowest tasks, and
-  retries/failures. Generated at run completion when `enable_trace` is set;
-  re-runnable by hand via `bin/generate_resource_report.py`. Complements
-  Nextflow's native `report.html` / `timeline.html`.
+  the per-task size logs and Nextflow `trace.txt`: run totals plus four plots:
+  wall-time by process, memory headroom (requested vs observed), the reserved
+  GB·hours lost to failures and retries, and input size against runtime.
+  Generated at run completion when `enable_trace` is set; re-runnable by hand
+  via `bin/generate_resource_report.py`. Complements Nextflow's native
+  `report.html` / `timeline.html`.
 
 ## Cluster & resources
 
@@ -362,9 +379,9 @@ Per-process requests, resource labels, retry policy and containers:
 | `slurm_account` | `null` | SLURM account (`--account`). |
 | `slurm_qos` | `null` | SLURM QoS (`--qos`). |
 | `gpu_type` | `1` | GRES string for GPU jobs (`--gres=gpu:<value>`). Bare `1` = any one GPU, which is portable; set a typed string (e.g. `nvidia_a100:1`) in your site config to match `sinfo -o "%G"`. |
-| `max_memory` | `700.GB` | Global memory ceiling. Clamps every process's request via `process.resourceLimits`. |
-| `max_cpus` | `128` | Global CPU ceiling. |
-| `max_time` | `240.h` | Global walltime ceiling. |
+| `max_memory` | *(required, no default)* | Global memory ceiling. Clamps every process's request via `process.resourceLimits`. Declared `null` in `nextflow.config` on purpose — a default here would be a guess about someone else's machine — and marked `required` in the schema, so a run that omits it is refused at launch. Set it in your `site.config`. |
+| `max_cpus` | *(required, no default)* | Global CPU ceiling. Same rule as `max_memory`: required, no default, set it in your `site.config`. |
+| `max_time` | `240.h` | Global walltime ceiling. This one keeps a real default: overshooting a walltime ceiling costs a queue slot, not a dead run. |
 | `concurrency` | `5` | The one knob to tune: drives both `max_forks` and `queue_size` together, preserving the shipped 5:20 ratio. |
 | `max_forks` | `null` | Max concurrent tasks **per process**. `null` = derive from `concurrency`; also an upper bound on every per-process `maxForks`, so lowering it throttles every module. |
 | `queue_size` | `null` | Max concurrent tasks across the **whole pipeline** (`executor.queueSize`). `null` = derive from `concurrency` (`concurrency * 4`). Normally the binding constraint. |
@@ -374,7 +391,7 @@ meaningful together. `--concurrency` moves both at once; `--max_forks` / `--queu
 override it individually for the asymmetric case. At the shipped defaults `max_forks` (5)
 is far lower, so raising `queue_size` alone has no effect — raise `max_forks` (or
 `concurrency`), or raise both. See
-[Resources → Execution & concurrency](resources.md#execution--concurrency).
+[Resources → Execution & concurrency](resources.md#execution-concurrency).
 
 !!! info "How resources scale"
     Per-process memory and time scale with `task.attempt`, bounded by the
@@ -389,7 +406,7 @@ is far lower, so raising `queue_size` alone has no effect — raise `max_forks` 
 | Parameter | Default | Description |
 |---|---|---|
 | `enable_trace` | `true` | Write Nextflow `trace.txt`, `report.html`, `timeline.html`, and per-task size logs. |
-| `trace_dir` | `.trace` | Directory for trace outputs (independent of `--outdir`). |
+| `trace_dir` | `.trace` | Directory for Nextflow's own `trace.txt` / `report.html` / `timeline.html`. Resolved against the **launch directory**, not `--outdir` — a relative value therefore follows where you ran `nextflow`, not where results go. The computational-resource report itself is written to `<outdir>/qc/` (see [Cluster & resources](#cluster-resources)); this directory only supplies its `trace.txt` input. |
 
 ## Output cleanup
 
@@ -487,8 +504,9 @@ Full walkthrough: [Incremental cycles](add_cycle.md).
 
 !!! warning "`add_cycle` prerequisites"
     `embed_masks` defaults to `false`, so a default run is **not** add_cycle-extendable.
-    Set `embed_masks = true` (together with `quantify_compartments` and
-    `--expanded_quantification`, both on by default) to make a run extendable.
+    Set `embed_masks = true` (together with `quantify_compartments`, which is on
+    by default, and `expanded_quantification`, which is **not** — set it in your
+    `-params-file`) to make a run extendable.
     `embed_masks = true` with either sibling off is rejected **at launch**
     (`ParamUtils.validateCompartmentQuant`) rather than silently producing a
     plain pyramid, so a prior run either failed to launch with `embed_masks=true`
@@ -503,18 +521,36 @@ Ready-made `-params-file` JSON presets in `params/`:
 
 | Preset | Purpose |
 |---|---|
-| `params/full_pipeline.json` | All stages from preprocessing |
+| `params/full_pipeline.json` | All stages from preprocessing, on the InstanSeg backend (see the file's `_comment_seg_method` for the StarDist switch) |
 | `params/preprocessing_only.json` | Preprocessing only |
 | `params/registration_only.json` | Registration from a checkpoint |
 | `params/postprocessing_only.json` | Postprocessing from a checkpoint |
-| `params/test.json` | Minimal test run |
+| `params/test.json` | Minimal self-contained test run (carries its own small ceilings) |
+| `params/dry_run.json` | `dry_run` alone — combine with any other flags |
+| `params/seg_quality_eval.json` | Turns the opt-in CSE segmentation-quality scorer on |
 
 ```bash
-nextflow run . -profile slurm,singularity \
+nextflow run . -profile slurm,singularity -c site.config \
   -params-file params/full_pipeline.json \
   --input samplesheet.csv --outdir results \
   --seg_method cellsam            # override any preset value on the CLI
 ```
+
+!!! warning "Presets never carry site sizing — that's `-c site.config`'s job (R4)"
+    `full_pipeline.json`, `preprocessing_only.json`, `registration_only.json` and
+    `postprocessing_only.json` deliberately do **not** set `max_cpus`/`max_memory`/
+    `max_time` (their `_comment_resources` entry says so). A `-params-file` value
+    **overrides a `-c` config file** (Nextflow's own precedence order), so a
+    preset that baked in one cluster's ceiling would silently defeat any
+    `site.config` layered on top of it on a different cluster — that mistake
+    shipped in these four presets before ruling R4. `max_cpus`/`max_memory` have
+    no default and are `required` in `nextflow_schema.json`, so every command
+    that loads one of these presets needs `-c site.config`
+    (`cp conf/site.config.template site.config`, then edit the ceiling) or the
+    run is refused at launch with `Missing required parameter(s)`.
+    `tests/test_param_presets_are_coherent.py` enforces this for every preset
+    except `test.json`, which intentionally pins tiny self-contained values for
+    the test suite.
 
 ## See also
 

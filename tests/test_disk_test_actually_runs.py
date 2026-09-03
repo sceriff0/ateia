@@ -167,7 +167,10 @@ def test_every_pytest_job_installs_torch_and_kornia():
         for req in ("requirements/torch-cpu.txt", "requirements/kornia.txt"):
             if req not in installed:
                 missing.append(f"{where} does not install {req} (installs {installed})")
-        if "requirements/torch-cpu.txt" in installed and "requirements/kornia.txt" in installed:
+        if (
+            "requirements/torch-cpu.txt" in installed
+            and "requirements/kornia.txt" in installed
+        ):
             if installed.index("requirements/torch-cpu.txt") > installed.index(
                 "requirements/kornia.txt"
             ):
@@ -252,7 +255,7 @@ def test_every_pytest_workflow_proves_the_disk_case_is_not_skipped():
         where = f"{wf.relative_to(REPO)}: job `{name}`"
         if not _IMPORT_PROOF_RE.search(text):
             missing.append(
-                f"{where}: no `python -c \"import torch, kornia\"` step -- an install "
+                f'{where}: no `python -c "import torch, kornia"` step -- an install '
                 "line does not prove the wheel imports on this runner"
             )
         if not _NO_SKIP_PROOF_RE.search(text):

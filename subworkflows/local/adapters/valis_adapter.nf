@@ -89,7 +89,9 @@ workflow VALIS_ADAPTER {
     // Need to convert to: [meta, file]
     //
     // Match registered outputs back to metadata using OME channel names
-    // from the channels manifest (no filename parsing).
+    // from the channels manifest (no filename parsing — VALIS renames its
+    // outputs, and name parsing broke on any patient id containing '_').
+    // The rule is lib/RegisteredMatch.groovy; this is wiring only.
 
     ch_registered = REGISTER.out.registered
         .flatMap { patient_id, reg_files, metas, manifest_file ->
@@ -98,78 +100,24 @@ workflow VALIS_ADAPTER {
             def files_list = reg_files instanceof List ? reg_files : [reg_files]
             def metas_list = metas instanceof List ? metas : [metas]
 
-            // Sanity check: file count must match metadata count
-            if (files_list.size() != metas_list.size()) {
-                def error_msg = """
-                VALIS adapter: file count mismatch for patient ${patient_id}
-                Expected ${metas_list.size()} files but got ${files_list.size()}
-                Metadata entries: ${metas_list.collect { it.channels.join('_') }.join(', ')}
-                Files: ${files_list.collect { it.name }.join(', ')}
-                """.stripIndent()
-                throw new Exception(error_msg)
-            }
-
-            // Read OME channels manifest (maps filename -> channel names from OME-XML)
+            // filename -> [channel names], from the OME-XML of each registered output.
+            // Written by bin/create_channels_manifest.py inside REGISTER.
             def manifest = new groovy.json.JsonSlurper().parseText(manifest_file.text)
 
-            // Build lookup: sorted channel signature (from CSV meta) -> meta
-            def channel_key_to_meta = metas_list.collectEntries { meta ->
-                // IMPORTANT: Use toSorted() instead of sort() to avoid mutating meta.channels.
-                // (Elsewhere in the pipeline, meta.clone() was replaced with `meta + [...]`
-                // map addition — but Groovy's Map.plus() is implemented as
-                // cloneSimilarMap(left).putAll(right), i.e. clone-then-putAll, so the two
-                // are operationally identical. That was an idiom change, not a safety
-                // change: meta.channels is still a shared List reference across any
-                // derived metas that do not explicitly rebind it. sort()'s in-place
-                // mutation would corrupt that shared list for every other meta holding the
-                // same reference — hence toSorted(), here and at every future call site.)
-                def key = meta.channels.toSorted().join('_').toLowerCase()
-                [(key): meta]
+            // The matching rule itself is lib/RegisteredMatch.groovy, where it is
+            // unit-tested (tests/lib_probe.nf) and reachable by a second backend.
+            // The patient id is added here because it is wiring context this
+            // subworkflow has and that class deliberately does not.
+            try {
+                return RegisteredMatch.pair(metas_list, files_list, manifest)
             }
-
-            // Guard against duplicate channel signatures (would silently overwrite)
-            if (channel_key_to_meta.size() != metas_list.size()) {
-                def signatures = metas_list.collect { it.channels.toSorted().join('_').toLowerCase() }
-                def duplicates = signatures.groupBy { it }.findAll { _sig, v -> v.size() > 1 }.keySet()
-                throw new Exception("""
-                VALIS adapter: duplicate channel signatures for patient ${patient_id}
-                ${metas_list.size()} slides but only ${channel_key_to_meta.size()} unique channel sets
-                Duplicated: ${duplicates.join(', ')}
-                Each slide must have a unique combination of channels
-                """.stripIndent())
-            }
-
-            // Match each registered file by its OME channel signature
-            files_list.collect { reg_file ->
-                def ome_channels = manifest[reg_file.name]
-                if (!ome_channels) {
-                    def error_msg = """
-                    VALIS adapter: no OME channel metadata for ${reg_file.name}
-                    Patient: ${patient_id}
-                    Manifest keys: ${manifest.keySet().join(', ')}
-                    Check that registered files have OME-XML metadata with channel names
-                    """.stripIndent()
-                    throw new Exception(error_msg)
-                }
-
-                // Create sorted channel signature from OME metadata
-                def ome_key = (ome_channels as List).toSorted().join('_').toLowerCase()
-                def matched_meta = channel_key_to_meta[ome_key]
-
-                if (!matched_meta) {
-                    def error_msg = """
-                    VALIS adapter: could not match OME channels to CSV metadata
-                    Patient: ${patient_id}
-                    File: ${reg_file.name}
-                    OME channels: ${ome_channels}
-                    OME key: ${ome_key}
-                    Available CSV keys: ${channel_key_to_meta.keySet().join(', ')}
-                    Ensure CSV 'channels' column matches OME-XML channel names
-                    """.stripIndent()
-                    throw new Exception(error_msg)
-                }
-
-                [matched_meta, reg_file]
+            catch (RuntimeException e) {
+                // RegisteredMatch.pair throws IllegalStateException for its own three
+                // failure modes, but signature() throws IllegalArgumentException when
+                // a meta carries null channels -- catch both, or the patient prefix
+                // below is silently dropped for that case.
+                throw new IllegalStateException(
+                    "VALIS adapter, patient ${patient_id}: ${e.message}", e)
             }
         }
 

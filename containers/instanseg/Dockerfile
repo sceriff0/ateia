@@ -1,8 +1,15 @@
 # torch 2.6.0 carries the CVE-2025-32434 fix; cuda11.8 is unchanged.
-FROM pytorch/pytorch:2.6.0-cuda11.8-cudnn9-runtime
+# DIGEST-PINNED (ruling R6). The tag stays for readability; the digest is what makes the
+# build reproducible -- a version tag is republished, so rebuilding from the tag alone can
+# produce a different image than the one that generated the published results. Resolved
+# 2026-09-02; Dependabot updates the digest in place. Guarded by
+# tests/test_base_images_are_digest_pinned.py.
+FROM pytorch/pytorch:2.6.0-cuda11.8-cudnn9-runtime@sha256:2428b92ebbaeceba5572b98c18c8a94e43162bead6e88588ad54471147c58a20
 
 LABEL maintainer="MIRAGE Pipeline"
-LABEL description="InstanSeg segmentation container (PyTorch 2.5.1 + CUDA 12.4)"
+# The version in this label is the FROM's, and it has been wrong before: it said
+# "PyTorch 2.5.1 + CUDA 12.4" against a 2.6.0-cuda11.8 base -- three numbers, two wrong.
+LABEL description="InstanSeg segmentation container (PyTorch 2.6.0 + CUDA 11.8)"
 LABEL version="1.0.0"
 
 ENV PYTHONUNBUFFERED=1
@@ -19,11 +26,17 @@ COPY requirements/constraints.txt /tmp/requirements/constraints.txt
 
 # OpenCL ICD loader and headers (kept in case downstream tools need OpenCL;
 # unrelated to InstanSeg itself, which uses PyTorch/CUDA).
+# procps is not optional. Nextflow's task-metrics wrapper hard-exits BEFORE the script
+# block when `ps` is absent, and params.enable_trace defaults to true, so every task in
+# this image would fail with exit status 1 and empty stdout. Installed in all eleven
+# images rather than "verified present in this base" -- apt is a no-op where it already
+# is, and containers/<dir>/smoke.sh asserts it either way.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ocl-icd-dev \
     ocl-icd-opencl-dev \
     opencl-headers \
     clinfo \
+    procps \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -43,5 +56,25 @@ RUN pip install --no-cache-dir -c /tmp/requirements/constraints.txt \
 #
 # LAST, and after every pip install, on purpose: a COPY invalidates the layer cache for
 # everything below it, so putting this at the end costs no rebuilds.
+# Read-only $HOME safety, the same three variables containers/segeval and
+# containers/spatialdata set. Several of these libraries default their caches to ~/.cache;
+# nextflow.config's docker profile runs tasks with `-u $(id -u):$(id -g)` and the cluster's
+# $HOME is a read-only mount, so a cache write turns into a crash far from its cause -- the
+# same class of failure as the VALIS JVM/jgo cache. MPLCONFIGDIR is not decoration here:
+# matplotlib writes ~/.config/matplotlib on its first import.
+ENV XDG_CACHE_HOME=/tmp/.cache \
+    MPLCONFIGDIR=/tmp/.mplconfig \
+    NUMBA_CACHE_DIR=/tmp/.numba
+
 COPY containers/instanseg/smoke.sh /usr/local/bin/mirage-smoke.sh
 RUN bash /usr/local/bin/mirage-smoke.sh
+
+# OCI provenance. LAST IN THE FILE ON PURPOSE: VCS_REF changes on every commit, and an ARG
+# referenced earlier would invalidate the layer cache for everything below it on every
+# build. Here it invalidates one metadata layer. .github/workflows/containers.yml passes
+# both values; a local `docker build` gets "unknown", which is honest.
+ARG VCS_REF=unknown
+ARG IMAGE_VERSION=unknown
+LABEL org.opencontainers.image.source="https://github.com/sceriff0/mirage" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${IMAGE_VERSION}"

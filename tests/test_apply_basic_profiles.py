@@ -199,7 +199,9 @@ def test_a_spatially_varying_profile_is_applied_per_tile_pixel(tmp_path):
     assert np.all(result[:, 150:200] == 1000)
 
 
-def test_write_tiles_straddling_fov_boundaries_are_corrected_exactly(tmp_path, monkeypatch):
+def test_write_tiles_straddling_fov_boundaries_are_corrected_exactly(
+    tmp_path, monkeypatch
+):
     """The regression this whole file's review wave exists for.
 
     ``apply_basic_profiles._correct_tile`` calls ``fov_overlaps(positions, y0, x0, ...)``
@@ -243,7 +245,9 @@ def test_write_tiles_straddling_fov_boundaries_are_corrected_exactly(tmp_path, m
         for k in range(n_fitted)
     ]
     dark_planes = [
-        (5.0 * (k + 1) * np.sin(yy / 17.0) * np.cos(xx / 23.0) + 50.0).astype(np.float32)
+        (5.0 * (k + 1) * np.sin(yy / 17.0) * np.cos(xx / 23.0) + 50.0).astype(
+            np.float32
+        )
         for k in range(n_fitted)
     ]
     ffp = tmp_path / "slide_tiles-ffp.ome.tif"
@@ -260,9 +264,7 @@ def test_write_tiles_straddling_fov_boundaries_are_corrected_exactly(tmp_path, m
     positions = [tuple(p) for p in manifest["positions"]]
     n_fovs_y, n_fovs_x = manifest["n_fovs_y"], manifest["n_fovs_x"]
     corrected_channels = set(manifest["corrected_channels"])
-    profile_index = {
-        source: k for k, source in enumerate(manifest["profile_channels"])
-    }
+    profile_index = {source: k for k, source in enumerate(manifest["profile_channels"])}
     storage_dtype = np.dtype(manifest["source_dtype"])
 
     expected = np.empty_like(original)
@@ -282,7 +284,9 @@ def test_write_tiles_straddling_fov_boundaries_are_corrected_exactly(tmp_path, m
             / flat_planes[k].astype(np.float64)
         ).astype(np.float32)
         reconstructed = reconstruct_image_from_fovs(corrected_stack, positions, (h, w))
-        expected[c] = apply_basic_profiles._to_storage_dtype(reconstructed, storage_dtype)
+        expected[c] = apply_basic_profiles._to_storage_dtype(
+            reconstructed, storage_dtype
+        )
 
     n_diff = int(np.count_nonzero(result != expected))
     assert np.array_equal(result, expected), (
@@ -346,7 +350,9 @@ def _clip_records(caplog):
     return [r for r in caplog.records if "Clipped" in r.getMessage()]
 
 
-def test_negative_values_are_clipped_and_reported_in_one_aggregate_line(tmp_path, caplog):
+def test_negative_values_are_clipped_and_reported_in_one_aggregate_line(
+    tmp_path, caplog
+):
     """Darkfield subtraction produces negatives; ONE line reports them for the whole image.
 
     ``clip_negative_values`` computes the percentage against the size of the array it is
@@ -427,9 +433,7 @@ def test_the_storage_cast_rounds_rather_than_flooring(tmp_path):
 def test_the_storage_cast_clips_before_rounding_so_nothing_wraps(tmp_path):
     """65535.6 rounds to 65536, which wraps to 0 in uint16 unless the clip comes first."""
     original = np.full((1, 250, 250), 60000, dtype=np.uint16)
-    slide, sidecar, manifest = _tile(
-        tmp_path, original, ["PANCK"], skip_nuclear=False
-    )
+    slide, sidecar, manifest = _tile(tmp_path, original, ["PANCK"], skip_nuclear=False)
     ffp, dfp = _flat_profiles(tmp_path, manifest, flat_value=0.5, dark_value=0.0)
 
     out = tmp_path / "slide_corrected.ome.tif"
@@ -721,7 +725,10 @@ def test_the_write_pins_one_compressor_thread(tmp_path, monkeypatch):
     monkeypatch.setattr(tifffile.TiffWriter, "write", spying_write)
 
     apply_basic_profiles.apply_basic_profiles(
-        str(slide), str(sidecar), str(ffp), str(dfp),
+        str(slide),
+        str(sidecar),
+        str(ffp),
+        str(dfp),
         str(tmp_path / "slide_corrected.ome.tif"),
     )
 

@@ -32,6 +32,10 @@ ALLOW_FILES = {
     "bin/utils/reg_benchmark.py",
     "tests/test_reg_benchmark.py",
     "tests/test_no_legacy_frontends.py",
+    # Its ALLOWLIST reason for reg_benchmark (dead-module guard, phase 02 task 5)
+    # repeats the same ORB-as-accuracy-oracle explanation as the entries above --
+    # same tool, same reason, different guard.
+    "tests/test_no_dead_bin_modules.py",
     # The COMPANION guard. test_the_deleted_frontends_are_really_gone names all eight
     # deleted symbols (`_frontend_orb`, `normalize_for_orb`, ...) in a hasattr sweep --
     # naming them is the whole point of it. It was passing the ORIGINAL \b pattern only
@@ -39,6 +43,13 @@ ALLOW_FILES = {
     # once. This guard covers stray TEXT, that one covers live ATTRIBUTES; the exemption
     # is what keeps them from cancelling each other out.
     "tests/test_coarse_frontend.py",
+    # Same class of reason again: this is the negative-rule guard that forbids ORB,
+    # SIFT, Fourier-Mellin and reg_tiled_frontend from appearing in docs/figures/*.html
+    # (plan 11 Task 2). Its RETIRED dict and module docstring name all four terms
+    # verbatim as the very things it forbids, and its drill in the same task's brief
+    # temporarily writes "ORB" into a figure to prove the guard fires -- so this file
+    # legitimately contains the tokens this guard exists to keep out of prose.
+    "tests/test_figures_have_no_retired_names.py",
     # THREE ENTRIES WERE DELETED FROM HERE ON 2026-09-01 (CI redesign, Phase 7):
     # `.github/workflows/ci.yml`, `.github/workflows/release.yml` and
     # `tests/test_ci_stack_pinned.py`. Their stated reason was that they quote the
@@ -79,10 +90,6 @@ ALLOW_FILES = {
     # the algorithms it surveys, and renaming them would be a lie.
     "docs/parallel_registration_design.md",
     "docs/parallel_registration_research.md",
-    # A published supplementary figure. It is now factually wrong about the method, but
-    # spec Phase 6 owns rewriting it -- half-rewriting it here would be worse than
-    # leaving it to its owner.
-    "docs/figures/registration-schematic.html",
 }
 
 
@@ -90,7 +97,9 @@ def _candidates():
     out = subprocess.run(
         ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
     ).stdout.split()
-    assert len(out) > 100, f"git ls-files returned only {len(out)} paths -- scope is wrong"
+    assert len(out) > 100, (
+        f"git ls-files returned only {len(out)} paths -- scope is wrong"
+    )
     keep = [
         r
         for r in out
@@ -120,8 +129,8 @@ def test_no_legacy_frontend_references():
         for i, line in enumerate(p.read_text(errors="ignore").splitlines(), 1):
             if PATTERN.search(line):
                 hits.append(f"{rel}:{i}: {line.strip()[:120]}")
-    assert not hits, (
-        "reference(s) to a deleted COARSE front-end remain:\n" + "\n".join(hits)
+    assert not hits, "reference(s) to a deleted COARSE front-end remain:\n" + "\n".join(
+        hits
     )
 
 
@@ -148,7 +157,8 @@ def test_the_allowlist_has_no_dead_entries():
             dead.append(f"{rel}: not a tracked file any more")
             continue
         if not any(
-            PATTERN.search(line) for line in path.read_text(errors="ignore").splitlines()
+            PATTERN.search(line)
+            for line in path.read_text(errors="ignore").splitlines()
         ):
             dead.append(
                 f"{rel}: contains no match for this guard's own pattern, so exempting "

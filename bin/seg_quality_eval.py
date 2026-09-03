@@ -119,7 +119,9 @@ def main():
     )
     a = ap.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
 
     channels, px_meta = _read_image_cyx(a.image)  # (C,Y,X)
     # .squeeze() drops a leading singleton axis: some label TIFFs are written
@@ -145,7 +147,11 @@ def main():
     # Downsample before scoring: full-WSI label masks otherwise blow CSE's
     # memory/time budget. Binning by `factor` means each pixel now spans
     # `factor`x more microns per axis, so scale the pixel size to match.
-    factor = a.downsample if a.downsample > 1 else _downsample_factor(cell.shape, a.max_pixels)
+    factor = (
+        a.downsample
+        if a.downsample > 1
+        else _downsample_factor(cell.shape, a.max_pixels)
+    )
     channels, cell, nuc = _downsample(channels, cell, nuc, factor)
     px *= factor
     py *= factor
@@ -182,4 +188,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

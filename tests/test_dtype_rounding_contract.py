@@ -184,7 +184,9 @@ def test_normalize_image_still_returns_uint8():
 # output.
 
 
-def test_both_halves_of_the_phase_correlation_arrive_at_the_same_precision(tmp_path, monkeypatch):
+def test_both_halves_of_the_phase_correlation_arrive_at_the_same_precision(
+    tmp_path, monkeypatch
+):
     """A split-precision correlation is a smell that costs 2x memory on the biggest arrays."""
     import json
 
@@ -202,7 +204,9 @@ def test_both_halves_of_the_phase_correlation_arrive_at_the_same_precision(tmp_p
     tifffile.imwrite(str(mov_f), stack, photometric="minisblack")
 
     m0_f = tmp_path / "m0.json"
-    m0_f.write_text(json.dumps({"M0": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]}))
+    m0_f.write_text(
+        json.dumps({"M0": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]})
+    )
 
     seen = {}
     real = tiled_reg_tile.residual_displacement
@@ -216,13 +220,32 @@ def test_both_halves_of_the_phase_correlation_arrive_at_the_same_precision(tmp_p
 
     tiled_reg_tile.main(
         [
-            "--reference", str(ref_f),
-            "--moving", str(mov_f),
-            "--m0", str(m0_f),
-            "--nuclear-index", "0",
-            "--ix", "0", "--iy", "0", "--cx", "64", "--cy", "64",
-            "--rx0", "0", "--ry0", "0", "--rx1", "128", "--ry1", "128",
-            "--out", str(tmp_path / "ctrl.json"),
+            "--reference",
+            str(ref_f),
+            "--moving",
+            str(mov_f),
+            "--m0",
+            str(m0_f),
+            "--nuclear-index",
+            "0",
+            "--ix",
+            "0",
+            "--iy",
+            "0",
+            "--cx",
+            "64",
+            "--cy",
+            "64",
+            "--rx0",
+            "0",
+            "--ry0",
+            "0",
+            "--rx1",
+            "128",
+            "--ry1",
+            "128",
+            "--out",
+            str(tmp_path / "ctrl.json"),
         ]
     )
 

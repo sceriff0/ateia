@@ -25,6 +25,7 @@ from typing import Any, Dict, Tuple
 import numpy as np
 import tifffile
 from numpy.typing import NDArray
+from ome_io import write_tiff
 
 __all__ = [
     "normalize_image_dimensions",
@@ -275,8 +276,9 @@ def save_tiff(
     output_path = Path(output_path)
     ensure_dir(output_path.parent)
 
-    tifffile.imwrite(
-        str(output_path), image, compression=compression, bigtiff=bigtiff, **kwargs
+    # bin/utils/ome_io.py is the only module in bin/ that may call tifffile's writers
+    # (tests/test_ome_io_is_the_only_writer.py). This function keeps its own defaults --
+    # they are its published contract, and ome_io.write_tiff deliberately sets none.
+    return write_tiff(
+        output_path, image, compression=compression, bigtiff=bigtiff, **kwargs
     )
-
-    return output_path

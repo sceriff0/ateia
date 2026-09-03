@@ -22,6 +22,26 @@ include { POSTPROCESSING      } from '../subworkflows/local/postprocess'
 include { ADD_CYCLE           } from '../subworkflows/local/add_cycle'
 include { FINAL_QC            } from '../subworkflows/local/final_qc'
 
+// Unknown columns are ACCEPTED -- a checkpoint CSV legitimately carries columns
+// the entry step does not read -- but never silently: a mistyped 'channles'
+// beside a missing 'channels' otherwise surfaces much later, as a null,
+// somewhere else. CsvUtils.unknownColumns derives the known set from
+// ParamUtils.STEPS + Checkpoint.STEPS, so a legitimate checkpoint header warns
+// about nothing.
+//
+// ONE implementation, called from BOTH the add_cycle branch (step is always the
+// literal 'preprocessing' there -- add_cycle has no --start/--stop choice) and
+// the linear start/stop path (step is params.start) below, rather than two
+// copies of the same log.warn. Defined at SCRIPT level, not inside workflow
+// MIRAGE{} or in lib/: `log` is unbound inside lib/*.groovy and inside
+// conf/*.config (see CLAUDE.md), but resolves in a workflow script -- which is
+// why this lives here, where both call sites can see it, and nowhere else.
+def warnUnknownColumns(String csv, String step) {
+    def unknown_columns = CsvUtils.unknownColumns(csv, step)
+    if (unknown_columns)
+        log.warn "Samplesheet column(s) this pipeline does not read, and will ignore: " +
+                 "${unknown_columns.join(', ')} (in ${csv})"
+}
 
 workflow MIRAGE {
 
@@ -58,8 +78,9 @@ workflow MIRAGE {
     if (params.cleanup_work && workflow.resume) {
         log.warn "--cleanup_work is true (the default) AND -resume was passed. The work " +
                  "directory is emptied after a successful run, so the NEXT -resume will " +
-                 "find nothing cached and re-run every task. Pass --cleanup_work false " +
-                 "for the iterate-with--resume loop docs/usage.md describes."
+                 "find nothing cached and re-run every task. Set cleanup_work to false in " +
+                 "a -params-file or a profile (Nextflow 26 rejects a boolean value on the " +
+                 "command line) for the iterate-with--resume loop docs/usage.md describes."
     }
 
     // --start past preprocessing re-enters from artifacts a cleaning level does not
@@ -132,19 +153,31 @@ workflow MIRAGE {
         ParamUtils.validateAddCycleStepFlags(params)
         ParamUtils.validateAddCycle(params.outdir, params.prior_outdir)
         ParamUtils.validateCompartmentQuant(compartment_mode)
-        // add_cycle re-registers the new cycle via the classic VALIS_ADAPTER only —
-        // add_cycle.nf hands REGISTER_PATIENT the literal 'valis'. Reject anything else
-        // loudly rather than registering with VALIS under another method's name.
+        // add_cycle re-registers the new cycle through whichever adapters declare they
+        // support that mode — today VALIS alone; add_cycle.nf hands REGISTER_PATIENT the
+        // literal 'valis'. Reject anything else loudly rather than registering with VALIS
+        // under another method's name.
         //
-        // ALLOWLIST, NOT DENYLIST. This used to name 'tiled' explicitly, so any method the
-        // schema enum gained afterwards passed the check and was then silently registered
-        // with VALIS -- the next method added to the enum would have been the first to hit it.
-        if (params.registration_method != 'valis') {
-            error "mode='add_cycle' does not support --registration_method ${params.registration_method} yet; use valis."
+        // ALLOWLIST, NOT DENYLIST, and now one the backend TABLE owns. This used to name
+        // 'tiled' explicitly (so any method the enum gained afterwards passed the check
+        // and was silently registered with VALIS), was then narrowed to `!= 'valis'`
+        // (correct, but a second place to update when a backend gains add_cycle support),
+        // and is now RegBackends.supportsMode — the same field lib_probe asserts and the
+        // same table register_patient.nf dispatches from.
+        if (!RegBackends.supportsMode(params.registration_method, 'add_cycle')) {
+            def supported = RegBackends.methods().findAll {
+                RegBackends.supportsMode(it, 'add_cycle')
+            }
+            error "mode='add_cycle' does not support --registration_method " +
+                  "${params.registration_method}; supported: ${supported.join(', ')}."
         }
 
         if (!params.input) error "mode='add_cycle' requires --input (the new cycle samplesheet)"
         CsvUtils.validateInputCSV(params.input, ParamUtils.requiredColumnsForStep('preprocessing'))
+        // add_cycle has no --start/--stop choice, so the step is always the
+        // literal 'preprocessing' here -- the same column set INPUT_CHECK reads
+        // below via 'path_to_file'.
+        warnUnknownColumns(params.input, 'preprocessing')
 
         // The new-cycle samplesheet intentionally has NO reference row: the
         // registration reference is the frozen prior-run reference (external to
@@ -219,6 +252,7 @@ workflow MIRAGE {
         params.input,
         ParamUtils.requiredColumnsForStep(params.start)
     )
+    warnUnknownColumns(params.input, params.start)
 
     // Fail-fast semantic validation (per-row format + per-patient reference
     // counts + file existence). Runs here so it is also exercised by --dry_run.

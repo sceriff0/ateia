@@ -221,7 +221,7 @@ jobs:
   #
   # It reads ONE result now, not five: `test-suite` is a reusable-workflow call,
   # and a caller job's result is the called workflow's conclusion, so a failure in
-  # any of its five jobs lands here. The five are still enumerated one by one --
+  # any of its six jobs lands here. The six are still enumerated one by one --
   # in `_test-suite.yml`'s own `suite-gate` job, which is where they now live.
   # That enumeration is not optional there and is not duplicated here: a called
   # workflow whose jobs were ALL SKIPPED concludes `success`, so this line alone

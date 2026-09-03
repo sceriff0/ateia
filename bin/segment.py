@@ -22,15 +22,13 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from typing import Optional, Tuple
 
-import dask.array as da
 import numpy as np
-import tifffile
 from csbdeep.utils import normalize
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
 from numpy.typing import NDArray
-from segment_io import extract_dapi_channel as _extract_dapi_channel_impl
-from skimage import segmentation
+from ome_io import write_tiff
+from segment_io import expand_labels_tiled, extract_dapi_channel
 from stardist.models import StarDist2D
 
 logger = get_logger(__name__)
@@ -44,52 +42,11 @@ logger = get_logger(__name__)
 MASK_TIFF_TILE = 1024
 
 __all__ = [
-    "extract_dapi_channel",
     "normalize_dapi",
     "load_stardist_model",
     "segment_nuclei",
     "run_segmentation",
 ]
-
-
-def extract_dapi_channel(
-    multichannel_image_path: str, dapi_channel_index: int = 0
-) -> Tuple[NDArray, dict]:
-    """
-    Extract DAPI channel from multichannel OME-TIFF image using a lazy zarr read.
-
-    Delegates to ``segment_io.extract_dapi_channel`` (``bin/utils/segment_io.py``),
-    which reads through ``tiled_io.open_lazy`` -- a tifffile zarr view that decodes
-    only the tiles a slice actually touches. This is NOT the same as
-    ``tif.asarray(out="memmap")``: on compressed input that call does not map the
-    source file at all, it decodes the ENTIRE image into a new full-size
-    *uncompressed* temp file and memory-maps THAT, so "extracting only the DAPI
-    channel" from it happens only after every channel has already been decoded.
-    ``segment_io`` lives outside this module specifically so it stays importable
-    (and testable) without this module's ``stardist``/``csbdeep`` dependencies.
-
-    Parameters
-    ----------
-    multichannel_image_path : str
-        Path to multichannel OME-TIFF file (e.g., from VALIS registration).
-    dapi_channel_index : int, optional
-        Index of DAPI channel. Default is 0 (first channel).
-
-    Returns
-    -------
-    dapi_image : ndarray, shape (Y, X)
-        DAPI channel image.
-    metadata : dict
-        Image metadata from OME-TIFF.
-
-    Raises
-    ------
-    ValueError
-        If image has wrong dimensions or DAPI channel doesn't exist.
-    """
-    return _extract_dapi_channel_impl(
-        multichannel_image_path, dapi_channel_index, logger=logger
-    )
 
 
 def normalize_dapi(
@@ -196,52 +153,6 @@ def load_stardist_model(
     logger.info("  ✓ Model loaded successfully")
 
     return model
-
-
-def expand_labels_tiled(
-    label_image: NDArray, distance: int = 1, tile_size: int = 1024
-) -> NDArray:
-    """
-    Parallel tiled expansion using Dask.
-
-    Uses dask.array.map_overlap to process tiles in parallel while
-    handling boundary overlaps correctly. Produces identical results
-    to calling expand_labels on the full image.
-
-    Parameters
-    ----------
-    label_image : ndarray, shape (Y, X)
-        Label image with background=0 and labels>=1.
-    distance : int, optional
-        Distance in pixels to expand labels. Default is 1.
-    tile_size : int, optional
-        Size of tiles for processing. Default is 1024.
-
-    Returns
-    -------
-    ndarray
-        Expanded label image with same shape as input.
-    """
-    # Overlap must be >= distance to ensure correct boundary handling
-    overlap = distance + 1
-
-    if tile_size <= 2 * overlap:
-        # Tile too small for this distance, fall back to full image
-        return segmentation.expand_labels(label_image, distance=distance)
-
-    # Convert to dask array with tile_size chunks
-    dask_labels = da.from_array(label_image, chunks=tile_size)
-
-    # Define the expansion function for each tile
-    def _expand_tile(tile: NDArray) -> NDArray:
-        return segmentation.expand_labels(tile, distance=distance).astype(np.uint32)
-
-    # Process tiles in parallel with overlap handling
-    expanded = da.map_overlap(
-        _expand_tile, dask_labels, depth=overlap, boundary="none", dtype=np.uint32
-    )
-
-    return expanded.compute()
 
 
 def segment_nuclei(
@@ -384,7 +295,9 @@ def run_segmentation(
     ensure_dir(output_dir)
 
     # 1. Extract DAPI channel from multichannel image
-    dapi_image, metadata = extract_dapi_channel(image_path, dapi_channel_index)
+    dapi_image, metadata = extract_dapi_channel(
+        image_path, dapi_channel_index, logger=logger
+    )
 
     # 2. Normalize using CSBDeep
     normalized_dapi = normalize_dapi(dapi_image, pmin=pmin, pmax=pmax)
@@ -415,7 +328,7 @@ def run_segmentation(
     # a 40000x40000 uint32 label mask is 6.4 GB before compression, and classic TIFF's
     # 32-bit offsets overflow past 4 GB. Compression usually keeps it under -- usually is
     # not a contract. Guarded by tests/test_slide_io_seam.py.
-    tifffile.imwrite(
+    write_tiff(
         nuclei_mask_path,
         nuclei_mask,
         compression="zlib",
@@ -425,7 +338,7 @@ def run_segmentation(
     del nuclei_mask  # Free before writing cell mask
 
     logger.info(f"  Cell mask: {cell_mask_path.name}")
-    tifffile.imwrite(
+    write_tiff(
         cell_mask_path,
         cell_mask,
         compression="zlib",
@@ -555,4 +468,4 @@ def main():
 
 
 if __name__ == "__main__":
-    exit(main())
+    sys.exit(main())

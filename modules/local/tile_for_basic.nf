@@ -49,9 +49,7 @@ process TILE_FOR_BASIC {
     def nuclear_args = "--nuclear-markers ${MarkerUtils.markerList(params.nuclear_markers).join(' ')}"
     def channels = meta.channels.join(' ')
     """
-    # Log input size for tracing (-L follows symlinks)
-    input_bytes=\$(stat -L --printf="%s" ${ome_tiff} 2>/dev/null || echo 0)
-    echo "${task.process},${meta.patient_id},${ome_tiff.name},\${input_bytes}" > ${meta.patient_id}_${ome_tiff.simpleName}.TILE_FOR_BASIC.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, meta.patient_id, ["${ome_tiff}"], "${meta.patient_id}_${ome_tiff.simpleName}.TILE_FOR_BASIC.size.csv")}
 
     tile_for_basic.py \\
         --image ${ome_tiff} \\
@@ -63,15 +61,15 @@ process TILE_FOR_BASIC {
         ${nuclear_args} \\
         ${args}
 
-    ${ProcessEnvelope.versions(task.process, ['numpy', 'tifffile'])}
+    ${ProcessEnvelope.versions(task.process, ['numpy', 'tifffile'], task.container)}
     """
 
     stub:
     """
     touch ${ome_tiff.simpleName}_tiles.ome.tif
     echo '{"format_version": 1}' > ${ome_tiff.simpleName}_tiles.json
-    echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${ome_tiff.simpleName}.TILE_FOR_BASIC.size.csv
+    ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${meta.patient_id}_${ome_tiff.simpleName}.TILE_FOR_BASIC.size.csv")}
 
-    ${ProcessEnvelope.versionsStub(task.process, ['numpy', 'tifffile'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['numpy', 'tifffile'], task.container)}
     """
 }

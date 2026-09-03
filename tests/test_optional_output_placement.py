@@ -20,6 +20,7 @@ Six other declarations in modules/local/ already write the qualifier correctly
 (export_geojson, generate_registration_qc, register x3, warp_seg_qc), so this
 is a slip against the repo's own prevailing form, not a convention question.
 """
+
 import re
 
 from tests.nfmodel import REPO_ROOT, processes
@@ -40,8 +41,7 @@ def test_optional_is_never_written_inside_path():
     for name, proc in processes().items():
         for m in _BAD.finditer(proc.outputs):
             offenders.append(
-                f"{proc.path.relative_to(REPO_ROOT)} ({name}): "
-                f"{m.group(0).strip()}..."
+                f"{proc.path.relative_to(REPO_ROOT)} ({name}): {m.group(0).strip()}..."
             )
     assert not offenders, (
         "`optional:` inside path(...) is parsed as one of path()'s own "
@@ -65,9 +65,7 @@ def test_the_correct_form_is_what_the_repo_actually_uses():
     """Pins the shape the guard is steering toward. If this stops matching, the
     guard above is enforcing a form that no longer exists anywhere and the next
     person will 'fix' it by deleting the qualifier instead of moving it."""
-    users = sorted(
-        n for n, p in processes().items() if _GOOD.search(p.outputs)
-    )
+    users = sorted(n for n, p in processes().items() if _GOOD.search(p.outputs))
     assert len(users) >= 4, (
         "no process writes `optional:` outside path(...) any more; the guard "
         f"above has no positive example left to point at. Found: {users}"

@@ -601,11 +601,20 @@ def test_parse_args_defaults_match_the_documented_behaviour():
 def test_parse_args_accepts_micro_reg_level():
     a = wsq.parse_args(
         [
-            "--pickle", "p.pickle",
-            "--ref-slide", "r", "--moving-slide", "m",
-            "--ref-geojson", "r.geojson", "--moving-geojson", "m.geojson",
-            "--output", "o.json",
-            "--micro-reg", "1",
+            "--pickle",
+            "p.pickle",
+            "--ref-slide",
+            "r",
+            "--moving-slide",
+            "m",
+            "--ref-geojson",
+            "r.geojson",
+            "--moving-geojson",
+            "m.geojson",
+            "--output",
+            "o.json",
+            "--micro-reg",
+            "1",
         ]
     )
     assert a.micro_reg == 1

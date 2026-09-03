@@ -41,7 +41,7 @@ process TILED_SOLVE {
         --out-manifest ${prefix}_manifest.json \\
         --out-tre ${prefix}_tre.json
 
-    ${ProcessEnvelope.versions(task.process, [])}
+    ${ProcessEnvelope.versions(task.process, [], task.container)}
     """
 
     stub:
@@ -50,6 +50,6 @@ process TILED_SOLVE {
     """
     echo '{"ref_slide":"ref","slides":{"ref":{"M0":[[1,0,0],[0,1,0],[0,0,1]],"mesh":null},"${slidename}":{"M0":[[1,0,0],[0,1,0],[0,0,1]],"mesh":null,"out_shape":[16,16]}}}' > ${prefix}_manifest.json
     echo '{"coarse_tre_px":0,"n_inliers":0,"n_tiles":0,"mesh_refined":false,"rigid_tre_px":{"mean":null,"p50":null,"p90":null,"max":null},"tiles":[]}' > ${prefix}_tre.json
-    ${ProcessEnvelope.versionsStub(task.process, [])}
+    ${ProcessEnvelope.versionsStub(task.process, [], task.container)}
     """
 }

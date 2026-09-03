@@ -21,12 +21,10 @@ Drop-in I/O contract with ``segment.py`` and ``segment_instantseg.py``:
 - emits ``{prefix}.SEGMENT.size.csv`` (input-size trace row) -- written by
   the module
 
-DAPI extraction is shared with the StarDist backend via ``bin/utils/segment_io.py``,
-a module with no ML dependencies of its own -- importing it here does NOT pull in
-``segment.py``'s ``stardist``/``tensorflow``, which stay absent from the CellSAM
-container. Tiled label expansion (``expand_labels_tiled``) is still *replicated*
-below rather than imported from ``segment.py``, for the same isolation reason:
-``segment.py`` itself imports ``stardist``/``tensorflow`` at top level.
+DAPI extraction AND tiled label expansion are both shared with the StarDist backend
+via ``bin/utils/segment_io.py``, a module with no ML dependencies of its own --
+importing it here does NOT pull in ``segment.py``'s ``stardist``/``tensorflow``,
+which stay absent from the CellSAM container.
 """
 
 from __future__ import annotations
@@ -41,14 +39,12 @@ from typing import Tuple
 # Add parent directory to path to import lib modules
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
-import dask.array as da
 import numpy as np
-import tifffile
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
 from numpy.typing import NDArray
-from segment_io import extract_dapi_channel as _extract_dapi_channel_impl
-from skimage import segmentation
+from ome_io import write_tiff
+from segment_io import expand_labels_tiled, extract_dapi_channel
 
 logger = get_logger(__name__)
 
@@ -59,87 +55,6 @@ logger = get_logger(__name__)
 #: own read pattern (many small windowed per-cell/per-region reads, not whole-plane decodes)
 #: -- see docs/perf/2026-08-26-rss.md's tiled-vs-striped table.
 MASK_TIFF_TILE = 1024
-
-
-def extract_dapi_channel(
-    multichannel_image_path: str,
-    dapi_channel_index: int = 0,
-) -> NDArray:
-    """Extract a single (DAPI/nuclear) channel from a multichannel OME-TIFF.
-
-    Delegates to ``segment_io.extract_dapi_channel`` (``bin/utils/segment_io.py``),
-    which reads through ``tiled_io.open_lazy`` -- a tifffile zarr view that decodes
-    only the tiles a slice actually touches, so only the requested channel is ever
-    decoded. This is a lazy zarr read, NOT a memory-map of the source file: unlike
-    what ``tif.asarray(out="memmap")`` implies, that call decodes the ENTIRE image
-    into a new full-size *uncompressed* temp file on compressed input before any
-    slicing happens. Negative interpolation artefacts (e.g. bicubic overshoot from
-    registration) are clipped to zero by ``segment_io``. Shares its implementation
-    with ``segment.py:extract_dapi_channel`` -- ``segment_io`` has no stardist/
-    tensorflow or cellSAM/torch imports, so it stays lightweight for both backends.
-
-    Parameters
-    ----------
-    multichannel_image_path
-        Path to multichannel OME-TIFF (e.g. registration output).
-    dapi_channel_index
-        Index of the nuclear channel. Default 0 (DAPI in channel 0).
-
-    Returns
-    -------
-    NDArray, shape (Y, X)
-        The extracted nuclear channel.
-    """
-    dapi_image, _metadata = _extract_dapi_channel_impl(
-        multichannel_image_path, dapi_channel_index, logger=logger
-    )
-    return dapi_image
-
-
-def expand_labels_tiled(
-    label_image: NDArray,
-    distance: int = 1,
-    tile_size: int = 1024,
-) -> NDArray:
-    """Parallel tiled label expansion using Dask.
-
-    Identical to ``segment.py:expand_labels_tiled``: uses ``dask.array.map_overlap``
-    so peak memory scales with the tile rather than the whole image, while
-    producing the same result as a full-image ``expand_labels``.
-
-    Parameters
-    ----------
-    label_image : NDArray, shape (Y, X)
-        Label image with background=0 and labels>=1.
-    distance
-        Distance (pixels) to expand labels.
-    tile_size
-        Tile side length for chunked processing.
-
-    Returns
-    -------
-    NDArray
-        Expanded label image, same shape as input.
-    """
-    overlap = distance + 1
-
-    if tile_size <= 2 * overlap:
-        return segmentation.expand_labels(label_image, distance=distance)
-
-    dask_labels = da.from_array(label_image, chunks=tile_size)
-
-    def _expand_tile(tile: NDArray) -> NDArray:
-        return segmentation.expand_labels(tile, distance=distance).astype(np.uint32)
-
-    expanded = da.map_overlap(
-        _expand_tile,
-        dask_labels,
-        depth=overlap,
-        boundary="none",
-        dtype=np.uint32,
-    )
-
-    return expanded.compute()
 
 
 def _build_cellsam_input(dapi_image: NDArray) -> NDArray:
@@ -244,7 +159,9 @@ def run_cellsam(
         logger.info(f"  CUDA available: {torch.cuda.get_device_name(0)}")
 
     # 1. Extract DAPI channel and build CellSAM's (H, W, 3) input.
-    dapi_image = extract_dapi_channel(image_path, dapi_channel_index)
+    dapi_image, _metadata = extract_dapi_channel(
+        image_path, dapi_channel_index, logger=logger
+    )
     cellsam_input = _build_cellsam_input(dapi_image)
     del dapi_image
 
@@ -292,7 +209,7 @@ def run_cellsam(
     # a 40000x40000 uint32 label mask is 6.4 GB before compression, and classic TIFF's
     # 32-bit offsets overflow past 4 GB. Compression usually keeps it under -- usually is
     # not a contract. Guarded by tests/test_slide_io_seam.py.
-    tifffile.imwrite(
+    write_tiff(
         nuclei_mask_path,
         nuclei_mask,
         compression="zlib",
@@ -302,7 +219,7 @@ def run_cellsam(
     del nuclei_mask
 
     logger.info(f"  Cell mask: {cell_mask_path.name}")
-    tifffile.imwrite(
+    write_tiff(
         cell_mask_path,
         cell_mask,
         compression="zlib",

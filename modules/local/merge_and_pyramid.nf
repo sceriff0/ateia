@@ -43,9 +43,7 @@ process MERGE_AND_PYRAMID {
     def masks_arg = mask_files ? "--masks-dir masks" : ""
 
     """
-    # Log input size for tracing (channels/ dir only, -L follows symlinks)
-    channels_bytes=\$(du -sLb channels/ | cut -f1)
-    echo "${task.process},${meta.patient_id},channels/,\${channels_bytes}" > ${meta.patient_id}.MERGE_AND_PYRAMID.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, meta.patient_id, ['channels/*'], "${meta.patient_id}.MERGE_AND_PYRAMID.size.csv")}
 
     echo "Sample: ${meta.patient_id}"
     echo "Input directory: channels/"
@@ -63,14 +61,14 @@ process MERGE_AND_PYRAMID {
         ${masks_arg} \\
         ${args}
 
-    ${ProcessEnvelope.versions(task.process, ['tifffile', 'numpy'])}
+    ${ProcessEnvelope.versions(task.process, ['tifffile', 'numpy'], task.container)}
     """
 
     stub:
     """
     touch pyramid.ome.tiff
-    echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}.MERGE_AND_PYRAMID.size.csv
+    ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${meta.patient_id}.MERGE_AND_PYRAMID.size.csv")}
 
-    ${ProcessEnvelope.versionsStub(task.process, ['tifffile', 'numpy'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['tifffile', 'numpy'], task.container)}
     """
 }

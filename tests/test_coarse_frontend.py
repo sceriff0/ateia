@@ -51,7 +51,7 @@ def pair():
     ref = np.zeros((512, 512), dtype=np.float32)
     for _ in range(120):
         y, x = rng.integers(20, 492, 2)
-        ref[y - 4:y + 4, x - 4:x + 4] = rng.uniform(0.5, 1.0)
+        ref[y - 4 : y + 4, x - 4 : x + 4] = rng.uniform(0.5, 1.0)
     mov = np.roll(np.roll(ref, -7, axis=0), 5, axis=1)
     return ref, mov
 
@@ -69,7 +69,7 @@ def rect_pair():
     for _ in range(120):
         y = rng.integers(20, 236)
         x = rng.integers(20, 492)
-        ref[y - 4:y + 4, x - 4:x + 4] = rng.uniform(0.5, 1.0)
+        ref[y - 4 : y + 4, x - 4 : x + 4] = rng.uniform(0.5, 1.0)
     mov = np.roll(np.roll(ref, -7, axis=0), 5, axis=1)
     return ref, mov
 

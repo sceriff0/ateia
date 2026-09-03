@@ -54,6 +54,17 @@ TILE_DTYPE = np.float32
 
 
 def main(argv=None) -> int:
+    """CLI entry point: measure one tile's residual displacement against the reference.
+
+    Writes a per-tile control-point JSON carrying the recovered displacement and
+    the ``error``/``ref_fg``/``mov_fg`` values behind STARE's accept/reject gate --
+    the only on-disk record of those, which is why the artifact is published.
+
+    Returns
+    -------
+    int
+        0 on success.
+    """
     configure_logging()
     ap = argparse.ArgumentParser(description="STARE per-tile residual.")
     ap.add_argument("--reference", required=True)

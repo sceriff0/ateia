@@ -114,7 +114,15 @@ def _module_constant(path: Path, name: str):
 
 
 def _count_imwrite_tile_kwarg_call_sites(path: Path, tile_name: str) -> int:
-    """How many ``tifffile.imwrite(...)`` calls in ``path`` pass ``tile=(tile_name, tile_name)``.
+    """How many ``tifffile.imwrite(...)`` or ``ome_io.write_tiff(...)`` calls in ``path``
+    pass ``tile=(tile_name, tile_name)``.
+
+    Both spellings, because the mask writers now go through ``bin/utils/ome_io.py``'s
+    ``write_tiff`` -- a verbatim forwarder to ``tifffile.imwrite``, so the argument this
+    function checks is the same argument reaching the same writer. Matching only
+    ``imwrite`` after that migration would have made this check return 0 for every file
+    and fail loudly, which is what happened and is why it is widened rather than
+    reasoned about.
 
     An AST ``Call`` match, not a text/regex search: the module also carries a comment
     quoting ``tile=`` in prose (this file's own docstring, and ``convert_image.py``'s),
@@ -123,17 +131,16 @@ def _count_imwrite_tile_kwarg_call_sites(path: Path, tile_name: str) -> int:
     tree = ast.parse(path.read_text())
     count = 0
     for node in ast.walk(tree):
-        if not (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "imwrite"
-        ):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+        if name not in ("imwrite", "write_tiff"):
             continue
         for kw in node.keywords:
-            if kw.arg != "tile":
-                continue
             if (
-                isinstance(kw.value, ast.Tuple)
+                kw.arg == "tile"
+                and isinstance(kw.value, ast.Tuple)
                 and len(kw.value.elts) == 2
                 and all(
                     isinstance(elt, ast.Name) and elt.id == tile_name
@@ -197,7 +204,10 @@ def _write_like(path, array, tile):
 # ---------------------------------------------------------------------------
 
 
-_ALL_WRITER_TILES = [*_TILE_BY_WRITER.items(), ("extract_mask_series", ems.MASK_TIFF_TILE)]
+_ALL_WRITER_TILES = [
+    *_TILE_BY_WRITER.items(),
+    ("extract_mask_series", ems.MASK_TIFF_TILE),
+]
 
 
 @pytest.mark.parametrize("writer, tile", _ALL_WRITER_TILES)
@@ -300,7 +310,9 @@ def test_a_striped_write_of_the_same_array_fails_the_chunk_geometry_assertion(tm
 # ---------------------------------------------------------------------------
 
 
-def test_extract_mask_series_writes_tiled_masks_through_its_own_code_path(tmp_path, monkeypatch):
+def test_extract_mask_series_writes_tiled_masks_through_its_own_code_path(
+    tmp_path, monkeypatch
+):
     """No heavy ML deps -- unlike the three backends above, drive the real ``main()``.
 
     Mirrors ``tests/test_mask_series_write_contract.py``'s fixture: a two-series OME-TIFF

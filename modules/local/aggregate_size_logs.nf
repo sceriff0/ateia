@@ -5,12 +5,19 @@
  * for post-run analysis of resource usage vs input size.
  *
  * Input: Collection of size.csv files from all processes
- * Output: Aggregated input_sizes.csv file
+ * Output: Aggregated input_sizes.csv (header from ProcessEnvelope.SIZE_LOG_COLUMNS)
  */
 process AGGREGATE_SIZE_LOGS {
     tag "aggregate"
     label 'process_single'
-    container 'ubuntu:22.04'
+    // NOT a bare `ubuntu:22.04`. That base ships no procps, and Nextflow's task-metrics
+    // wrapper hard-exits before the script: block without `ps` -- so with the shipped
+    // params.enable_trace=true this process failed with exit 1 and empty stdout on every
+    // real run. The preprocess image has bash, coreutils and procps, and is already
+    // pulled by six other modules, so this costs the cluster no extra pull. The script
+    // below is echo/cat/wc and a hand-written bash-only versions.yml; it needs nothing
+    // else from the image.
+    container 'bolt3x/mirage-preprocess:1.0.0'
 
     input:
     path(size_csvs)
@@ -24,24 +31,19 @@ process AGGREGATE_SIZE_LOGS {
 
     script:
     """
-    echo "process,sample_id,filename,bytes" > input_sizes.csv
+    echo "${ProcessEnvelope.SIZE_LOG_COLUMNS.join(',')}" > input_sizes.csv
     cat ${size_csvs} >> input_sizes.csv
 
     echo "Aggregated \$(wc -l < input_sizes.csv) size log entries"
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        bash: \$(bash --version | head -n1 | sed 's/GNU bash, version //')
-    END_VERSIONS
+    ${ProcessEnvelope.versionsBash(task.process, task.container)}
     """
 
     stub:
     """
-    echo "process,sample_id,filename,bytes" > input_sizes.csv
+    echo "${ProcessEnvelope.SIZE_LOG_COLUMNS.join(',')}" > input_sizes.csv
+    cat ${size_csvs} >> input_sizes.csv
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        bash: stub
-    END_VERSIONS
+    ${ProcessEnvelope.versionsBashStub(task.process, task.container)}
     """
 }

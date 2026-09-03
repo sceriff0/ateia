@@ -95,10 +95,10 @@ resume points, and their headers are a published contract
 
 ```bash
 # run preprocessing only …
-nextflow run . --input samplesheet.csv --outdir results --stop preprocessing
+nextflow run . --input samplesheet.csv --outdir results --stop preprocessing -c site.config
 
 # … then pick up from its checkpoint later
-nextflow run . --input results/csv/preprocessed.csv --outdir results --start registration
+nextflow run . --input results/csv/preprocessed.csv --outdir results --start registration -c site.config
 ```
 
 !!! note "The schema is fixed across parameter settings"
@@ -193,7 +193,8 @@ results/                              # = --outdir
 │       ├── registration/             # *_seg_qc.json — WARP_SEG_QC
 │       │   │                         # *_tre.json    — TILED_SOLVE (tiled backend)
 │       │   ├── qc/                   # *_QC_RGB.{png,tif}, *_QC_RGB_fullres.tif
-│       │   │                         #   — GENERATE_REGISTRATION_QC
+│       │   │                         #   (one 2-panel before/after figure per
+│       │   │                         #   moving slide) — GENERATE_REGISTRATION_QC
 │       │   └── geojson/              # *.geojson — SEG_QC_GEOJSON (reg_qc=2)
 │       └── postprocessing/
 │           └── qc/                   # *.png — GENERATE_POSTPROCESSING_QC
@@ -203,6 +204,17 @@ results/                              # = --outdir
                                       # mirage_resource_report.html — main.nf's
                                       #   workflow.onComplete handler, not a process
 ```
+
+!!! info "The QC report is plots; the data folder beside it is data"
+    `mirage_qc_report_<timestamp>.html` is a self-contained page of images and
+    hand-rolled inline SVG: per-stage registration-error distributions, the
+    per-tile spatial heatmap, a log-log scatter of feature-TRE against cell
+    displacement with the 3× divergence band drawn, and the per-cell residual
+    distribution. It carries **no** software-version table and **no** sample
+    manifest table, because both are files: `mirage_qc_data_<timestamp>/`
+    (published beside the report) holds `collated_versions.yml` and
+    `run_summary.json` verbatim, along with every CSV and JSON the plots were
+    built from. Read the page; parse the folder.
 
 !!! info "Why `geojson/export/`, `registered/registered_slides/` and the repeated `qc/`"
     A process that writes into a named subdirectory of its task directory and
@@ -278,6 +290,51 @@ Written to `--trace_dir` (default `.trace`, **independent of `--outdir`**) when
 
 ---
 
+## Provenance: what a run records about itself
+
+Every process emits a `versions.yml`, and every process emits one row into a
+`*.size.csv` (`process,sample_id,filename,bytes` —
+`lib/ProcessEnvelope.groovy`'s `SIZE_LOG_COLUMNS`). Both are aggregated at the
+end of the run.
+
+```yaml
+"MIRAGE:PREPROCESSING:CONVERT_IMAGE":
+    python: 3.10.14
+    container: bolt3x/mirage-convert:1.0.0
+    tifffile: 2024.12.12
+    bioio: 1.1.0
+    h5py: 3.11.0
+```
+
+The `container:` line is `task.container` as Nextflow resolved it, so it records
+the image that *actually ran* — not just the one a config file names. Every
+`FROM` in `containers/*/Dockerfile` is digest-pinned, so this field plus the
+Dockerfile identifies the exact base bytes a result came from (a first-party
+`bolt3x/mirage-*` image is itself tag-pinned rather than digest-pinned until a
+release publishes it — see
+[Installation → Pre-pulling container images](installation.md#pre-pulling-container-images-optional)).
+In a stub run every value reads `stub`, which is how a stubbed tree is told
+apart from a real one.
+
+| Artifact | Where | What it is |
+|---|---|---|
+| `versions.yml` | per task, aggregated into `qc/mirage_qc_data_<timestamp>/collated_versions.yml` | tool versions + the resolved container, per process |
+| `*.size.csv` | per task, aggregated into `size_logs/input_sizes.csv` | one row per task: `process,sample_id,filename,bytes` — the byte total of that task's inputs |
+| `qc/` (run level) | `<outdir>/qc/` | the aggregated HTML QC report plus its `mirage_qc_data_<timestamp>/` folder, and the self-contained `mirage_resource_report.html` |
+| `<trace_dir>/` | resolved against the **launch directory**, not `--outdir` | Nextflow's own `trace.txt`, `report.html`, `timeline.html` only |
+
+!!! note "The resource report lives in `<outdir>/qc/`; only its INPUT lives under `trace_dir`"
+    `mirage_resource_report.html` is written to `<outdir>/qc/` by `main.nf`'s
+    `workflow.onComplete` handler (`Layout.runDir(cfg.outdir, 'qc')`), not into
+    `trace_dir` — `--trace_dir` only names where it *reads* `trace.txt` from,
+    and where it points its own `report.html`/`timeline.html` links. `--trace_dir`
+    defaults to `.trace` and is resolved against the launch directory, matching
+    where Nextflow itself resolves `trace.file`. A run launched from a different
+    directory reads its traces from somewhere else, and the resource report names
+    the exact path it looked in when it finds nothing there — see
+    [Resources → When no report appears](resources.md#when-no-report-appears) —
+    rather than silently producing an empty report.
+
 ## The measurement-key contract
 
 `quantify.py` produces, and `export_geojson.py` / `export_spatialdata.py`
@@ -292,8 +349,15 @@ consume, a single key grammar:
 | `<Compartment>` | `Nucleus`, `Cytoplasm`, `Cell` | `--quantify_compartments` — when `false`, only `Cell` is produced |
 | `<Statistic>` | `Median`, `Mean`, `Sum` | `Median` is **always** produced; `--expanded_quantification` adds `Mean` and `Sum` |
 
-So a default run (`quantify_compartments=true`, `expanded_quantification=true`)
-emits nine keys per marker:
+So a **default** run (`quantify_compartments=true`, `expanded_quantification=false`)
+emits three keys per marker:
+
+```text
+CD3: Nucleus: Median      CD3: Cytoplasm: Median      CD3: Cell: Median
+```
+
+Turning `expanded_quantification` on (in a `-params-file`; it requires
+`quantify_compartments`) adds Mean and Sum in each compartment, for nine:
 
 ```text
 CD3: Nucleus: Median      CD3: Nucleus: Mean      CD3: Nucleus: Sum
@@ -301,8 +365,9 @@ CD3: Cytoplasm: Median    CD3: Cytoplasm: Mean    CD3: Cytoplasm: Sum
 CD3: Cell: Median         CD3: Cell: Mean         CD3: Cell: Sum
 ```
 
-Plus one **bare** column per marker (`CD3`), which is the whole-cell *mean*,
-kept for backward compatibility with FlowPath's bare-key fast path.
+Plus one **bare** column per marker (`CD3`), which is the whole-cell *mean* and is
+written in every mode — FlowPath's bare-key fast path is hard-wired to
+(whole cell, Mean), so it stays a mean even when Mean is not otherwise emitted.
 
 !!! danger "Do not change this format"
     The grammar is **case- and space-sensitive** and is consumed by the sibling
@@ -327,7 +392,7 @@ kept for backward compatibility with FlowPath's bare-key fast path.
     `Solidity`, `Convex Area µm²`, `Major/Minor Axis Length µm`, `Area µm²`).
 
     This changed with the 2026-08-24 merge; see the
-    [migration note](migration-2026-08-24.md#2-nan-measurements-are-omitted-not-written-as-00).
+    [CHANGELOG's Migration section](https://github.com/sceriff0/mirage/blob/main/CHANGELOG.md#migration--read-before-comparing-any-output-across-this-release).
 
 Cytoplasm is computed as `Cell − Nucleus` by subtraction, per cell. A cell with
 no nuclear overlap yields an empty Nucleus/Cytoplasm compartment, which is

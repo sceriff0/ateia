@@ -36,6 +36,8 @@ The one rule asserted as a rule, rather than merely recorded, is the multi-chann
 ``photometric="minisblack"`` precondition -- see below.
 """
 
+import ast
+import importlib
 import re
 from pathlib import Path
 
@@ -43,46 +45,134 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 
+# CLAUDE.md's "Verification reality" item 7: a POSITIVE text-matching guard ("does this
+# file still write pixels?") is satisfied by a `write_tiff(`/`tifffile.imwrite(` sitting
+# in a comment, keeping a dead PIXEL_WRITERS entry alive. `ci_actions.strip_line_comment`
+# is the one quote-aware `#`-stripper this repo shares for exactly that, rather than a
+# private `split("#")` that would truncate a quoted `#` (e.g. inside a path or f-string).
+# `tests/test_layout.py`'s own stripper (the nfmodel helper `strip_comments_and_strings`)
+# is Groovy/Nextflow-shaped (`//` and `/* */`) and wrong for this file's Python `#` comments.
+ci_actions = importlib.import_module("ci_actions")
+
+
+def _strip_comments(text: str) -> str:
+    """`text` with every `#` line/trailing comment removed, quote-aware."""
+    return "\n".join(ci_actions.strip_line_comment(line) for line in text.splitlines())
+
+
 # file -> (number of pixel-writing call sites, what it writes)
 #
 # Keyed by file and COUNT rather than by line number: line numbers drift under unrelated edits
 # (see tests/test_compartment_mode_routing.py's re-pinning history), while a count still fails
 # the moment a writer is added or removed.
 PIXEL_WRITERS = {
-    "bin/apply_basic_profiles.py": (1, "the illumination-corrected multi-channel slide"),
+    "bin/apply_basic_profiles.py": (
+        1,
+        "the illumination-corrected multi-channel slide",
+    ),
     "bin/convert_image.py": (1, "the converted multi-channel slide"),
-    "bin/extract_mask_series.py": (1, "cell/nuclei masks recovered from a prior pyramid"),
+    "bin/extract_mask_series.py": (
+        1,
+        "cell/nuclei masks recovered from a prior pyramid",
+    ),
     "bin/merge_channels_pyramid.py": (1, "the published QuPath pyramid"),
     "bin/segment.py": (2, "StarDist cell + nuclei masks"),
     "bin/segment_cellsam.py": (2, "CellSAM cell + nuclei masks"),
     "bin/segment_instantseg.py": (2, "InstanSeg cell + nuclei masks"),
     "bin/split_multichannel.py": (1, "one single-channel plane per marker"),
-    "bin/tile_for_basic.py": (1, "the multi-site CZYX pseudo-FOV stack BASICPY fits on"),
+    "bin/tile_for_basic.py": (
+        1,
+        "the multi-site CZYX pseudo-FOV stack BASICPY fits on",
+    ),
     "bin/tiled_stitch.py": (1, "the STARE registered slide"),
-    "bin/utils/image_utils.py": (1, "generic helper; the caller supplies the decisions"),
+    # The seam itself. The regex counts BOTH a def line and a call line whenever they share
+    # a name -- `def ome_tiff_writer(` and `def write_ome_tiff(` each match their own pattern
+    # too, not just their call sites -- so this is 3 def lines (ome_tiff_writer, write_ome_tiff,
+    # write_tiff) plus the 3 real tifffile calls they wrap (TiffWriter(...), the
+    # ome_tiff_writer(...) call inside write_ome_tiff, and the tifffile.imwrite(...) call
+    # inside write_tiff): 6, measured with _writer_sites("bin/utils/ome_io.py") rather than
+    # assumed. This is the ONLY file allowed to name tifffile's writers at all; see
+    # tests/test_ome_io_is_the_only_writer.py.
+    "bin/utils/ome_io.py": (
+        6,
+        "the seam: every TIFF this pipeline writes goes through here",
+    ),
+    "bin/utils/image_utils.py": (
+        1,
+        "generic helper; the caller supplies the decisions",
+    ),
     "bin/utils/qc.py": (2, "QC raster output, not a pipeline artifact"),
 }
 
-# Writers that emit a (C, H, W) stack. These MUST set photometric="minisblack".
+# Writers that emit a (C, H, W) stack and pass photometric THEMSELVES. Every one of these
+# still constructs its own tw.write(...) call, so the flag is theirs to set.
 MULTI_CHANNEL_WRITERS = (
     "bin/apply_basic_profiles.py",
-    "bin/convert_image.py",
     "bin/tile_for_basic.py",
     "bin/merge_channels_pyramid.py",
     "bin/tiled_stitch.py",
 )
 
-_WRITE_CALL = re.compile(r"tifffile\.imwrite\(|TiffWriter\(")
+# ... and the one that DELEGATES the flag. bin/convert_image.py hands its stack to
+# ome_io.write_ome_tiff, which sets photometric="minisblack" itself. Naming the delegation
+# rather than dropping the file is what keeps the property covered: without the second
+# assertion below, moving the flag into the seam would have silently removed
+# convert_image.py from this check with nothing put in its place.
+DELEGATED_MULTI_CHANNEL_WRITERS = {
+    "bin/convert_image.py": "bin/utils/ome_io.py",
+}
+
+#: Every route by which a file under bin/ writes pixels. Before bin/utils/ome_io.py
+#: existed this was `tifffile.imwrite(` and `TiffWriter(` alone, because those were the
+#: only routes there were; ten scripts called them directly. They are now reachable from
+#: exactly one file, and the other twelve writers call one of ome_io's three entry
+#: points. Both halves are matched here so that the INVENTORY -- which file writes what,
+#: and how many times -- survives the seam rather than collapsing to a single row.
+#:
+#: `TiffWriter(` and the ome_io entry points are receiver-agnostic substrings on purpose
+#: -- they never required a `tifffile.` prefix. `imwrite(` alone would be too loose (it
+#: would sweep up cv2.imwrite and any other `.imwrite` method), so the ALIAS a file's own
+#: `import tifffile [as X]` binds is resolved per file with `_tifffile_module_aliases`
+#: below and substituted in -- not a hardcoded `tifffile.` or `tf.` -- so
+#: `import tifffile as tf; tf.imwrite(...)` is counted the same as
+#: `tifffile.imwrite(...)`. Missed until a reviewer's probe file proved the untampered
+#: `tifffile\.imwrite\(` alternative let an aliased call through uncounted.
+_WRITE_CALL_STATIC = r"TiffWriter\(|write_tiff\(|write_ome_tiff\(|ome_tiff_writer\("
+
+
+def _tifffile_module_aliases(path):
+    """Names bound to the tifffile module in `path`: always "tifffile" itself, plus
+    whatever `import tifffile as X` adds. AST, not a hardcoded alias, because the point
+    is to catch whichever name a file actually chose."""
+    try:
+        tree = ast.parse(path.read_text())
+    except SyntaxError:
+        return {"tifffile"}
+    aliases = {"tifffile"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "tifffile":
+                    aliases.add(alias.asname or alias.name)
+    return aliases
+
+
+def _write_call_pattern(path):
+    """The _WRITE_CALL alternation, widened with this file's OWN tifffile module
+    alias(es) so an aliased `X.imwrite(...)` counts the same as `tifffile.imwrite(...)`."""
+    alias_alt = "|".join(re.escape(a) for a in sorted(_tifffile_module_aliases(path)))
+    return re.compile(rf"(?:{alias_alt})\.imwrite\(|{_WRITE_CALL_STATIC}")
 
 
 def _writer_sites(rel):
-    return len(_WRITE_CALL.findall((REPO / rel).read_text()))
+    path = REPO / rel
+    return len(_write_call_pattern(path).findall(_strip_comments(path.read_text())))
 
 
 def _all_writer_files():
     found = {}
     for path in sorted((REPO / "bin").rglob("*.py")):
-        n = len(_WRITE_CALL.findall(path.read_text()))
+        n = len(_write_call_pattern(path).findall(_strip_comments(path.read_text())))
         if n:
             found[path.relative_to(REPO).as_posix()] = n
     return found
@@ -132,8 +222,31 @@ def test_every_multi_channel_writer_sets_photometric_minisblack(rel):
     text = (REPO / rel).read_text()
 
     assert 'photometric="minisblack"' in text, (
-        f"{rel} writes a multi-channel stack without photometric=\"minisblack\". tifffile will "
+        f'{rel} writes a multi-channel stack without photometric="minisblack". tifffile will '
         "store it as one page with C samples and pages[i] will raise IndexError."
+    )
+
+
+@pytest.mark.parametrize("rel,owner", sorted(DELEGATED_MULTI_CHANNEL_WRITERS.items()))
+def test_a_delegating_multi_channel_writer_has_an_owner_that_sets_the_flag(rel, owner):
+    """The delegation must be real in both directions: the caller must not set the flag
+    (or it is not delegating), and the owner must.
+
+    The owner-side check matches the KWARG shape (a trailing comma; both real call sites
+    in ome_io.py have another keyword after ``photometric=`` so this is structural, not a
+    style guess) rather than the bare ``photometric="minisblack"`` substring. ome_io.py's
+    own module docstring names that bare string in prose while explaining the rule, and a
+    text-matching guard checked against the bare substring is satisfied by that prose even
+    when the real kwarg is changed to something else -- watched failing this way before
+    being narrowed.
+    """
+    assert 'photometric="minisblack"' not in (REPO / rel).read_text(), (
+        f"{rel} sets photometric itself, so it is not delegating -- move it back into "
+        "MULTI_CHANNEL_WRITERS"
+    )
+    assert 'photometric="minisblack",' in (REPO / owner).read_text(), (
+        f"{rel} delegates its photometric flag to {owner}, which does not set it. Every "
+        "per-page read downstream of the converted slide breaks silently."
     )
 
 
@@ -154,14 +267,16 @@ def test_minisblack_really_is_what_makes_pages_addressable(tmp_path):
     tifffile.imwrite(str(without_flag), data)
 
     with tifffile.TiffFile(str(with_flag)) as tif:
-        assert len(tif.series[0].pages) == 3, "one page per channel is the property we rely on"
+        assert len(tif.series[0].pages) == 3, (
+            "one page per channel is the property we rely on"
+        )
         assert tif.series[0].pages[2].asarray().shape == (32, 32)
 
     with tifffile.TiffFile(str(without_flag)) as tif:
         n_pages = len(tif.series[0].pages)
 
     assert n_pages != 3, (
-        "writing without photometric=\"minisblack\" produced one page per channel anyway on this "
+        'writing without photometric="minisblack" produced one page per channel anyway on this '
         "tifffile version, so this test no longer demonstrates why the rule exists. Re-check "
         "against the pinned container version before relaxing anything."
     )
@@ -225,7 +340,7 @@ def test_every_mask_writer_sets_bigtiff(rel):
 # Every generator fed to a tiled write is declared here with what it yields. A new one
 # has to be added deliberately, which is the moment to ask whether it yields tiles.
 TILE_FED_GENERATORS = {
-    "_iter_tiles": "bin/convert_image.py -- wraps _iter_planes and re-slices each plane",
+    "_iter_tiles": "bin/utils/ome_io.py -- wraps _iter_planes and re-slices each plane",
     "_tiles": "bin/apply_basic_profiles.py -- channel-major, tile-major",
     "_plane_tiles": "bin/merge_channels_pyramid.py -- per-plane tile walk",
     "stream_tiles": "bin/tiled_stitch.py -- warps and emits one out_tile at a time",
@@ -234,8 +349,6 @@ TILE_FED_GENERATORS = {
 
 def _tiled_writes_with_a_generator():
     """(file, lineno, callee) for every write that sets tile= and is fed a call."""
-    import ast
-
     out = []
     for rel in sorted(set(PIXEL_WRITERS)):
         path = REPO / rel
@@ -246,7 +359,7 @@ def _tiled_writes_with_a_generator():
                 continue
             fn = node.func
             name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
-            if name not in ("write", "imwrite"):
+            if name not in ("write", "imwrite", "write_tiff"):
                 continue
             if not any(k.arg == "tile" for k in node.keywords):
                 continue
@@ -255,27 +368,39 @@ def _tiled_writes_with_a_generator():
             first = node.args[0]
             if isinstance(first, ast.Call):
                 callee = first.func
-                out.append((rel, node.lineno,
-                            callee.attr if isinstance(callee, ast.Attribute)
-                            else getattr(callee, "id", "<expr>")))
+                out.append(
+                    (
+                        rel,
+                        node.lineno,
+                        callee.attr
+                        if isinstance(callee, ast.Attribute)
+                        else getattr(callee, "id", "<expr>"),
+                    )
+                )
     return out
 
 
 def test_every_generator_fed_to_a_tiled_write_yields_tiles():
     """A tiled write fed a PLANE generator fails only on an image bigger than one
     tile -- i.e. never in this suite, and always in production."""
-    undeclared = [(f, ln, c) for f, ln, c in _tiled_writes_with_a_generator()
-                  if c not in TILE_FED_GENERATORS]
+    undeclared = [
+        (f, ln, c)
+        for f, ln, c in _tiled_writes_with_a_generator()
+        if c not in TILE_FED_GENERATORS
+    ]
     assert not undeclared, (
         "tiled write fed an undeclared generator: "
         + ", ".join(f"{f}:{ln} -> {c}()" for f, ln, c in undeclared)
         + ". tifffile requires TILES here, not planes; a plane generator raises "
-          "'tile is too large' on any image larger than one tile. Declare it in "
-          "TILE_FED_GENERATORS once you have checked what it yields.")
+        "'tile is too large' on any image larger than one tile. Declare it in "
+        "TILE_FED_GENERATORS once you have checked what it yields."
+    )
 
 
 def test_the_declaration_is_not_carrying_dead_entries():
     """A name here that no tiled write uses is an excuse for a call that is gone."""
     live = {c for _, _, c in _tiled_writes_with_a_generator()}
     stale = sorted(set(TILE_FED_GENERATORS) - live)
-    assert not stale, f"TILE_FED_GENERATORS names generators no tiled write feeds: {stale}"
+    assert not stale, (
+        f"TILE_FED_GENERATORS names generators no tiled write feeds: {stale}"
+    )

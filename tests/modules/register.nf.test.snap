@@ -2,13 +2,13 @@
     "Should emit versions.yml with process info - stub": {
         "content": [
             [
-                "versions.yml:md5,7ab2b753f080e9564ba699d4bc2f6cec"
+                "versions.yml:md5,e71e758953f46c2e90fe93b887c318fe"
             ]
         ],
+        "timestamp": "2026-09-02T21:40:49.436328",
         "meta": {
-            "nf-test": "0.9.0",
+            "nf-test": "0.9.5",
             "nextflow": "25.04.7"
-        },
-        "timestamp": "2026-06-13T23:42:14.382804"
+        }
     }
 }

@@ -3,6 +3,9 @@
 This directory is nf-core/modules' `basicpy` module, copied verbatim. `main.nf` and
 `meta.yml` are byte-for-byte upstream; nothing here is patched.
 
+Ruling R6's digest pin for this image lives in `conf/modules.config`'s `withName:
+'BASICPY'` block (a `container = '…@sha256:…'` override), not in this vendored file.
+
 Two tests hold that, and it is worth knowing which does what:
 
 * `tests/test_basicpy_module_is_vendored_unmodified.py` pins the **sha256 of each file**,

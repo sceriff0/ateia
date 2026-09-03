@@ -62,22 +62,21 @@ process SEG_QC_GEOJSON {
     def args   = task.ext.args ?: ''
     def prefix = meta.qc_slide
     """
-    bytes=\$(stat -L --printf="%s" ${cell_mask} 2>/dev/null || echo 0)
-    echo "${task.process},${meta.patient_id},${cell_mask.name},\${bytes}" > ${prefix}.SEG_QC_GEOJSON.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, meta.patient_id, ["${cell_mask}"], "${prefix}.SEG_QC_GEOJSON.size.csv")}
 
     mask_to_geojson.py \\
         --mask ${cell_mask} \\
         --out ${prefix}.geojson \\
         ${args}
 
-    ${ProcessEnvelope.versions(task.process, ['skimage', 'scipy'])}
+    ${ProcessEnvelope.versions(task.process, ['skimage', 'scipy'], task.container)}
     """
 
     stub:
     def prefix = meta.qc_slide
     """
     echo '{"type": "FeatureCollection", "features": []}' > ${prefix}.geojson
-    echo "STUB,${meta.patient_id},stub,0" > ${prefix}.SEG_QC_GEOJSON.size.csv
-    ${ProcessEnvelope.versionsStub(task.process, ['skimage', 'scipy'])}
+    ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${prefix}.SEG_QC_GEOJSON.size.csv")}
+    ${ProcessEnvelope.versionsStub(task.process, ['skimage', 'scipy'], task.container)}
     """
 }

@@ -70,7 +70,9 @@ class TestCombinedGeoJsonExport:
         assert any("nucleusGeometry" in f for f in combined["features"])
         assert all("nucleusGeometry" not in f for f in wholecell["features"])
         # Measurements preserved in the companion (compartment gating still works).
-        wc_names = [m["name"] for m in wholecell["features"][0]["properties"]["measurements"]]
+        wc_names = [
+            m["name"] for m in wholecell["features"][0]["properties"]["measurements"]
+        ]
         assert "CD3: Cell: Mean" in wc_names
 
     def test_combined_cell_object_has_toplevel_nucleusgeometry(self, tmp_path):

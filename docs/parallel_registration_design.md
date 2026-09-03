@@ -335,7 +335,7 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   registered pixel coordinates match what postprocessing/segmentation expects.
 - **OME channel manifest.** STITCH must still emit `channels_manifest.json` (filename → OME
   channel names) so `TILED_ADAPTER` matches registered files back to meta by channel signature
-  (`valis_adapter.nf:76-113`). Reuse `create_channels_manifest.py`.
+  (`lib/RegisteredMatch.groovy`). Reuse `create_channels_manifest.py`.
 
 ## Implementation status (branch `feat/tiled-registration`)
 
@@ -376,13 +376,19 @@ dedicated lean `withName:'TILED_*'` overrides (2–8 GB) or pair with a memory-c
   (previously dropped). The fan-out's final-accuracy residual comes from the reg_benchmark harness.
 - **Final QC-report integration (done):** the `_tre.json` already flowed into the report's
   `registration_tre/` input; `generate_qc_report.py` now renders it as a "Registration Accuracy
-  (STARE Tiled TRE)" subsection — a per-slide table (coarse / rigid p50-p90 / post-refinement final
-  p50-p90 / refined / tiles) plus a **per-tile SVG heatmap** of the spatial TRE, sitting alongside
-  the VALIS rTRE, feature-distance, and seg-QC tables. Unit-tested.
-- **Accuracy harness (done):** `bin/utils/reg_benchmark.py` + `bin/registration_benchmark.py` —
-  a ground-truth-free residual-TRE + correlation metric that runs on any method's output, so
-  VALIS vs tiled is a direct number-to-number comparison on the same slide. Validated on synthetic
-  ground truth (STARE drops the residual TRE below 2 px; a pure 11.66 px shift is fully removed).
+  (STARE Tiled TRE)" subsection: a per-slide caption carrying the headline numbers
+  (coarse / rigid p50-p90 / post-refinement final p50-p90 / refined / accepted-of-total
+  tiles), a **per-stage error-distribution plot** for the rigid and post-refinement
+  stages built from the accepted tiles, and the **per-tile SVG heatmap** of the spatial
+  TRE. It sits alongside the VALIS rTRE table and the per-stage seg-QC displacement
+  plots. Unit-tested.
+- **Accuracy harness (done):** `bin/utils/reg_benchmark.py` — a ground-truth-free residual-TRE +
+  correlation metric that runs on any method's output, so VALIS vs tiled is a direct
+  number-to-number comparison on the same slide. Validated on synthetic ground truth (STARE drops
+  the residual TRE below 2 px; a pure 11.66 px shift is fully removed). The CLI that wrapped it,
+  `bin/registration_benchmark.py`, lives on the `benchmarking` branch with the sweep that drives
+  it; on this branch the library is exercised by `tests/test_reg_benchmark.py` and
+  `tests/test_tiled_fanout.py` and is allowlisted in `tests/test_no_dead_bin_modules.py`.
 - **Per-tile Nextflow fan-out (done, and now the only shape):** the adapter runs
   `TILED_COARSE → TILED_REG_TILE (one task per tile) → TILED_SOLVE → TILED_STITCH` — the
   little-process-per-tile design, all JVM-free. `warp_image` gained an `out_origin` so each tile

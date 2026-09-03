@@ -144,7 +144,7 @@ def plan_stages(checkpoint=None) -> tuple:
 
 
 # ── one stage's geometry ───────────────────────────────────────────────────────
-def stage_geometry(warp, slide_name, native_ps, stage):
+def _stage_geometry(warp, slide_name, native_ps, stage):
     """Warp a native :class:`PolySet` into ``stage``'s frame and measure it.
 
     The returned set shares its ring bookkeeping with ``native_ps``, so feature index ``i`` is
@@ -242,10 +242,10 @@ def run(
         )
 
     # ── anchor: warp, size the match radius from the cells themselves, pair once ──
-    a_ref, a_area_ref, a_cent_ref = stage_geometry(
+    a_ref, a_area_ref, a_cent_ref = _stage_geometry(
         warp, ref_slide, ref_native, ANCHOR_STAGE
     )
-    a_mov, a_area_mov, a_cent_mov = stage_geometry(
+    a_mov, a_area_mov, a_cent_mov = _stage_geometry(
         warp, moving_slide, mov_native, ANCHOR_STAGE
     )
     cell_radius = cp.median_equivalent_radius(np.concatenate([a_area_ref, a_area_mov]))
@@ -344,8 +344,8 @@ def run(
     for stage in stages:
         if stage == ANCHOR_STAGE:
             continue
-        s_ref, ar_ref, c_ref = stage_geometry(warp, ref_slide, ref_native, stage)
-        s_mov, ar_mov, c_mov = stage_geometry(warp, moving_slide, mov_native, stage)
+        s_ref, ar_ref, c_ref = _stage_geometry(warp, ref_slide, ref_native, stage)
+        s_mov, ar_mov, c_mov = _stage_geometry(warp, moving_slide, mov_native, stage)
         records[stage] = score_stage(
             s_ref, s_mov, c_ref, c_mov, ar_ref, ar_mov, idx_ref, idx_mov, **score_kwargs
         )
@@ -783,4 +783,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

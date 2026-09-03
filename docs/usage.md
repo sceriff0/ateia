@@ -59,12 +59,12 @@ nextflow run . -profile test,docker --outdir results
 Run the whole pipeline on your own data:
 
 ```bash
-nextflow run . --input samplesheet.csv --outdir results -profile docker
+nextflow run . --input samplesheet.csv --outdir results -profile docker -c site.config
 ```
 
-`--input` and `--outdir` are **required**. `-profile` selects execution + container
-profiles, comma-combined — e.g. `-profile slurm,singularity` on a cluster or
-`-profile test,docker` for the bundled demo.
+`--input`, `--outdir`, `--max_cpus` and `--max_memory` are all **required**; the
+last two come from `site.config` — see [Make a site config](installation.md#size-your-run).
+`-profile` selects execution + container profiles, comma-combined.
 
 !!! note "Two kinds of flags"
     Nextflow distinguishes **pipeline parameters** (double dash, `--input`) from
@@ -85,7 +85,7 @@ profiles, comma-combined — e.g. `-profile slurm,singularity` on a cluster or
 | `-profile` | option | no | Execution/config profiles, comma-combined (e.g. `slurm,singularity`). |
 | `-params-file` | option | no | JSON preset of parameters, e.g. `params/full_pipeline.json`. |
 | `-resume` | option | no | Reuse cached results from a previous run's `work/`. |
-| `-c` | option | no | Layer an extra config file (e.g. site-specific SLURM settings). |
+| `-c` | option | yes on a cluster | Layer your `site.config` (required `max_cpus`/`max_memory`, SLURM fields). See [Make a site config](installation.md#size-your-run). |
 
 For the complete parameter list see [Parameters](parameters.md).
 
@@ -96,7 +96,7 @@ For the complete parameter list see [Parameters](parameters.md).
 
 ```bash
 # works
-nextflow run . --input samplesheet.csv -params-file params/dry_run.json
+nextflow run . --input samplesheet.csv --outdir results -c site.config -params-file params/dry_run.json
 
 nextflow run . --input samplesheet.csv --dry_run true   # x fails on Nextflow 26
 nextflow run . --input samplesheet.csv --dry_run        # x fails on Nextflow 26
@@ -125,42 +125,48 @@ and works on both engines.
     ```bash
     nextflow run . --input samplesheet.csv --outdir results \
       --start preprocessing -profile docker \
-      -params-file params/full_pipeline.json
+      -params-file params/full_pipeline.json \
+      -c site.config
     ```
 
 === "Single stage"
 
     ```bash
     nextflow run . --input samplesheet.csv --outdir results \
-      --start preprocessing --stop preprocessing -profile docker
+      --start preprocessing --stop preprocessing -profile docker \
+      -c site.config
     ```
 
 === "Resume at registration"
 
     ```bash
     nextflow run . --input results/csv/preprocessed.csv --outdir results \
-      --start registration -profile docker -resume
+      --start registration -profile docker -resume \
+      -c site.config
     ```
 
 === "Resume at segmentation"
 
     ```bash
     nextflow run . --input results/csv/registered.csv --outdir results \
-      --start segmentation -profile docker -resume
+      --start segmentation -profile docker -resume \
+      -c site.config
     ```
 
 === "Resume at postprocessing"
 
     ```bash
     nextflow run . --input results/csv/segmented.csv --outdir results \
-      --start postprocessing -profile docker -resume
+      --start postprocessing -profile docker -resume \
+      -c site.config
     ```
 
 === "Dry run"
 
     ```bash
     nextflow run . --input samplesheet.csv --outdir results \
-      --start preprocessing -params-file params/dry_run.json
+      --start preprocessing -params-file params/dry_run.json \
+      -c site.config
     ```
 
 ## The samplesheet
@@ -188,6 +194,17 @@ different kind of image:
 | `registration` | `preprocessed_image` | `patient_id`, `is_reference`, `channels` | `<outdir>/csv/preprocessed.csv` |
 | `segmentation` | `registered_image` | `patient_id`, `is_reference`, `channels` | `<outdir>/csv/registered.csv` |
 | `postprocessing` | `registered_image` | `patient_id`, `is_reference`, `channels`, `cell_mask`, `nuclei_mask` | `<outdir>/csv/segmented.csv` |
+
+### Supported formats {: #supported-formats }
+
+Which formats this pipeline reads, and what each was verified against, is
+recorded in [Format validation](validation/format_validation.md) — synthesised
+fixtures for everything CI can generate (pyramidal OME-TIFF, BigTIFF, RGB,
+8-bit, float32, HDF5, NDPI/NDPIS) on every push. The five vendor formats that
+cannot be synthesised (`.czi`, `.nd2`, `.lif`, `.ndpi` real scanner bytes,
+`.svs`) each need a cluster run against real vendor files, and as of this
+release none has been recorded — the page marks all five "kit-validated:
+pending" rather than omitting them.
 
 Example raw samplesheet (`--start preprocessing`):
 
@@ -290,15 +307,22 @@ Profiles are defined in `nextflow.config` and combine with commas — pick one
 | `conda` | container | Conda-managed environments (no containers). |
 | `local` | executor | Local executor with conservative caps (4 CPU / 16 GB). |
 | `slurm` | executor | Submit each process as a SLURM job. |
-| `ieo` | site | IEO cluster profile (site-specific). |
 | `test` / `test_full` | data + caps | Bundled synthetic datasets, small resource caps, CPU segmentation. |
 | `instantseg_test` / `cellsam_test` | data + caps | Test profiles exercising those segmentation backends. |
+
+!!! note "Your own site profile"
+    There is no shipped site profile. Copy `conf/site.config.template` to
+    `site.config` and layer it with `-c site.config` — see
+    [Make a site config](installation.md#size-your-run). A named profile is
+    possible too (`profiles { mysite { includeConfig 'conf/mysite.config' } }`),
+    but note that a profile body is evaluated while `nextflow.config` is parsed,
+    whereas a `-c` file is layered afterwards and wins on params.
 
 ```bash
 # Laptop demo
 nextflow run . -profile test,docker --outdir results
 # HPC production
-nextflow run . -profile slurm,singularity --input samplesheet.csv --outdir results
+nextflow run . -profile slurm,singularity --input samplesheet.csv --outdir results -c site.config
 ```
 
 JSON presets in `params/` (`full_pipeline.json`, `preprocessing_only.json`,
@@ -311,7 +335,8 @@ On a cluster, combine the SLURM executor with Singularity containers:
 
 ```bash
 nextflow run . -profile slurm,singularity \
-  --input samplesheet.csv --outdir results --start preprocessing
+  --input samplesheet.csv --outdir results --start preprocessing \
+  -c site.config
 ```
 
 - **Cache images once** — point `NXF_SINGULARITY_CACHEDIR` (and
@@ -321,10 +346,10 @@ nextflow run . -profile slurm,singularity \
 - **GPU jobs** — request a GPU with `--gpu_type` matching `sinfo -o "%G"`; the
   request is emitted as `--gres=gpu:<value>` and Singularity passes the device with
   `--nv`. Set `seg_gpu = false` to force CPU.
-- **Resource caps** — `--max_memory` (default `700.GB`), `--max_cpus` (`128`),
-  `--max_time` (`240.h`) clamp every per-process request; memory/time scale with
-  `task.attempt`, so retries automatically ask for more (up to the cap). See the
-  [cluster parameters](parameters.md#cluster-resources).
+- **Resource caps** — `--max_memory` and `--max_cpus` have **no default** (required
+  at launch); `--max_time` defaults to `240.h`. All three clamp every per-process
+  request; memory/time scale with `task.attempt`, so retries automatically ask
+  for more (up to the cap). See the [cluster parameters](parameters.md#cluster-resources).
 - **`DEEPCELL_ACCESS_TOKEN` on Singularity** — `singularity.envWhitelist`
   forwards it to the container by *reference*, so it must be present in the
   environment on the compute node itself, and a SLURM site launching with
@@ -421,7 +446,7 @@ Then set `NXF_OFFLINE=true` on the cluster so Nextflow skips every remote check
 
 ```bash
 export NXF_OFFLINE=true
-nextflow run . -profile slurm,singularity --input samplesheet.csv --outdir results
+nextflow run . -profile slurm,singularity -c site.config --input samplesheet.csv --outdir results
 ```
 
 The plugin version is pinned exactly, never as a range, so the copy you
@@ -508,9 +533,17 @@ key grammar is a cross-repository contract — see
     `--memory_mode low` and lower `--reg_max_image_dim`.
 
 ??? failure "The run seems to hang at startup"
-    Usually Nextflow pulling large container images on first run. Pre-pull once:
-    `docker pull cdgatenbee/valis-wsi:1.0.0` (and the `bolt3x/mirage-*`
-    tag pinned in `conf/modules.config`), or the `singularity pull` equivalents.
+    Usually Nextflow pulling large container images on first run. Every
+    MIRAGE-owned image is named in `modules/local/*.nf`'s `container` directive,
+    or — for the per-backend images — in `lib/SegBackends.groovy` /
+    `lib/WarpBackends.groovy`; `conf/modules.config` owns those processes'
+    resources, not their images. The one exception is `BASICPY`, the single
+    vendored nf-core module: `conf/modules.config`'s `withName: 'BASICPY'` block
+    overrides its image to a digest-pinned reference, so that one image comes
+    from `conf/modules.config` on purpose (see
+    [Installation → Where tags live, and what they pin](installation.md#pre-pulling-container-images-optional)).
+    Pre-pull them once with the list in
+    [Installation → Pre-pulling container images](installation.md#pre-pulling-container-images-optional).
 
 ??? failure "Singularity: `FATAL: ... permission denied`"
     The cache isn't writable. Point it at a path you own:
@@ -519,9 +552,12 @@ key grammar is a cross-repository contract — see
     export SINGULARITY_CACHEDIR=$HOME/.singularity_cache
     ```
 
-??? failure "`--expanded_quantification requires --quantify_compartments`"
-    Expanded output depends on compartments. Either add `--quantify_compartments`,
-    or drop `--expanded_quantification` for a flat per-cell table.
+??? failure "`expanded_quantification requires quantify_compartments to also be true`"
+    Expanded output depends on compartments. Both are booleans, so set them in a
+    `-params-file`: either add `"quantify_compartments": true` alongside
+    `"expanded_quantification": true`, or drop `expanded_quantification` for a
+    flat per-cell table. Neither can be passed on the command line — see
+    [Boolean parameters](#boolean-parameters).
 
 ??? question "Do I need a GPU?"
     No — run CPU-only with `seg_gpu = false`. A GPU mainly accelerates `SEGMENT`.

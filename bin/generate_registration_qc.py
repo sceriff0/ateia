@@ -28,6 +28,14 @@ Custom scale factor:
         --output qc/ \\
         --scale-factor 0.5
 
+Before/after (the form the pipeline uses):
+
+    $ python generate_registration_qc.py \\
+        --reference patient1_ref.ome.tif \\
+        --registered patient1_cycle2_registered.ome.tif \\
+        --native patient1_cycle2_preprocessed.ome.tif \\
+        --output qc/
+
 Output Format
 -------------
 For each registered image, creates:
@@ -35,13 +43,23 @@ For each registered image, creates:
 - {basename}_QC_RGB.tif: Downsampled TIFF for ImageJ viewing
 - {basename}_QC_RGB.png: Downsampled PNG for quick preview
 
-Channel assignment in composites:
-- Red: Registered image
+Layout. With --native, each output is a TWO-PANEL figure on the reference
+canvas: left is *Before* (reference + the native, pre-registration moving
+slide), right is *After* (reference + the registered slide), separated by a
+blue band. Without --native only the "after" panel is drawn.
+
+Channel assignment in both panels:
+- Red: the moving slide (native on the left, registered on the right)
 - Green: Reference image
-- Blue: 0 (black)
+- Blue: 0, except the separator band between panels
 
 Perfect alignment appears yellow (red + green).
-Misalignment shows red/green fringing.
+Misalignment shows red/green fringing -- fringing that shrinks from the left
+panel to the right one is exactly the correction registration applied.
+
+The moving slide is placed on the reference canvas by pad-or-crop at the
+origin, never by rescaling: a rescale would absorb the scale component of the
+misalignment and make the "before" panel understate the error.
 
 Notes
 -----
@@ -79,9 +97,11 @@ def parse_args() -> argparse.Namespace:
         Parsed arguments with attributes:
         - reference: Path to reference image
         - registered: List of paths to registered images
+        - native: List of paths to the native pre-registration images
         - output: Path to output directory
         - scale_factor: Downsampling factor
         - nuclear_markers: Ordered nuclear/fiducial marker preference list
+        - pixel_size_um: Pixel size in micrometers, stamped on both QC TIFFs
         - no_fullres: Skip full-resolution output
         - no_png: Skip PNG output
         - no_tiff: Skip downsampled TIFF output
@@ -128,6 +148,19 @@ Output:
     )
 
     parser.add_argument(
+        "--native",
+        type=Path,
+        nargs="+",
+        default=None,
+        help=(
+            "Path(s) to the NATIVE (pre-registration) counterpart of each "
+            "--registered image, in the same order. When given, each QC figure "
+            "gains a 'before' panel showing the reference overlaid with the "
+            "un-registered moving slide. Omit for the single 'after' panel."
+        ),
+    )
+
+    parser.add_argument(
         "--output", type=Path, required=True, help="Output directory for QC files"
     )
 
@@ -163,13 +196,24 @@ Output:
     )
 
     parser.add_argument(
+        "--pixel-size-um",
+        type=float,
+        default=None,
+        help=(
+            "Pixel size in micrometers, stamped as the XResolution/ResolutionUnit "
+            "tags on both the full-resolution and downsampled QC TIFFs. Omit to "
+            "leave the output unstamped, unchanged from before this flag existed."
+        ),
+    )
+
+    parser.add_argument(
         "--verbose", action="store_true", help="Enable verbose (DEBUG) logging"
     )
 
     return parser.parse_args()
 
 
-def process_single_image(
+def _process_single_image(
     reference_path: Path,
     registered_path: Path,
     output_dir: Path,
@@ -179,6 +223,8 @@ def process_single_image(
     save_tiff: bool,
     logger,
     nuclear_markers=None,
+    native_path=None,
+    pixel_size_um=None,
 ) -> Tuple[bool, str]:
     """Process a single registered image to generate QC outputs.
 
@@ -202,6 +248,12 @@ def process_single_image(
         Logger instance.
     nuclear_markers : sequence of str, optional
         Ordered nuclear/fiducial marker preference list.
+    native_path : Path, optional
+        The registered image's native (pre-registration) counterpart. Adds the
+        "before" panel when supplied.
+    pixel_size_um : float, optional
+        Pixel size in micrometers, stamped on both QC TIFFs. Omit to leave the
+        output unstamped.
 
     Returns
     -------
@@ -225,6 +277,8 @@ def process_single_image(
             save_png=save_png,
             save_tiff=save_tiff,
             nuclear_markers=nuclear_markers,
+            native_path=native_path,
+            pixel_size_um=pixel_size_um,
         )
 
         return True, "Success"
@@ -277,12 +331,25 @@ def main() -> int:
         logger.error(f"Reference image not found: {args.reference}")
         return 1
 
+    # --native is positional against --registered: index i of one is index i of the
+    # other. A silent zip() would pair the wrong slides when the lengths differ, and
+    # a wrongly-paired "before" panel is worse than no before panel at all -- it
+    # looks like a catastrophic registration failure.
+    if args.native is not None and len(args.native) != len(args.registered):
+        logger.error(
+            f"--native takes one path per --registered image, in the same order: "
+            f"got {len(args.native)} native and {len(args.registered)} registered."
+        )
+        return 1
+
     # Create output directory
     args.output.mkdir(parents=True, exist_ok=True)
     logger.info(f"Reference image: {args.reference}")
     logger.info(f"Output directory: {args.output}")
     logger.info(f"Scale factor: {args.scale_factor}")
     logger.info(f"Nuclear markers: {args.nuclear_markers or 'default'}")
+    logger.info(f"Native images: {len(args.native) if args.native else 0}")
+    logger.info(f"Pixel size (um): {args.pixel_size_um or 'unstamped'}")
     logger.info(f"Save full-res: {not args.no_fullres}")
     logger.info(f"Save PNG: {not args.no_png}")
     logger.info(f"Save TIFF: {not args.no_tiff}")
@@ -294,6 +361,7 @@ def main() -> int:
     failed_images: List[Tuple[Path, str]] = []
 
     for i, reg_path in enumerate(args.registered, 1):
+        native_path = args.native[i - 1] if args.native else None
         logger.info(f"Processing {i}/{len(args.registered)}: {reg_path.name}")
 
         # Validate file exists
@@ -308,7 +376,7 @@ def main() -> int:
             continue
 
         # Process image
-        success, message = process_single_image(
+        success, message = _process_single_image(
             reference_path=args.reference,
             registered_path=reg_path,
             output_dir=args.output,
@@ -318,6 +386,8 @@ def main() -> int:
             save_tiff=not args.no_tiff,
             logger=logger,
             nuclear_markers=args.nuclear_markers,
+            native_path=native_path,
+            pixel_size_um=args.pixel_size_um,
         )
 
         if success:

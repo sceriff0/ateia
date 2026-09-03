@@ -57,6 +57,16 @@ tests/test_ci_stack_pinned.py::test_image_installing_a_constrained_package_reads
 # --- a pointer to a decision recorded elsewhere, not a second decision.
 tests/test_no_dead_bin_modules.py::test_bin_utils_module_has_a_real_importer[tiled_pipeline.py]
 
+# --- bin/utils/reg_benchmark.py lost its only production importer,
+# --- bin/registration_benchmark.py, deleted from this branch for release 1.0
+# --- (it survives on `benchmarking`, alongside the sweep that drives it). The
+# --- library stays: it is a deliberate accuracy-measurement oracle kept
+# --- independent of the pipeline's own DISK/LightGlue front-end, imported by
+# --- tests/test_reg_benchmark.py and tests/test_tiled_fanout.py. The skip
+# --- comes from that file's own permanent allowlist, so this entry is a
+# --- pointer to a decision recorded elsewhere, not a second decision.
+tests/test_no_dead_bin_modules.py::test_bin_utils_module_has_a_real_importer[reg_benchmark.py]
+
 # --- DEBT, not an exemption. Read this one before adding anything like it.
 # ---
 # --- This case skips when stardist/csbdeep are not importable. The pytest job
@@ -75,6 +85,13 @@ tests/test_no_dead_bin_modules.py::test_bin_utils_module_has_a_real_importer[til
 # --- csbdeep lands in the CI set and this line is deleted, or the case is.
 tests/test_segment_lazy_dapi_read.py::test_segment_py_delegation_is_live_when_importable
 
+# --- R4 (1.0.0): params/test.json is the one preset allowed to bake in site
+# --- sizing -- it pins tiny self-contained ceilings (2 cpus / 6.GB / 6.h) so the
+# --- test suite does not depend on a developer's -c site.config. The other six
+# --- presets are checked by the same parametrised test; this is the one
+# --- permanent, deliberate skip.
+tests/test_param_presets_are_coherent.py::test_a_preset_does_not_bake_in_site_sizing[test.json]
+
 # --- ENVIRONMENT-CONDITIONAL (`?` prefix: suppressed when they fire, exempt from
 # --- the stale-entry check). These six skip in CI's python-tests job, which
 # --- deliberately does not install Nextflow, and do NOT skip on a developer
@@ -88,3 +105,17 @@ tests/test_segment_lazy_dapi_read.py::test_segment_py_delegation_is_live_when_im
 ?tests/test_cleanup_validation.py::test_an_unknown_level_names_the_valid_set
 ?tests/test_cleanup_validation.py::test_start_past_preprocessing_at_a_cleaning_level_says_something
 ?tests/test_cleanup_validation.py::test_the_default_path_still_launches
+
+# --- NOT environment-conditional (no `?`): these three skip because
+# --- docs/validation/format_validation.md is in the explicit, honest "pending"
+# --- state (RULING R3 -- the vendor formats need a cluster and private images
+# --- CI never has). That is a property of the REPO's content, the exact case
+# --- this file's own docstring says an unconditional entry is for. Once
+# --- tests/cluster/validate_formats.sh's real output is copied over that file
+# --- (Task 14 Steps 5-7 / tests/cluster/README.md), these three stop skipping
+# --- and start running for real -- at which point these lines match nothing
+# --- and the stale-entry check fails, on purpose, so landing the real evidence
+# --- forces this file to be cleaned up in the same commit.
+tests/test_validation_report_is_real.py::test_the_report_names_the_commit_it_was_produced_from
+tests/test_validation_report_is_real.py::test_the_report_names_the_container_the_probe_ran_in
+tests/test_validation_report_is_real.py::test_the_report_records_at_least_one_successful_conversion

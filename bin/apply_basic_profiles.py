@@ -106,6 +106,7 @@ import numpy as np  # noqa: E402
 import tifffile  # noqa: E402
 from fov_tiling import fov_overlaps  # noqa: E402
 from logger import configure_logging, get_logger  # noqa: E402
+from ome_io import ome_metadata, ome_tiff_writer  # noqa: E402
 from pixel_size import (  # noqa: E402
     read_ome_pixel_size,
     resolve_pixel_size,
@@ -237,7 +238,10 @@ def apply_basic_profiles(
     tile_shape = tuple(manifest["tile_shape"])
 
     flatfields = _read_profile_stack(
-        flatfield_path, len(profile_channels), tile_shape, "flatfield",
+        flatfield_path,
+        len(profile_channels),
+        tile_shape,
+        "flatfield",
         require_positive=True,
     )
     if darkfield_path is None or not Path(darkfield_path).exists():
@@ -354,15 +358,13 @@ def apply_basic_profiles(
 
     arr, _dtype, close = open_lazy(image_path)
     try:
-        metadata = {
-            "axes": "CYX",
-            "Channel": {"Name": list(channel_names)},
-            "PhysicalSizeX": pixel_size_x,
-            "PhysicalSizeXUnit": "\u00b5m",
-            "PhysicalSizeY": pixel_size_y,
-            "PhysicalSizeYUnit": "\u00b5m",
-        }
-        with tifffile.TiffWriter(str(output_path), bigtiff=True, ome=True) as tw:
+        # The dict AND the writer come from bin/utils/ome_io.py. This file used to
+        # rebuild both -- one of the four independent copies of the same six keys.
+        # The header's attribute ORDER now follows ome_io.ome_metadata's own order
+        # (the order convert_image.py already used), not this file's former order;
+        # pixels and values are unchanged.
+        metadata = ome_metadata(list(channel_names), (pixel_size_x, pixel_size_y))
+        with ome_tiff_writer(str(output_path), bigtiff=True, ome=True) as tw:
             tw.write(
                 _tiles(),
                 shape=(n_channels, height, width),
@@ -401,9 +403,7 @@ def apply_basic_profiles(
     clip_stats.finalize()
     out_stats.finalize()
 
-    logger.info(
-        f"[OK] Saved OME-TIFF with {n_channels} channels to {output_path}"
-    )
+    logger.info(f"[OK] Saved OME-TIFF with {n_channels} channels to {output_path}")
     # Returns the output PATH, not the pixels. The whole-array version returned the
     # assembled slide, which is precisely the object this function now exists not to
     # build; handing one back would reintroduce the peak at every call site.
@@ -411,12 +411,27 @@ def apply_basic_profiles(
 
 
 def parse_args(argv=None):
+    """Parse the BASICPY-apply CLI.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argument vector; ``None`` reads ``sys.argv[1:]``.
+
+    Returns
+    -------
+    argparse.Namespace
+        ``image``, ``sidecar``, ``flatfield``, ``darkfield`` (optional),
+        ``output``, ``pixel_size`` (may be the literal ``'auto'``), ``log_level``.
+    """
     parser = argparse.ArgumentParser(
         description="Apply BASICPY flatfield/darkfield profiles and reassemble the slide."
     )
     parser.add_argument("--image", required=True, help="Input OME-TIFF (C, Y, X).")
     parser.add_argument("--sidecar", required=True, help="Tile-position JSON.")
-    parser.add_argument("--flatfield", required=True, help="*-ffp.ome.tif from BASICPY.")
+    parser.add_argument(
+        "--flatfield", required=True, help="*-ffp.ome.tif from BASICPY."
+    )
     # Optional: at upstream defaults BASICPY estimates no darkfield, and while it still
     # writes an all-zero *-dfp.ome.tif, a caller with none is a legitimate case.
     parser.add_argument(
@@ -429,6 +444,13 @@ def parse_args(argv=None):
 
 
 def main(argv=None):
+    """CLI entry point: apply the flatfield/darkfield profiles and reassemble the slide.
+
+    Returns
+    -------
+    int
+        0 on success. Failures propagate as exceptions.
+    """
     args = parse_args(argv)
     configure_logging(getattr(logging, args.log_level.upper(), logging.INFO))
     apply_basic_profiles(

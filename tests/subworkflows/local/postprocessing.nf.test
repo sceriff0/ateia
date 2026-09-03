@@ -404,14 +404,32 @@ nextflow_workflow {
                 compression = 'zstd'
                 debug_channels = false
             }
+            // `pixel_size` goes in the METAS below, not only in params. EXPORT_GEOJSON
+            // and EXPORT_SPATIALDATA both render the flag from `meta.pixel_size`: each
+            // is handed a CSV or a pyramid rather than the source image, so neither can
+            // resolve `params.pixel_size == 'auto'` itself, and both read the value the
+            // samplesheet reader already resolved. In production
+            // `Meta.fromCheckpointRow` REQUIRES the column (lib/Meta.groovy:190-197), so
+            // it is always there; a hand-built meta has to supply it. Absent, the flag
+            // renders as the literal string `null` and bin/utils/pixel_size.py exits 1
+            // with `PixelSizeError: --pixel_size 'null' is neither a number nor 'auto'`
+            // -- family 6 of nightly 33633986188 (test 8e60d8b3), the one case in the
+            // fourteen that reached a process and failed inside it.
+            //
+            // Setting it on input[0] is enough for the export chain: QUANTIFY_MARKERS
+            // rebuilds the grouped meta as `metas[0] + [id: ...]`, so the key survives
+            // SPLIT_CHANNELS -> QUANTIFY -> MERGE_QUANT_CSVS -> ASSEMBLE_EXPORT.
+            // (The comment lives out here rather than inside the workflow block below:
+            // that block is a GString, and a `${...}` in it would be interpolated
+            // against the test's own binding.)
             workflow {
                 """
                 input[0] = Channel.fromList([
-                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA']],
+                    [[patient_id: 'P001', is_reference: true, channels: ['DAPI', 'PANCK', 'SMA'], pixel_size: 0.325],
                      file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)]
                 ])
                 input[1] = Channel.fromList([
-                    [[patient_id: 'P001', id: 'P001', is_reference: true],
+                    [[patient_id: 'P001', id: 'P001', is_reference: true, pixel_size: 0.325],
                      file('$projectDir/tests/testdata/P001_cell_mask.tif', checkIfExists: true)]
                 ])
                 input[2] = Channel.fromList([
@@ -444,7 +462,7 @@ nextflow_workflow {
                     def csv = get(0)
                     assert file(csv).exists()
                     assert file(csv).name == 'postprocessed.csv'
-                    def lines = csv.readLines()
+                    def lines = file(csv).readLines()
                     // Header + at least 1 data row
                     assert lines.size() >= 2
                     // Validate header contains expected columns

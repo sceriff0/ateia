@@ -13,9 +13,13 @@ process REGISTER {
     // patient_id is the grouping key; all_metas carries the per-slide metadata list.
     tag "${patient_id}"
 
-    // VALIS uses the maintained upstream image (linux/amd64); we do not rebuild
-    // it (its from-source libvips build is heavy and not vendored). See containers/README.md.
-    container 'cdgatenbee/valis-wsi:1.0.0'
+    // VALIS uses the maintained upstream image (linux/amd64); we do not rebuild it (its
+    // from-source libvips build is heavy and not vendored). See containers/README.md.
+    // DIGEST-PINNED (ruling R6), digest only and no tag: Apptainer documents an image
+    // reference as NAME[:TAG|@DIGEST] and has known bugs with the combined form, and the
+    // cluster pulls through Singularity. The digest below is cdgatenbee/valis-wsi:1.0.0
+    // as resolved 2026-09-02, and it is the SAME image containers/merge builds FROM.
+    container 'cdgatenbee/valis-wsi@sha256:eac27cc599ae0e54aa01c1bef97538301994ce1abd4da44be3f3130ab85a40e6'
 
     input:
     // Use stageAs to avoid filename collision when reference is included in preproc_files
@@ -79,10 +83,7 @@ process REGISTER {
     def jvm_heap_gb = Math.min(heap_request, task.memory.toGiga() - 4)
 
     """
-    # === LOG INPUT SIZES ===
-    # Sum all input OME-TIFF file sizes for resource tracing
-    total_bytes=\$(find -L ref input_* -maxdepth 1 -type f \\( -name "*.ome.tif" -o -name "*.ome.tiff" \\) -exec stat -L --printf="%s\\n" {} + 2>/dev/null | awk '{sum+=\$1} END {print sum}')
-    echo "${task.process},${patient_id},inputs/,\${total_bytes:-0}" > ${patient_id}.REGISTER.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, patient_id, ['ref/*', 'input_*/*'], "${patient_id}.REGISTER.size.csv")}
 
     mkdir -p registered_slides preprocessed
 
@@ -192,7 +193,7 @@ ${valis_overrides}
     rm -rf preprocessed/deformation_fields preprocessed/masks preprocessed/overlaps \
            preprocessed/rigid_registration preprocessed/non_rigid_registration preprocessed/processed
 
-    ${ProcessEnvelope.versions(task.process, ['valis'])}
+    ${ProcessEnvelope.versions(task.process, ['valis'], task.container)}
     """
 
     stub:
@@ -221,9 +222,9 @@ ${valis_overrides}
     ${touch_commands}
     touch preprocessed/data/${patient_id}_registrar.pickle
     echo '${manifest_json}' > channels_manifest.json
-    echo "STUB,${patient_id},stub,0" > ${patient_id}.REGISTER.size.csv
+    ${ProcessEnvelope.sizeLogStub(task.process, patient_id, "${patient_id}.REGISTER.size.csv")}
     ${stub_ckpt}
 
-    ${ProcessEnvelope.versionsStub(task.process, ['valis'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['valis'], task.container)}
     """
 }

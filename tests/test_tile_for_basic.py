@@ -80,7 +80,9 @@ def test_tiles_land_on_the_z_axis_so_the_module_sees_more_than_one_site(tmp_path
     )
 
     with tifffile.TiffFile(str(out)) as tif:
-        assert tif.is_ome, "the module reads the file through Bio-Formats; it must be OME"
+        assert tif.is_ome, (
+            "the module reads the file through Bio-Formats; it must be OME"
+        )
         ome = tif.ome_metadata
         series = tif.series[0]
 

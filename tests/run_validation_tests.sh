@@ -214,6 +214,105 @@ run_test \
 
 echo ""
 echo "=========================================="
+echo "Test Suite: Samplesheet shapes"
+echo "=========================================="
+echo ""
+
+# Test 3.1: paths RELATIVE to the launch directory.
+#
+# This case can only live here. CsvUtils.validateInputSemantics resolves a
+# relative path with `new File(p).exists()`, i.e. against the JVM's working
+# directory -- the LAUNCH directory. run_test cd's to $PROJECT_ROOT before every
+# `nextflow run`, so a sheet holding repo-root-relative paths resolves. Under
+# nf-test the launch directory is a per-test .nf-test/tests/<hash>/ path that is
+# not knowable when the fixture is generated, so the same assertion cannot be
+# made from an nf-test file.
+run_test \
+    "Valid - paths relative to the launch directory" \
+    "pass" \
+    "$TESTDATA_DIR/relative_paths_input.csv" \
+    "" \
+    --start preprocessing
+
+# Test 3.2: CRLF line endings (Excel on Windows). MEASURED on NXF_VER=25.04.7
+# and 26.04.6: Nextflow's splitCsv already strips the trailing \r cleanly, so
+# this is a regression guard (a future engine change, or a hand-rolled reader
+# that splits on "\n" without going through splitCsv/readLines) rather than a
+# currently-live bug -- see generate_complete_testdata.py's crlf_input.csv
+# comment for the full measurement.
+run_test \
+    "Valid - CRLF line endings" \
+    "pass" \
+    "$TESTDATA_DIR/crlf_input.csv" \
+    "" \
+    --start preprocessing
+
+# Test 3.3: UTF-8 BOM on the header. Without CsvUtils.readCsvLines' strip the
+# first column reads as "<BOM>patient_id" and every lookup returns -1 -- which
+# is a hang in the sized groupTuples, not an error.
+run_test \
+    "Valid - UTF-8 BOM on the header row" \
+    "pass" \
+    "$TESTDATA_DIR/bom_input.csv" \
+    "" \
+    --start preprocessing
+
+# Test 3.4: a quoted path containing a space.
+run_test \
+    "Valid - quoted path containing a space" \
+    "pass" \
+    "$TESTDATA_DIR/space_path_input.csv" \
+    "" \
+    --start preprocessing
+
+# Test 3.5: a non-ASCII filename.
+run_test \
+    "Valid - non-ASCII filename" \
+    "pass" \
+    "$TESTDATA_DIR/unicode_input.csv" \
+    "" \
+    --start preprocessing
+
+# Test 3.6: extra, unknown columns are ACCEPTED. Rejecting them would be wrong:
+# a checkpoint CSV legitimately carries columns the entry step does not read.
+# The run must still warn -- that half is asserted in Test 3.7.
+run_test \
+    "Valid - unknown extra columns are ignored" \
+    "pass" \
+    "$TESTDATA_DIR/extra_column_input.csv" \
+    "" \
+    --start preprocessing
+
+# Test 3.7: the warning half of Test 3.6. Accepting an unknown column silently is
+# the failure this pair exists to close, so "it ran" is not the assertion --
+# "the operator was told which columns are ignored" is. run_test's grep is for
+# FAILURE cases only, so this one greps the log directly.
+TESTS_TOTAL=$((TESTS_TOTAL + 1))
+echo -e "${YELLOW}[TEST $TESTS_TOTAL]${NC} Unknown extra columns are NAMED in a warning"
+warn_log="$OUTPUT_DIR/test_${TESTS_TOTAL}.log"
+cd "$PROJECT_ROOT"
+# Exit status is genuinely not the assertion here -- dry_run succeeding or
+# failing tells us nothing about whether the warning was logged, which is the
+# only thing checked below -- so it is captured into an explicitly-unused
+# variable (the `n=$(...) || n=0` idiom tests/test_no_swallowed_failures.py
+# asks for), never discarded with a bare `|| true`.
+nextflow run main.nf \
+    -params-file "$PARAMS_FILE" \
+    --input "$TESTDATA_DIR/extra_column_input.csv" \
+    --outdir "$OUTPUT_DIR/test_${TESTS_TOTAL}" \
+    --start preprocessing \
+    > "$warn_log" 2>&1 || warn_run_exit=$?
+if grep -q "operator, scan_date" "$warn_log"; then
+    echo -e "${GREEN}✓ PASS${NC} - Unknown columns named in the log"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    echo -e "${RED}✗ FAIL${NC} - The run did not name the ignored columns"
+    echo "  Log: $warn_log (nextflow exit ${warn_run_exit:-0})"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+
+echo ""
+echo "=========================================="
 echo "Test Suite: Checkpoint CSV Validation"
 echo "=========================================="
 echo ""

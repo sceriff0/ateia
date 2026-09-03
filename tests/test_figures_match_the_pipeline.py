@@ -69,17 +69,7 @@ FIGURES_DIR = REPO_ROOT / "docs" / "figures"
 # Do NOT add a figure here to make it pass. A failing figure is a real drift
 # and the figure is what gets fixed.
 # --------------------------------------------------------------------------
-STALE_FIGURES = {
-    "registration-schematic.html": (
-        "deliberately stale: its rewrite is owned by a different spec's Phase 6. "
-        "It still describes the deleted COARSE front-end and carries two values "
-        "for coarse_max_dim. The dangerous numbers in it were fixed. "
-        "(The front-end is not named here: tests/test_no_legacy_frontends.py "
-        "forbids that token across the tracked tree and this file is not on its "
-        "allowlist -- which is itself a second, independent record of why this "
-        "figure is exempt.)"
-    ),
-}
+STALE_FIGURES = {}
 
 # `--<token>` forms that are NOT pipeline parameters. Each is another tool's
 # flag, quoted in a figure because the pipeline renders it. Kept honest by
@@ -92,6 +82,11 @@ NON_PARAM_FLAGS = {
     "nv": "Singularity's flag, the --gpus equivalent",
     "method": "bin/warp_seg_qc.py's CLI flag, not a pipeline parameter",
     "tolerance": "bin/seg_qc_geojson.py's CLI flag, not a pipeline parameter",
+    "pairing": "bin/warp_seg_qc.py's CLI flag; the pipeline parameter is seg_qc_pairing",
+    # NOT "match-radius-factor": _FLAG (`--([a-z][a-z0-9_]*)(?![A-Za-z0-9_-])`) cannot
+    # match a hyphenated flag name at all -- the lookahead rejects the very next
+    # character it would need to consume -- so `--match-radius-factor` is invisible to
+    # both this checker and the exists-check above. Nothing to exempt.
 }
 
 # ``UPPER_SNAKE_CASE`` tokens that name something real but are not Nextflow
@@ -110,7 +105,7 @@ NON_PIPELINE_NAMES = {
     "DAPI": "a channel/marker name, not a pipeline name",
     "CD3": "a channel/marker name, not a pipeline name",
     "CELLTOX": "a channel/marker name, not a pipeline name",
-    "CYX": "a TIFF axis order, written as `axes=\"CYX\"`",
+    "CYX": 'a TIFF axis order, written as `axes="CYX"`',
     "PREPROCESS": "the published subdirectory `qc/preprocess`, not a process",
 }
 
@@ -120,6 +115,11 @@ NON_PIPELINE_NAMES = {
 NOT_A_PARAM_ROW = {
     "max_dim": "a Python keyword argument of the lazy readers, not a parameter",
     "factor": "a decimation factor computed at runtime, not a parameter",
+    "is_reference": (
+        "a samplesheet COLUMN, not a parameter -- registration-schematic.html's "
+        "dispatch table lists it beside the params that govern the same decision, "
+        "and says so in its own description cell"
+    ),
 }
 
 # --------------------------------------------------------------------------
@@ -132,6 +132,15 @@ NOT_A_PARAM_ROW = {
 _STYLE_BLOCK = re.compile(r"<style\b.*?</style>", re.S | re.I)
 _STYLE_ATTR = re.compile(r"""\sstyle\s*=\s*(["']).*?\1""", re.S | re.I)
 _VAR_REF = re.compile(r"var\(\s*--[A-Za-z0-9_-]+\s*\)")
+# HTML comments cannot nest, so a non-greedy DOTALL match is the whole comment,
+# never less. Every POSITIVE check in this file ("this row/name exists") reads
+# `_prose()`, not `path.read_text()`, precisely so commented-out markup cannot
+# satisfy a claim that never renders -- see `_prose`'s docstring. The negative
+# guard in tests/test_figures_have_no_retired_names.py is the mirror image and
+# deliberately reads RAW text instead: there, a retired name inside a comment
+# must still fire, because a positive and a negative rule need opposite
+# treatment (CLAUDE.md, "Verification reality" #7).
+_COMMENT = re.compile(r"<!--.*?-->", re.S)
 
 # A Nextflow parameter is snake_case and never contains a hyphen -- true of all
 # 92 declared in nextflow.config. So `--jvm-heap-gb`, `--checkpoint-dir` and
@@ -186,13 +195,47 @@ def _live_figures():
 
 
 def _prose(path: Path) -> str:
-    """Figure text with CSS custom properties removed. See `_STYLE_BLOCK`."""
+    """Figure text with CSS custom properties AND HTML comments removed.
+
+    See `_STYLE_BLOCK` for the CSS half. The HTML-comment half (`_COMMENT`)
+    exists because every check that asks "does the figure claim X" is a
+    POSITIVE rule, and a positive rule satisfied by markup that never renders
+    is checking nothing -- a parameter row or a pipeline name sitting inside
+    `<!-- ... -->` must not count as the figure making that claim.
+    """
     text = path.read_text()
-    return _VAR_REF.sub(" ", _STYLE_ATTR.sub(" ", _STYLE_BLOCK.sub(" ", text)))
+    return _COMMENT.sub(
+        " ", _VAR_REF.sub(" ", _STYLE_ATTR.sub(" ", _STYLE_BLOCK.sub(" ", text)))
+    )
 
 
 def _cell_text(fragment: str) -> str:
     return html.unescape(_TAG.sub("", fragment)).replace("\xa0", " ").strip()
+
+
+def test_a_param_row_inside_an_html_comment_is_not_counted(tmp_path):
+    """`_prose()` must blank HTML comments, or a commented-out row/name would
+    satisfy a POSITIVE check without the figure ever making that claim.
+
+    Regression for the hole named in this module's own docstring update: before
+    `_COMMENT` existed, `_prose()` stripped `<style>` blocks and `style=""`
+    attrs but not `<!-- ... -->`, so a `<table class="pr">` row or an
+    UPPER_SNAKE_CASE name commented out of a figure still resolved as if it
+    were live markup.
+    """
+    fixture = tmp_path / "commented.html"
+    fixture.write_text(
+        "<html><body>\n"
+        "<!--\n"
+        '<table class="pr"><tr>'
+        '<td class="k">reg_qc</td><td class="v">2</td>'
+        "</tr></table>\n"
+        "REGISTER_PATIENT\n"
+        "-->\n"
+        "</body></html>\n"
+    )
+    assert list(_param_rows(fixture)) == []
+    assert "REGISTER_PATIENT" not in _names_used(fixture)
 
 
 def _config_defaults():
@@ -268,9 +311,7 @@ def test_every_parameter_a_figure_names_exists():
     problems, seen = [], 0
     for path in _live_figures():
         problems += _flag_problems(path, defaults)
-        seen += len(
-            {m.group(1) for m in _FLAG.finditer(_prose(path))} & set(defaults)
-        )
+        seen += len({m.group(1) for m in _FLAG.finditer(_prose(path))} & set(defaults))
     assert seen >= 8, (
         f"only {seen} parameter mentions found across the figures -- the "
         "extractor has stopped matching and this test is checking nothing"
@@ -305,8 +346,13 @@ def test_non_param_flags_are_really_not_params():
 # 2. pipeline names
 # --------------------------------------------------------------------------
 def _names_used(path):
-    """Every token in this figure that is a claim about a pipeline name."""
-    text = path.read_text()
+    """Every token in this figure that is a claim about a pipeline name.
+
+    Reads `_prose()`, not `path.read_text()`, so a name sitting only inside a
+    `<!-- ... -->` section-label comment (e.g. `<!-- e — SEG_QC -->`) does not
+    count as the figure claiming that name exists.
+    """
+    text = _prose(path)
     named = {m.group(0) for m in _UPPER.finditer(text)}
     for span in _CODE_SPAN.finditer(text):
         fragment = _TAG.sub("", span.group(1) or span.group(2) or "")
@@ -382,8 +428,11 @@ def _param_rows(path):
     for parameters; `qa`, `rc`, `own`, `ss` and `bk` pair prose with prose
     (`step 1 · features`, `eager whole-array write`). Unscoped, every prose row
     would have to be excused by name.
+
+    Reads `_prose()`, not `path.read_text()`, so a `<table class="pr">` row
+    sitting inside an HTML comment does not count as a claim the figure makes.
     """
-    for table in _PR_TABLE.finditer(path.read_text()):
+    for table in _PR_TABLE.finditer(_prose(path)):
         for m in _KV_ROW.finditer(table.group(1)):
             yield _cell_text(m.group(1)), _cell_text(m.group(2))
 
@@ -510,6 +559,90 @@ def test_every_default_a_figure_states_matches_nextflow_config():
         "table markup has changed and this test would pass on an empty loop"
     )
     assert not problems, "\n".join(problems)
+
+
+# --------------------------------------------------------------------------
+# 4. registration backend names
+# --------------------------------------------------------------------------
+# `test_every_pipeline_name_a_figure_uses_exists` resolves VALIS_ADAPTER and
+# TILED_ADAPTER because they are include aliases -- and would resolve a third
+# adapter just as happily. It says nothing at all about the lower-case METHOD
+# VALUES the figures write in prose and in `registration_method` rows. So a
+# figure could keep advertising a backend that was deleted (this set did
+# exactly that with ashlar until spec Phase 2 removed it), or miss one that was
+# added, and stay green. lib/RegBackends.groovy is the one owner of that list.
+#
+# Two exclusions, both keyed to the exact carve-out
+# `tests/test_figures_have_no_retired_names.py`'s own module docstring already
+# names and defends ("Two ASHLAR sentences in this set are CORRECT and must
+# survive"): "ASHLAR's" (a possessive reference to the external tool, e.g.
+# "the kernel mirrors ASHLAR's") and "Elastix bindings" (VALIS's optional
+# SimpleITK+Elastix affine refiner, which the image explicitly does not
+# carry -- registration-schematic.html:507). Neither is a claim that mirage
+# ships that backend; a bare "ashlar" or "elastix" with no possessive/bindings
+# tail still matches, which is what the drills below rely on.
+#
+# Residual: a possessive tail is not proof the sentence is merely descriptive
+# -- "mirage ships ashlar's tile solver" would dodge the exclusion above while
+# still being a shipping claim. Tightened by flagging a possessive match too
+# when a shipping verb sits within 40 chars before it.
+_METHOD_WORD = re.compile(
+    r"(?<![A-Za-z0-9_])(valis|tiled|ashlar|stare_ml|elastix)(?![A-Za-z0-9_])"
+    r"(?!'s)(?! bindings)",
+    re.I,
+)
+_SHIP_VERB = re.compile(r"\b(?:ships|supports|adds|selectable)\b", re.I)
+_POSSESSIVE_METHOD = re.compile(
+    r"(?<![A-Za-z0-9_])(valis|tiled|ashlar|stare_ml|elastix)(?![A-Za-z0-9_])'s", re.I
+)
+
+
+def test_figures_name_exactly_the_shipped_registration_backends():
+    from tests.test_reg_backends import reg_backend_methods
+
+    shipped = set(reg_backend_methods())
+    assert shipped, "RegBackends.methods() parsed as empty -- the reader is broken"
+
+    named, per_file = set(), {}
+    for path in _live_figures():
+        prose = _prose(path)
+        found = {m.group(1).lower() for m in _METHOD_WORD.finditer(prose)}
+        for m in _POSSESSIVE_METHOD.finditer(prose):
+            if _SHIP_VERB.search(prose[max(0, m.start() - 40) : m.start()]):
+                found.add(m.group(1).lower())
+        per_file[path.name] = found
+        named |= found
+
+    assert named, (
+        "no registration-method word found in any figure -- the extractor has "
+        "stopped matching and this test is checking nothing"
+    )
+    extra = named - shipped
+    assert not extra, (
+        f"figure(s) name registration backend(s) the pipeline does not ship: "
+        f"{sorted(extra)} (RegBackends.methods() == {sorted(shipped)}). "
+        f"Per file: { {k: sorted(v) for k, v in per_file.items() if v & extra} }"
+    )
+    missing = shipped - named
+    assert not missing, (
+        f"the figure set names no backend {sorted(missing)}, which the pipeline "
+        f"ships. A supplementary set that omits a whole backend is a claim that "
+        f"it does not exist."
+    )
+
+
+def test_a_shipping_claim_is_not_excused_by_a_possessive_tail():
+    """Drill for the residual noted above _METHOD_WORD: a possessive form
+    dressed up as a shipping claim ("mirage ships ashlar's tile solver")
+    must still be caught, even though a bare possessive ("mirrors ASHLAR's")
+    must not be."""
+    adversarial = "mirage ships ashlar's tile solver end to end."
+    m = next(_POSSESSIVE_METHOD.finditer(adversarial))
+    assert _SHIP_VERB.search(adversarial[max(0, m.start() - 40) : m.start()])
+
+    descriptive = "the kernel mirrors ASHLAR's phase-correlation approach."
+    m = next(_POSSESSIVE_METHOD.finditer(descriptive))
+    assert not _SHIP_VERB.search(descriptive[max(0, m.start() - 40) : m.start()])
 
 
 # --------------------------------------------------------------------------

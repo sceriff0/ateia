@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIRAGE Supplementary Figure S5 — Coarse alignment</title>
+<style>
+  /* ======================================================================
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4 · S5 · S6)
+     ----------------------------------------------------------------------
+     DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
+     this set has to survive being detached from the repository — attached to
+     a submission, mailed, opened from file:// — so it may not reference an
+     external stylesheet, not even a sibling one. This block is therefore
+     repeated verbatim in docs/figures/pipeline-schematic.html,
+     docs/figures/registration-schematic.html, docs/figures/qc-schematic.html,
+     docs/figures/zarr-schematic.html, docs/figures/coarse-schematic.html and
+     docs/figures/accuracy-schematic.html, and is ported (with the slate
+     counterpart the figures deliberately lack) to docs/stylesheets/extra.css.
+     Change one, change all seven.
+
+     SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
+     paper ground.
+
+     ONE FONT STACK, shared with docs/stylesheets/extra.css so the site and
+     the figures really do read as one artefact (that file's header claimed
+     they did while leading with a different family).
+
+     ONE BREAKPOINT LADDER for the whole set: 1040 · 880 · 760 · 640 · 520.
+     No figure introduces a sixth rung.
+
+     ONE SIZING SCALE: .tag/.tag-def/.tag-alt .53rem / 1px 4px · .pp span
+     .62rem / 1px 5px · table.pr td.k .7rem, td.v/td.val .68rem ·
+     .masthead h1 max-width 72ch.
+
+     OVERFLOW DISCIPLINE: every grid track is minmax(0,…) and every grid or
+     flex item carries min-width:0. Without it a track's automatic minimum is
+     min-content, so one long identifier (GENERATE_POSTPROCESSING_QC) widens
+     its column and pushes the whole grid outside the panel border instead of
+     wrapping.
+     ====================================================================== */
+  :root{
+    --paper:#ffffff; --panel:#ffffff; --sub:#f6f7f8; --sub-2:#eef0f2;
+    --ink:#0f1113; --ink-2:#3c4147; --ink-3:#767c83;
+    --rule:#c3c8cd; --rule-2:#e5e8ea; --bar:#1b1e22;
+    --serif:Georgia,"Times New Roman",Cambria,"Noto Serif",serif;
+    --sans:"Inter","Helvetica Neue",Helvetica,Arial,"Segoe UI",system-ui,sans-serif;
+    --mono:"JetBrains Mono","SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    color-scheme:light;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+  .sheet{max-width:1060px;margin:0 auto;padding:40px 26px 72px;}
+
+  .masthead{border-bottom:2px solid var(--ink);padding-bottom:12px;}
+  .masthead .kick{font-size:.71rem;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);font-weight:700;}
+  .masthead h1{font-weight:700;font-size:1.32rem;letter-spacing:-.01em;margin:.3em 0 0;max-width:72ch;line-height:1.26;text-wrap:balance;}
+  .standfirst{font-family:var(--serif);font-size:.95rem;color:var(--ink-2);margin:12px 0 30px;max-width:82ch;}
+
+  /* Figure-set navigation. Relative filenames, so the strip works both from
+     file:// on a detached copy sitting beside its siblings and from the built
+     MkDocs site, which copies docs/figures/ through verbatim. */
+  .figset{display:flex;gap:0;flex-wrap:wrap;align-items:center;margin:12px 0 0;
+    font-family:var(--mono);font-size:.63rem;letter-spacing:.05em;text-transform:uppercase;}
+  .figset a,.figset span{border:1px solid var(--rule);padding:4px 9px;margin:0 -1px 0 0;
+    color:var(--ink-2);text-decoration:none;white-space:nowrap;}
+  .figset a:hover{border-color:var(--ink);color:var(--ink);}
+  .figset .self{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:700;}
+
+  .panel{position:relative;background:var(--panel);border:1px solid var(--rule);padding:20px 20px 18px;margin:0 0 20px;}
+  .panel > .plabel{position:absolute;top:-1px;left:-1px;background:var(--ink);color:#fff;font-weight:700;
+    font-size:.85rem;line-height:1;padding:6px 9px;}
+  .panel-head{margin:2px 0 16px 26px;}
+  .panel-head h2{font-size:1.02rem;font-weight:700;letter-spacing:-.01em;margin:0;}
+  .panel-head p{font-size:.85rem;color:var(--ink-2);margin:3px 0 0;max-width:84ch;}
+
+  code{font-family:var(--mono);font-size:.82em;background:var(--sub);border:1px solid var(--rule-2);border-radius:2px;padding:.5px 4px;}
+  .tbl-scroll{overflow-x:auto;}
+
+  /* parameter chips */
+  .pp{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px;min-width:0;}
+  .pp span{font-family:var(--mono);font-size:.62rem;background:var(--sub);border:1px solid var(--rule-2);padding:1px 5px;
+    color:var(--ink-2);max-width:100%;min-width:0;overflow-wrap:anywhere;}
+  .pp b{color:var(--ink);font-weight:700;}
+  .tag{font-family:var(--mono);font-size:.53rem;text-transform:uppercase;letter-spacing:.04em;padding:1px 4px;
+    font-weight:700;border:1px solid var(--rule);color:var(--ink-2);background:var(--sub-2);white-space:nowrap;}
+  .tag-on{border-color:var(--ink);color:var(--ink);background:#fff;}
+  .tag-def{font-family:var(--mono);font-size:.53rem;background:var(--ink);color:#fff;padding:1px 4px;font-weight:700;white-space:nowrap;}
+  .tag-alt{font-family:var(--mono);font-size:.53rem;background:var(--sub);color:var(--ink-2);border:1px solid var(--rule);padding:1px 4px;white-space:nowrap;}
+
+  /* parameter tables (td.v in S1/S3, td.val in S2 — same scale) */
+  table.pr{border-collapse:collapse;width:100%;font-size:.78rem;}
+  table.pr td{padding:3.5px 4px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
+  table.pr tr:last-child td{border-bottom:none;}
+  table.pr td.k{font-family:var(--mono);font-size:.7rem;font-weight:700;white-space:nowrap;}
+  table.pr td.v,table.pr td.val{font-family:var(--mono);font-size:.68rem;color:var(--ink-2);white-space:nowrap;
+    padding-right:8px;font-variant-numeric:tabular-nums;}
+  table.pr td.v.w{white-space:normal;overflow-wrap:anywhere;}
+  table.pr td.d{color:var(--ink-2);}
+  .nul{color:var(--ink-3);font-style:italic;}
+
+  .caption{font-family:var(--serif);font-size:.83rem;color:var(--ink-2);line-height:1.62;border-top:1px solid var(--rule);padding-top:16px;margin-top:8px;}
+  .caption b{color:var(--ink);}
+  .footnote{font-family:var(--sans);font-size:.72rem;color:var(--ink-3);margin-top:14px;display:block;}
+
+  /* method-agnostic frame — horizontal rail */
+  .rail{display:flex;align-items:stretch;gap:0;border:1px solid var(--rule);flex-wrap:wrap;}
+  .rail .r{flex:1 1 150px;padding:11px 13px;border-right:1px solid var(--rule);border-top:3px solid var(--ink);
+    min-width:0;overflow-wrap:anywhere;}
+  .rail .r:last-child{border-right:none;}
+  .rail .r.disp{border-top-color:var(--ink-3);border-top-style:dashed;background:var(--sub);}
+  .rail .r .t{font-family:var(--mono);font-size:.62rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);}
+  .rail .r .v{font-weight:700;font-family:var(--mono);font-size:.74rem;margin-top:3px;}
+  .rail .r .d{font-size:.76rem;color:var(--ink-2);margin-top:4px;}
+  .railnote{font-family:var(--mono);font-size:.72rem;color:var(--ink-2);margin-top:11px;display:flex;gap:16px;flex-wrap:wrap;}
+  .railnote b{color:var(--ink);}
+
+  /* two-backend header strip */
+  .bkhead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;
+    background:var(--bar);color:#fff;padding:9px 13px;font-family:var(--mono);}
+  .bkhead .name{font-weight:700;font-size:.86rem;letter-spacing:.02em;}
+  .bkhead .sub{font-size:.68rem;color:#c7cacd;}
+  .bkhead .flag{font-size:.6rem;background:#fff;color:var(--ink);padding:1px 6px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+  .bkhead .flag-alt{background:transparent;color:#fff;border:1px solid #6b7075;}
+
+  /* ordered stage stack */
+  .stack{border:1px solid var(--rule);border-top:none;background:var(--sub);padding:11px;display:flex;flex-direction:column;gap:0;}
+  .stg{background:var(--panel);border:1px solid var(--rule);border-left:2.5px solid var(--ink);padding:9px 11px;position:relative;}
+  .stg + .stg{margin-top:16px;}
+  .stg::before{content:"↓";position:absolute;top:-14px;left:14px;font-family:var(--mono);font-size:.7rem;color:var(--rule);}
+  .stg:first-child::before{content:none;}
+  .stg{min-width:0;}
+  .stg .sn{font-family:var(--mono);font-weight:700;font-size:.74rem;display:flex;flex-wrap:wrap;gap:7px;
+    align-items:center;min-width:0;overflow-wrap:anywhere;}
+  .stg .sn .num{background:var(--ink);color:#fff;font-size:.6rem;padding:1px 5px;border-radius:2px;}
+  .stg .sx{font-size:.79rem;color:var(--ink-2);margin-top:5px;}
+  .tag-skip{border-style:dashed;color:var(--ink-3);}
+
+  .emit{border:1px dashed var(--ink-3);background:var(--sub-2);padding:8px 10px;margin-top:11px;
+    font-family:var(--mono);font-size:.7rem;color:var(--ink-2);}
+  .emit b{color:var(--ink);}
+  .emit .lbl{text-transform:uppercase;letter-spacing:.05em;font-size:.58rem;color:var(--ink-3);display:block;margin-bottom:4px;}
+
+  .callout{border-left:3px solid var(--ink);background:var(--sub);padding:8px 12px;font-size:.8rem;color:var(--ink-2);margin:12px 0 0;}
+  .callout b{color:var(--ink);}
+
+  /* mode branch (fanout) */
+  .branch{border:1px dashed var(--ink-3);background:var(--sub-2);padding:9px;display:flex;flex-direction:column;gap:8px;margin-top:11px;}
+  .branch .bh{font-family:var(--mono);font-size:.61rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);}
+  .branch .opt{background:var(--panel);border:1px solid var(--rule);padding:8px 9px;}
+  .branch .opt .oh{font-family:var(--mono);font-weight:700;font-size:.7rem;display:flex;justify-content:space-between;gap:6px;flex-wrap:wrap;align-items:center;}
+  .branch .opt .ox{font-size:.75rem;color:var(--ink-2);margin-top:3px;}
+  .branch .opt .chain{font-family:var(--mono);font-size:.64rem;color:var(--ink);margin-top:6px;overflow-x:auto;white-space:nowrap;}
+
+  /* comparison / spec tables */
+  table.rc{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:.72rem;font-variant-numeric:tabular-nums;}
+  table.rc caption{font-family:var(--mono);font-size:.63rem;text-transform:uppercase;letter-spacing:.07em;color:var(--ink-3);text-align:left;padding:0 0 7px;}
+  table.rc th{text-align:left;font-weight:700;color:var(--ink-2);border-bottom:1.5px solid var(--ink);padding:6px 9px;vertical-align:bottom;}
+  table.rc th.v,table.rc td.v{width:31%;}
+  table.rc td{padding:6px 9px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
+  table.rc tr:last-child td{border-bottom:none;}
+  table.rc td.k{color:var(--ink-3);white-space:nowrap;}
+  table.rc td .em{color:var(--ink);font-weight:700;}
+  .valwin{background:#f2f4f5;}
+
+  table.ss{border-collapse:collapse;width:100%;font-family:var(--mono);font-size:.72rem;}
+  table.ss th{text-align:left;font-weight:700;color:var(--ink-2);border-bottom:1.5px solid var(--ink);padding:5px 8px;white-space:nowrap;}
+  table.ss td{padding:5px 8px;border-bottom:1px solid var(--rule-2);vertical-align:top;}
+  table.ss tr:last-child td{border-bottom:none;}
+
+  /* reg_qc ladder */
+  .ladder{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+  @media(max-width:760px){.ladder{grid-template-columns:minmax(0,1fr);}}
+  .lv{border:1px solid var(--rule);border-top:2.5px solid var(--ink);padding:10px 11px;background:var(--panel);min-width:0;}
+  .lv .h{font-family:var(--mono);font-weight:700;font-size:.72rem;display:flex;justify-content:space-between;align-items:center;gap:6px;}
+  .lv .h .n{background:var(--ink);color:#fff;font-size:.58rem;padding:1px 5px;}
+  .lv .x{font-size:.77rem;color:var(--ink-2);margin-top:5px;}
+  .lv .proc{font-family:var(--mono);font-size:.62rem;color:var(--ink-3);margin-top:6px;}
+
+  /* parameters */
+  .pgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 26px;}
+  @media(max-width:760px){.pgrid{grid-template-columns:minmax(0,1fr);}}
+  .pcol{min-width:0;}
+  /* Below the 880 rung the two .pgrid tracks are too narrow for the longest keys
+     (reg_tiled_coarse_max_dim) to stay on one line. */
+  @media(max-width:880px){table.pr td.k,table.pr td.val{white-space:normal;overflow-wrap:anywhere;}}
+  .pcol h4{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);
+    margin:14px 0 4px;padding-bottom:3px;border-bottom:1px solid var(--ink);}
+
+  .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;}
+  .grid2 > *{min-width:0;}
+  @media(max-width:880px){.grid2{grid-template-columns:minmax(0,1fr);}}
+
+
+  /* ---- added: two-step teaching components ---- */
+  .twoq{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0;border:1px solid var(--rule);}
+  @media(max-width:880px){.twoq{grid-template-columns:minmax(0,1fr);}}
+  .twoq .q{padding:13px 15px;border-right:1px solid var(--rule);min-width:0;overflow-wrap:anywhere;}
+  .twoq .q:last-child{border-right:none;}
+  @media(max-width:880px){.twoq .q{border-right:none;border-bottom:1px solid var(--rule);}
+    .twoq .q:last-child{border-bottom:none;}}
+  .twoq .q .qn{font-family:var(--mono);font-size:.6rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);}
+  .twoq .q h3{font-size:.94rem;margin:4px 0 6px;font-weight:700;letter-spacing:-.01em;}
+  .twoq .q p{font-size:.81rem;color:var(--ink-2);margin:0 0 8px;}
+  .twoq .q dl{margin:0;font-size:.78rem;}
+  .twoq .q dt{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);margin-top:8px;}
+  .twoq .q dd{margin:2px 0 0;color:var(--ink-2);}
+  .twoq .q dd b{color:var(--ink);}
+
+  figure.dia{margin:14px 0 0;border:1px solid var(--rule);background:var(--sub);padding:12px 12px 8px;}
+  figure.dia svg{display:block;width:100%;height:auto;max-width:920px;margin:0 auto;}
+  figure.dia figcaption{font-size:.75rem;color:var(--ink-2);margin-top:8px;font-family:var(--sans);}
+  figure.dia figcaption b{color:var(--ink);}
+
+  /* deep two-step anatomy block */
+  .step{border:1px solid var(--rule);background:var(--panel);margin-top:14px;}
+  .step > .sh{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;background:var(--sub-2);
+    border-bottom:1px solid var(--rule);padding:8px 12px;}
+  .step > .sh .k{font-family:var(--mono);font-size:.6rem;font-weight:700;letter-spacing:.06em;
+    text-transform:uppercase;background:var(--ink);color:#fff;padding:2px 6px;}
+  .step > .sh .ttl{font-weight:700;font-size:.9rem;letter-spacing:-.01em;}
+  .step > .sh .who{font-family:var(--mono);font-size:.66rem;color:var(--ink-3);margin-left:auto;}
+  .step .sb{padding:11px 13px 13px;}
+  .step .sb > p{margin:0 0 9px;font-size:.83rem;color:var(--ink-2);}
+  .step .sb > p:last-child{margin-bottom:0;}
+  .step .sb b{color:var(--ink);}
+  table.qa{border-collapse:collapse;width:100%;font-size:.79rem;margin:2px 0 0;}
+  table.qa td{padding:5px 8px 5px 0;border-bottom:1px solid var(--rule-2);vertical-align:top;color:var(--ink-2);}
+  table.qa tr:last-child td{border-bottom:none;}
+  table.qa td.q{font-family:var(--mono);font-size:.61rem;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--ink-3);white-space:nowrap;width:150px;padding-top:7px;}
+  table.qa td b{color:var(--ink);}
+  .math{font-family:var(--mono);font-size:.76rem;background:var(--sub);border:1px solid var(--rule-2);
+    padding:7px 10px;margin:9px 0;overflow-x:auto;white-space:nowrap;color:var(--ink);}
+  .math .cm{color:var(--ink-3);}
+  .warnbox{border-left:3px solid var(--ink);background:#fff;border:1px solid var(--ink);
+    padding:8px 12px;font-size:.79rem;color:var(--ink-2);margin:10px 0 0;}
+  .warnbox b{color:var(--ink);}
+  .warnbox .wl{font-family:var(--mono);font-size:.57rem;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--ink);font-weight:700;display:block;margin-bottom:3px;}
+  ul.tight{margin:6px 0 0;padding-left:18px;font-size:.8rem;color:var(--ink-2);}
+  ul.tight li{margin:3px 0;}
+  ul.tight b{color:var(--ink);}
+  .procmap{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:11px;}
+  @media(max-width:880px){.procmap{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  @media(max-width:520px){.procmap{grid-template-columns:minmax(0,1fr);}}
+  .procmap .pm{border:1px solid var(--rule);border-top:2.5px solid var(--ink);background:var(--panel);padding:9px 10px;min-width:0;}
+  .procmap .pm .nm{font-family:var(--mono);font-weight:700;font-size:.68rem;overflow-wrap:anywhere;}
+  .procmap .pm .fk{font-family:var(--mono);font-size:.58rem;color:var(--ink-3);margin-top:2px;}
+  .procmap .pm .ds{font-size:.74rem;color:var(--ink-2);margin-top:5px;}
+  .procmap .pm .mem{font-family:var(--mono);font-size:.6rem;margin-top:6px;border-top:1px solid var(--rule-2);padding-top:5px;color:var(--ink-2);}
+  .procmap .pm .mem b{color:var(--ink);}
+  .stalebox{border:1px solid var(--rule);background:var(--sub);padding:10px 13px;margin-top:14px;}
+  .stalebox h4{margin:0 0 6px;font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2);}
+  .stalebox ul{margin:0;padding-left:17px;font-size:.77rem;color:var(--ink-2);}
+  .stalebox li{margin:2.5px 0;}
+  .stalebox b{color:var(--ink);}
+</style>
+
+</head>
+<body>
+
+<div class="sheet">
+
+  <div class="masthead">
+    <div class="kick">Supplementary Figure S5 · coarse alignment</div>
+    <h1>STARE's coarse anchor: a learned DISK + LightGlue matcher estimates one global pose per moving slide, and its residual — not its speed — is what the per-tile step depends on</h1>
+  </div>
+  <nav class="figset" aria-label="Supplementary figure set">
+    <a href="pipeline-schematic.html">S1 · pipeline</a>
+    <a href="registration-schematic.html">S2 · registration</a>
+    <a href="qc-schematic.html">S3 · quality control</a>
+    <a href="zarr-schematic.html">S4 · lazy reads</a>
+    <span class="self">S5 · coarse alignment</span>
+    <a href="accuracy-schematic.html">S6 · accuracy measures</a>
+  </nav>
+  <p class="standfirst">The STARE (tiled) registration backend's first step — <code>TILED_COARSE</code> — estimates a
+    single whole-slide affine <code>M0</code> on a downsampled thumbnail before the per-tile step refines the small
+    residual left over. For v1.0.0 the front-end that produces that estimate changed from three classical,
+    non-learned feature matchers to one learned matcher, DISK + LightGlue, run CPU-only inside the same task. This
+    figure grounds why that swap happened, what the code kept unchanged underneath it, why the memory curve now has a
+    different shape, and what is — and is not — verified about the replacement.</p>
+
+  <!-- a — THE NAIVE EXPECTATION -->
+  <section class="panel">
+    <span class="plabel">a</span>
+    <div class="panel-head"><h2>The naive expectation — a cheap thumbnail step, any detector would do</h2>
+      <p>Coarse alignment looks like it only has to be fast: a whole-slide anchor computed on a small thumbnail,
+        refined later. What it actually has to deliver is a residual narrow enough to land inside the window the
+        per-tile step reads — that requirement, not runtime, is what selects the matcher.</p></div>
+    <div class="rail">
+      <div class="r"><div class="t">COARSE delivers</div><div class="v">M0 + residual (px)</div>
+        <div class="d">One 3×3 affine mapping moving → reference pixels, plus a residual TRE —
+          <code>estimate_rigid</code>'s return value.</div></div>
+      <div class="r"><div class="t">the constraint</div><div class="v">residual &lt; halo</div>
+        <div class="d">The per-tile step reads a tile core expanded by <code>reg_tiled_halo</code> px and clamped to
+          the image — the capture radius the anchor's residual must land inside. Null by default, resolved from the
+          <code>reg_tiled_mode</code> tier row (256 px at <code>high</code>).</div></div>
+      <div class="r"><div class="t">what enforces it</div><div class="v">nothing</div>
+        <div class="d"><code>TILED_COARSE</code> logs a warning once the residual reaches the halo, but nothing
+          downstream checks it and no task fails on it — a slide can mis-register silently and the run still exits
+          0.</div></div>
+    </div>
+    <div class="callout" style="margin-top:12px"><b>Why this is a correctness requirement, not a speed one.</b> A
+      faster, worse matcher does not merely take a different amount of time — it produces a wider residual, and once
+      that residual reaches the halo the per-tile step is measuring a shift to the wrong structure while the pipeline
+      keeps running. The matcher is chosen for what it can find inside that budget, not for how quickly it runs.</div>
+  </section>
+
+  <!-- b — WHY THE FRONT-END CHANGED -->
+  <section class="panel">
+    <span class="plabel">b</span>
+    <div class="panel-head"><h2>Why the front-end changed, and what did not</h2>
+      <p>Three non-learned, classical feature-matching front-ends preceded this one, plus a selector parameter
+        choosing among all four. All four were <b>deleted outright</b> for v1.0.0 — not kept behind a flag — because
+        a dispatch table with one live value is dead config and the deleted three were not the method being
+        replicated. The numerically load-bearing fit underneath every one of them was never touched.</p>
+    </div>
+    <div class="grid2">
+      <div class="branch" style="margin-top:0">
+        <div class="bh">changed — the front-end</div>
+        <div class="opt"><div class="oh"><span>the matcher</span><span class="tag">deleted &amp; replaced</span></div>
+          <div class="ox">What produces point correspondences between the two thumbnails. The module's own docstring
+            now reads "Learned feature matching (DISK + LightGlue) handles the inter-cycle rotation/translation" —
+            it used to name a different, classical technique in the same sentence.</div></div>
+      </div>
+      <div class="branch" style="margin-top:0">
+        <div class="bh">unchanged — the fit</div>
+        <div class="opt"><div class="oh"><span>estimate_transform_from_matches</span><span class="tag-def">untouched</span></div>
+          <div class="ox">RANSAC + model fit over whatever correspondences the front-end hands it, plus
+            <code>scale_transform_to_full_res</code>, the thumbnail-to-full-resolution lift. Same function, same
+            signature, before and after the swap.</div></div>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:12px"><b>Why cross-cycle thumbnails are hard to match, regardless of
+      matcher.</b> Reference and moving planes come from different imaging cycles with different exposures: two views
+      of the same tissue can arrive at wildly different dynamic ranges and match each other far worse than they
+      should, with no error raised. That is a <i>correspondence</i> problem — what a matcher can find in the two
+      images — never a geometry problem in how the fit is solved from what it finds. The front-end swap targets
+      exactly the half of the step that owns correspondences; it could not have targeted the other half, because the
+      other half was never where the difficulty was.</div>
+  </section>
+
+  <!-- c — THE MECHANISM -->
+  <section class="panel">
+    <span class="plabel">c</span>
+    <div class="panel-head"><h2>The mechanism — from two raw planes to one lifted transform</h2>
+      <p>Six steps, run once per moving slide. The tensor shapes are the part the code makes hardest to hold in one
+        pass, so they are spelled out at every stage.</p></div>
+    <div class="stack">
+      <div class="stg"><div class="sn"><span class="num">1</span>normalize_intensity</div>
+        <div class="sx">Raw decimated plane, <code>H×W</code> float32 counts (0–65535) → rescaled to <b>[0, 1]</b>
+          over a <b>p1–p99.9</b> percentile window (<code>_NORM_PCT</code>) — the range DISK was trained on, and a
+          correctness fix for the cross-cycle exposure mismatch in panel&nbsp;b, not only a domain-range one.</div></div>
+      <div class="stg"><div class="sn"><span class="num">2</span>reshape for DISK</div>
+        <div class="sx">Normalised plane → a <b>1×3×H×W</b> float32 tensor, the single channel repeated across three
+          (<code>_to_disk_tensor</code>). Reference and moving are each converted independently.</div></div>
+      <div class="stg"><div class="sn"><span class="num">3</span>DISK.from_pretrained("depth")</div>
+        <div class="sx">Two forward passes, one per plane. Internally padded to a multiple of 16
+          (<code>pad_if_not_divisible=True</code> — its U-Net downsamples by 16 and raises on a thumbnail whose
+          dimensions are not multiples of it), up to <b>2048</b> keypoints per plane (<code>n_keypoints</code>, the
+          module default — <code>bin/tiled_coarse.py</code> never overrides it). Each call returns keypoints
+          (<code>N×2</code>) and descriptors, on CPU only.</div></div>
+      <div class="stg"><div class="sn"><span class="num">4</span>LightGlue("disk")</div>
+        <div class="sx">Both keypoint/descriptor sets in → an <code>M×2</code> match-index array out, column 0
+          indexing the reference set and column 1 the moving set.</div></div>
+      <div class="stg"><div class="sn"><span class="num">5</span>RANSAC euclidean fit</div>
+        <div class="sx"><code>estimate_transform_from_matches(src, dst)</code> — default model <b>euclidean</b>
+          (rotation + translation, 3 DOF), <b>1000</b> trials, <b>3&nbsp;px</b> inlier threshold → a 3×3 matrix
+          <code>M0</code> in <i>thumbnail</i> pixels, plus <code>(residual_px, n_inliers)</code>.</div></div>
+      <div class="stg"><div class="sn"><span class="num">6</span>lift to full resolution</div>
+        <div class="sx"><code>scale_transform_to_full_res</code> multiplies the translation column by the decimation
+          factor (rotation is scale-invariant and passes through unchanged); the residual is scaled by the same
+          factor. Both COARSE outputs — <code>M0</code> and the reported <code>coarse_tre</code> — are full-resolution
+          numbers from this point on.</div></div>
+    </div>
+  </section>
+
+  <!-- d — THE MEMORY SHAPE -->
+  <section class="panel">
+    <span class="plabel">d</span>
+    <div class="panel-head"><h2>The memory shape — a U-Net's activations, not a corner detector's</h2>
+      <p>DISK is a U-Net: its activation memory scales with thumbnail <b>area</b>, not with keypoint count or with
+        the slide's own dimensions. That single fact reshaped a resource request and moved a tier column.</p></div>
+    <div class="grid2">
+      <div class="branch" style="margin-top:0">
+        <div class="bh">activation memory, per call</div>
+        <div class="opt"><div class="oh"><span>DISK forward pass</span><span class="tag-alt">scales with area</span></div>
+          <div class="ox"><b>GB ≈ 1.1 + 7.3 × Mpx</b> — measured on the pinned stack (3.03 GB at 512 px, 8.78 GB at
+            1024 px thumbnails). At the shipped <code>high</code> tier (2048 px → 4.19 Mpx) that is ≈31.7 GB;
+            <code>TILED_COARSE</code>'s memory closure applies 1.5× headroom on top to reach the <b>48&nbsp;GB</b> it
+            actually requests.</div></div>
+      </div>
+      <div class="branch" style="margin-top:0">
+        <div class="bh">model weights, cached once</div>
+        <div class="opt"><div class="oh"><span>_DISK_MODELS</span><span class="tag">built once per process</span></div>
+          <div class="ox">A module-level dict keyed on device, holding both DISK and LightGlue after the first call
+            — because building both models dominates a single call, not because repeat inference is slow. It matters
+            for the in-process oracle and the test suite; a fresh <code>TILED_COARSE</code> task pays that cost
+            exactly once.</div></div>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:12px"><b>Why <code>reg_tiled_coarse_max_dim</code> is now a memory knob,
+      not just a time knob.</b> Raising the thumbnail bound is no longer a free accuracy trade: the shipped
+      <code>high</code> tier is <b>2048</b> px, not the 4096 an earlier iteration shipped — the whole tier column
+      moved down one step for v1.0.0 because of this same area-scaling formula. A <b>256&nbsp;px floor</b> is
+      enforced at launch, before any task starts: below it, the decimator treats the bound as "no decimation" and
+      would hand DISK the full-resolution plane — a guaranteed OOM now that the matcher is a U-Net rather than a
+      cheap corner detector.</div>
+  </section>
+
+  <!-- e — THE KNOBS -->
+  <section class="panel">
+    <span class="plabel">e</span>
+    <div class="panel-head"><h2>The knobs</h2>
+      <p>Defaults verbatim from the <code>params{}</code> block of <code>nextflow.config</code>, the only place a
+        default is declared. <code>reg_tiled_coarse_max_dim</code> and <code>reg_tiled_halo</code> are
+        <b>tier-owned</b>: both are declared <code>null</code>, and the value comes from <code>reg_tiled_mode</code>'s
+        row in the STARE preset table. Setting either directly requires <code>reg_tiled_mode&nbsp;=&nbsp;custom</code>
+        — an override under any other tier is rejected at launch, before any process runs.</p></div>
+    <div class="tbl-scroll"><table class="pr">
+      <tr><td class="k">reg_tiled_coarse_max_dim</td><td class="val nul">null</td>
+        <td class="d">M0 thumbnail longest side (px) — the memory knob from panel&nbsp;d. null → the
+          <code>reg_tiled_mode</code> row in the STARE preset table (<code>high</code>: 2048). 256 px floor enforced
+          at launch.</td></tr>
+      <tr><td class="k">reg_tiled_halo</td><td class="val nul">null</td>
+        <td class="d">tile read halo = the capture radius from panel&nbsp;a (px). null → the same tier row
+          (<code>high</code>: 256).</td></tr>
+      <tr><td class="k">reg_tiled_mode</td><td class="val">high</td>
+        <td class="d">cost/accuracy tier: high | medium | low | custom. <code>custom</code> starts from the
+          <code>high</code> row and keeps every knob not explicitly set.</td></tr>
+    </table></div>
+  </section>
+
+  <!-- f — HONEST LIMITS -->
+  <section class="panel">
+    <span class="plabel">f</span>
+    <div class="panel-head"><h2>Honest limits</h2>
+      <p>Three things this front-end swap does not have behind it, stated plainly rather than left for a reviewer to
+        discover.</p></div>
+    <div class="warnbox"><span class="wl">1 — no head-to-head measurement</span> No accuracy comparison between the
+      three deleted classical front-ends and the learned one is recorded anywhere in this tree. The change's own
+      record states a methodological reason — the classical alternatives were not the front-end being replicated —
+      not a measured one. The only tests exercising the learned front-end directly recover a pure synthetic pixel
+      shift injected into a random blob image; there is no real-slide accuracy test for it, classical or learned.</div>
+    <div class="warnbox" style="margin-top:10px"><span class="wl">2 — no CPU fallback</span> If torch or the learned
+      matcher's library fail to import, the front-end raises a <code>RuntimeError</code> naming the missing
+      dependency and the pinned versions to install — there is no classical detector left to fall back to. A
+      deployment node missing the pinned stack fails the task outright rather than degrading.</div>
+    <div class="warnbox" style="margin-top:10px"><span class="wl">3 — the residual is an estimate, not a per-pixel
+      guarantee</span> Both <code>M0</code> and its residual are computed on the thumbnail and then <i>lifted</i> to
+      full resolution by a single multiplicative scale — they are never re-measured at full resolution. The reported
+      residual is therefore an estimate of the global pose error, not a guarantee about any individual full-resolution
+      pixel.</div>
+  </section>
+
+  <p class="caption">
+    <b>Supplementary Figure S5. The STARE coarse front-end.</b>
+    <b>(a)</b> <code>TILED_COARSE</code> estimates one global affine per moving slide on a shared thumbnail; the
+    per-tile step that follows can only recover a residual that lands inside its read halo, and nothing downstream
+    checks that it did — a wide residual mis-registers a slide while the run still exits 0. <b>(b)</b> Three earlier,
+    classical feature-matching front-ends and their selector parameter were deleted outright and replaced by a single
+    learned matcher (DISK + LightGlue) for v1.0.0; the RANSAC fit and the thumbnail-to-full-resolution lift underneath
+    every front-end, past and present, were never touched — what changed was only how correspondences are found
+    between two cross-cycle thumbnails. <b>(c)</b> Six steps carry a plane from raw counts to a lifted transform:
+    percentile normalisation, a batched tensor reshape, two DISK forward passes (padded internally to a multiple of
+    16, up to 2048 keypoints each, CPU-only), a LightGlue match, a RANSAC euclidean fit, and a full-resolution lift.
+    <b>(d)</b> Because the matcher is a U-Net, its activation memory scales with thumbnail <i>area</i>
+    (GB ≈ 1.1 + 7.3 × Mpx) rather than staying near-flat the way a classical corner detector's did — the resource
+    request this step asks for, and the tier this pipeline ships at, both moved to respect that curve. <b>(e)</b> The
+    two knobs governing this step's cost and accuracy are tier-owned and null-declared, resolved from
+    <code>reg_tiled_mode</code>'s row unless <code>reg_tiled_mode=custom</code> explicitly overrides them.
+    <b>(f)</b> The replacement is unmeasured head-to-head against what it replaced, has no fallback if its learned
+    stack is unavailable, and reports a residual that is an estimate lifted from a thumbnail, not a full-resolution
+    guarantee. This figure is the long form of Supplementary Figure <b>S2</b>'s panel on the STARE backend, which it
+    must not contradict; Supplementary Figure <b>S1</b> places registration in the whole workflow.
+    <span class="footnote">All algorithm details and parameter defaults are read verbatim from the pipeline source
+    (<code>bin/utils/coarse_align.py</code>, <code>bin/tiled_coarse.py</code>,
+    <code>bin/utils/tile_grid.py</code>, <code>bin/utils/tiled_io.py</code>, <code>lib/RegPresets.groovy</code>,
+    <code>lib/ParamUtils.groovy</code>, <code>conf/modules.config</code>, <code>nextflow.config</code>,
+    <code>containers/tiled/Dockerfile</code>, <code>requirements/torch-cpu.txt</code>,
+    <code>requirements/kornia.txt</code>, <code>tests/test_coarse_frontend.py</code> and CHANGELOG.md).</span>
+  </p>
+</div>
+</body>
+</html>

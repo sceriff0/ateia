@@ -130,7 +130,9 @@ def test_blanking_half_a_tile_roughly_halves_its_foreground():
     rng = np.random.default_rng(11)
     tile = _tissue()
     half = tile.copy()
-    half[:, : tile.shape[1] // 2] = rng.normal(30.0, 3.0, (tile.shape[0], tile.shape[1] // 2))
+    half[:, : tile.shape[1] // 2] = rng.normal(
+        30.0, 3.0, (tile.shape[0], tile.shape[1] // 2)
+    )
 
     full_fg = foreground_fraction(tile)
     half_fg = foreground_fraction(half)
@@ -157,13 +159,32 @@ def _run_tile(tmp_path, nuclear_index=0):
 
     tiled_reg_tile.main(
         [
-            "--reference", str(ref_f),
-            "--moving", str(mov_f),
-            "--m0", str(m0),
-            "--nuclear-index", str(nuclear_index),
-            "--ix", "0", "--iy", "0", "--cx", "64", "--cy", "64",
-            "--rx0", "0", "--ry0", "0", "--rx1", "128", "--ry1", "128",
-            "--out", str(out),
+            "--reference",
+            str(ref_f),
+            "--moving",
+            str(mov_f),
+            "--m0",
+            str(m0),
+            "--nuclear-index",
+            str(nuclear_index),
+            "--ix",
+            "0",
+            "--iy",
+            "0",
+            "--cx",
+            "64",
+            "--cy",
+            "64",
+            "--rx0",
+            "0",
+            "--ry0",
+            "0",
+            "--rx1",
+            "128",
+            "--ry1",
+            "128",
+            "--out",
+            str(out),
         ]
     )
     return json.loads(out.read_text())
@@ -188,8 +209,16 @@ def test_the_existing_control_point_keys_are_unchanged(tmp_path):
 
 def test_nothing_gates_on_the_foreground_fraction_yet():
     """Phase 1 emits without gating -- deliberately, so the next phase stays measurable."""
-    base = {"ix": 0, "iy": 0, "cx": 0.0, "cy": 0.0, "dx": 1.0, "dy": 0.0,
-            "tre": 1.0, "error": 0.04}
+    base = {
+        "ix": 0,
+        "iy": 0,
+        "cx": 0.0,
+        "cy": 0.0,
+        "dx": 1.0,
+        "dy": 0.0,
+        "tre": 1.0,
+        "error": 0.04,
+    }
 
     accepted_without, _ = tiled_solve._accept(dict(base), max_error=0.99, max_disp=256)
     accepted_with_zero, _ = tiled_solve._accept(
@@ -205,8 +234,16 @@ def test_nothing_gates_on_the_foreground_fraction_yet():
 
 def test_a_control_point_without_the_keys_still_works(tmp_path):
     """Backward compatibility: a resumed run's older control points must not warn or fail."""
-    legacy = {"ix": 0, "iy": 0, "cx": 0.0, "cy": 0.0, "dx": 1.0, "dy": 0.0,
-              "tre": 1.0, "error": 0.04}
+    legacy = {
+        "ix": 0,
+        "iy": 0,
+        "cx": 0.0,
+        "cy": 0.0,
+        "dx": 1.0,
+        "dy": 0.0,
+        "tre": 1.0,
+        "error": 0.04,
+    }
 
     accepted, reason = tiled_solve._accept(legacy, max_error=0.99, max_disp=256)
 

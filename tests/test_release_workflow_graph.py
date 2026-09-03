@@ -90,7 +90,9 @@ GATE_REF = "steps.get_version.outputs.gate_ref"
 
 def load(path: Path) -> dict:
     data = yaml.safe_load(path.read_text())
-    assert isinstance(data, dict), f"{path.relative_to(ROOT)} did not parse to a mapping"
+    assert isinstance(data, dict), (
+        f"{path.relative_to(ROOT)} did not parse to a mapping"
+    )
     return data
 
 
@@ -342,7 +344,9 @@ def test_no_job_in_release_yml_does_a_bare_checkout():
             seen += 1
             ref = str((step.get("with") or {}).get("ref", "")).strip()
             if not ref:
-                offenders.append(f"{job_id}: `{step.get('name', '<unnamed>')}` has no `ref:`")
+                offenders.append(
+                    f"{job_id}: `{step.get('name', '<unnamed>')}` has no `ref:`"
+                )
             elif ref not in literals and not any(token in ref for token in expressions):
                 offenders.append(
                     f"{job_id}: `{step.get('name', '<unnamed>')}` checks out {ref!r}, which "
@@ -501,7 +505,8 @@ def test_artifact_jobs_build_from_the_created_tag():
             if RELEASE_TAG not in ref:
                 wrong.append(f"{job_id}: checks out {ref!r}, not the released tag")
     assert not wrong, (
-        "release-artifact job(s) do not build from the created tag:\n" + "\n".join(wrong)
+        "release-artifact job(s) do not build from the created tag:\n"
+        + "\n".join(wrong)
     )
 
 
@@ -634,7 +639,9 @@ def test_jobs_needing_verify_config_tolerate_it_being_skipped():
         checked += 1
         cond = str(job.get("if", "")).replace('"', "'")
         if "always()" not in cond:
-            offenders.append(f"{job_id}: needs `verify-config` but its `if:` has no always()")
+            offenders.append(
+                f"{job_id}: needs `verify-config` but its `if:` has no always()"
+            )
         elif "needs.verify-config.result == 'skipped'" not in cond:
             offenders.append(
                 f"{job_id}: needs `verify-config` but never allows it to be 'skipped', so "
@@ -682,11 +689,21 @@ BLOCKING_CHECKS = [
     ("DISK front-end non-skip proof", "tests/test_coarse_frontend.py"),
     ("nf-test stub suite", "nf-test test --tag stub"),
     ("ruff lint", "ruff check ."),
+    ("ruff format (blocking since release 1.0 phase 02)", "ruff format --check ."),
     ("lib/ probe (the only unit-test surface lib/*.groovy has)", "tests/lib_probe.nf"),
-    ("profiles parse without the gitignored site config", "tests/check_profiles_parse.sh"),
+    (
+        "profiles parse without the gitignored site config",
+        "tests/check_profiles_parse.sh",
+    ),
     ("param surface consistency", "tests/check_param_consistency.py"),
     ("pipeline validation script", "tests/run_validation_tests.sh"),
     ("work-directory cleanup", "tests/cleanup_work.sh"),
+    # Added 2026-09-02 (plan 01). Same class as cleanup_work.sh: a shell check that
+    # measures a session-teardown / session-to-session OUTCOME, so it can be neither
+    # a pytest nor an nf-test, and it therefore needs its own step or it runs
+    # nowhere. It ran nowhere -- it was named in the developer notes as "the
+    # behavioural resume check" and appeared in no workflow file.
+    ("resume determinism (behavioural)", "tests/resume_check.sh"),
     ("shipped-defaults stub run", "-profile shipped_defaults_test"),
     ("DEEPCELL token-leak guard", "tests/modules/segment_deepcell_token.nf.test"),
     ("token-guard collection assertion", "--dry-run"),
@@ -704,10 +721,27 @@ BLOCKING_CHECKS = [
     # longer appears in any `run:` body and matching it would assert the old
     # implementation rather than the check.
     ("actionlint (workflow + composite-action syntax)", "actionlint"),
+    # Added by phase 07. The format suite runs the CONVERT_IMAGE reader stack
+    # against synthesised pyramidal/BigTIFF/RGB/8-bit/float/HDF5/NDPI fixtures.
+    # The needle is the DIRECTORY form, which is also what keeps this suite out
+    # of python-tests' collection: `pytest tests/` (the blocking python suite's
+    # needle, above) would match a `tests/` run, not this one.
+    (
+        "format suite (convert image's reader stack)",
+        "pytest -v tests/integration/formats",
+    ),
+    # Added 2026-09-02 (plan 12). The RTD site is a release artefact: a broken
+    # internal link or a page that fell out of the nav ships as a 404 on
+    # mirage-pipeline.readthedocs.io, and nothing else in this suite reads
+    # mkdocs.yml. `--strict` is the whole point of the needle -- `mkdocs build`
+    # without it exits 0 on every warning this check exists to catch.
+    ("mkdocs strict site build", "mkdocs build --strict"),
 ]
 
 
-@pytest.mark.parametrize("label,needle", BLOCKING_CHECKS, ids=[c[0] for c in BLOCKING_CHECKS])
+@pytest.mark.parametrize(
+    "label,needle", BLOCKING_CHECKS, ids=[c[0] for c in BLOCKING_CHECKS]
+)
 def test_the_shared_test_suite_runs_every_blocking_check(label, needle):
     """Each blocking check must still be RUN, in the suite both gates require.
 
@@ -797,12 +831,24 @@ def test_the_shared_test_suite_gate_covers_every_job_in_it():
     )
     gate_id = aggregators[0]
     covered = set(needs_of(jobs[gate_id]))
-    uncovered = sorted(set(jobs) - covered - {gate_id})
+    # The SAME allowlist test_every_job_is_connected_to_its_workflows_gate uses, not a
+    # second one: an exemption must be a single fact, so that deleting it re-arms both
+    # checks at once and test_the_gate_disconnected_allowlist_has_no_dead_entries can
+    # force the deletion the moment the job is wired in.
+    exempt = {
+        job_id
+        for (file_name, job_id) in GATE_DISCONNECTED_JOBS
+        if file_name == suite.name
+    }
+    uncovered = sorted(set(jobs) - covered - {gate_id} - exempt)
     assert not uncovered, (
         f"{suite.name}: job(s) {uncovered} are not in `{gate_id}`'s `needs:`, so a skip "
         "or a removal there is invisible to both gates. Add them, and see "
         "test_every_gate_aggregator_reads_every_result_it_needs for the other half: "
-        "being in `needs:` is not the same as being CHECKED."
+        "being in `needs:` is not the same as being CHECKED. If a job is deliberately "
+        "outside the gate, put it in GATE_DISCONNECTED_JOBS with a reason -- that is "
+        "the ONE allowlist, shared with "
+        "test_every_job_is_connected_to_its_workflows_gate."
     )
 
 
@@ -875,9 +921,10 @@ def test_the_shared_test_suite_honours_the_ref_it_is_given():
     """
     suite = shared_gate_suite()
     call_inputs = (
-        ((load(suite).get("on") or load(suite).get(True) or {}).get("workflow_call") or {}).get(
-            "inputs"
-        )
+        (
+            (load(suite).get("on") or load(suite).get(True) or {}).get("workflow_call")
+            or {}
+        ).get("inputs")
     ) or {}
     assert "ref" in call_inputs, (
         f"{suite.name}'s `workflow_call` declares no `ref` input, so neither caller "
@@ -929,7 +976,9 @@ def test_every_reusable_workflow_call_in_release_yml_names_its_ref():
     )
     offenders = []
     for job_id, called in sorted(calls.items()):
-        passed = str((jobs_of(RELEASE)[job_id].get("with") or {}).get("ref", "")).strip()
+        passed = str(
+            (jobs_of(RELEASE)[job_id].get("with") or {}).get("ref", "")
+        ).strip()
         if not any(token in passed for token in allowed):
             offenders.append(
                 f"{job_id}: calls {called.name} with ref={passed or '<none>'!r}, which is "
@@ -947,7 +996,9 @@ def test_both_workflows_carry_a_gate_aggregator_this_file_can_find():
     checks over a DISCOVERED set. ci.yml (`all-tests`) and release.yml (`test`)
     each carry exactly the one aggregator; if the discovery predicate stops
     matching, the `skipped` scan passes having read nothing."""
-    found = {path.name: sorted(result_aggregator_jobs(path)) for path in workflow_files()}
+    found = {
+        path.name: sorted(result_aggregator_jobs(path)) for path in workflow_files()
+    }
     for name in ("ci.yml", "release.yml"):
         assert found.get(name), (
             f"no job in {name} reads `needs.<job>.result` in a `run:` step, so this "
@@ -1051,9 +1102,9 @@ def test_every_gate_aggregator_reads_every_job_it_needs(path):
             "so that it reports rather than vanishes -- a FAILED dependency no longer "
             "stops the job, so the comparison in the script IS the gate. A dependency "
             "with no comparison is required in appearance and advisory in fact; one "
-            "compared as `== \"failure\"` instead of `!= \"success\"` lets `cancelled` "
+            'compared as `== "failure"` instead of `!= "success"` lets `cancelled` '
             "and `skipped` straight through, which is the same hole one operator to "
-            "the left. Add a `!= \"success\"` branch for each, or take it out of "
+            'the left. Add a `!= "success"` branch for each, or take it out of '
             "`needs:` and put the job in a workflow nothing is gated on."
         )
 
@@ -1185,12 +1236,26 @@ def test_no_workflow_branches_on_the_workflow_call_event_name():
 
 # Jobs deliberately outside their workflow's gate DAG. BY (file, job id), with the
 # reason, because an unexplained one is exactly the defect.
-# EMPTY AS OF 2026-09-01 (CI redesign, Phase 7), and that is the point rather than
-# an oversight. The single entry was ("ci.yml", "lint") -- the nf-core structural
-# lint, whose one substantive step ended in `|| true` and therefore could never fail.
-# Phase 7 deleted the JOB: no released nf-core/tools version can lint this repository
+# EMPTY AS OF 2026-09-02 (CI redesign, Phase 7; and again after the `docs` fix
+# round below), and that is the point rather than an oversight. The single Phase 7
+# entry was ("ci.yml", "lint") -- the nf-core structural lint, whose one
+# substantive step ended in `|| true` and therefore could never fail. Phase 7
+# deleted the JOB: no released nf-core/tools version can lint this repository
 # (2.14.1 through 4.1.0 all die on `manifest.name` having no `/`; see .nf-core.yml's
 # header for the measurement), so there was nothing to un-swallow.
+#
+# A SECOND entry, ("_test-suite.yml", "docs"), existed briefly on 2026-09-02: the
+# `docs` job was landed in `_test-suite.yml` outside `suite-gate`'s `needs:`, on the
+# premise that being outside the gate's `needs:` made it non-blocking. CI run
+# 33641966166 disproved that: `_test-suite.yml` is a `workflow_call` reusable
+# workflow, and a called workflow's own CONCLUSION is the worst conclusion of ANY
+# job inside it, gate membership included or not -- so the red `docs` job made
+# `_test-suite.yml` itself conclude `failure`, and ci.yml's `all-tests` reads that
+# one result regardless of `suite-gate`. The fix was relocation, not an exemption:
+# `docs` now lives in `.github/workflows/nightly.yml`, which carries no gate
+# aggregator at all, so there is no gate for it to be disconnected FROM and this
+# allowlist has nothing to say about it. See nightly.yml's own job comment for the
+# full account and the plan-12 return path.
 #
 # Every job in every gated workflow is now wired to its gate. Leave this dict empty
 # if you can: an entry here is a job that cannot fail the MERGE and can still fail
@@ -1203,6 +1268,13 @@ GATE_DISCONNECTED_JOBS: dict[tuple[str, str], str] = {}
 ADVISORY_SUITES = {
     "nf-test real suite": "--tag real",
     "nf-test integration suite": "--tag integration",
+    # "docs strict site build" lived here from 2026-09-02 until plan 12: the
+    # `docs` job was relocated to nightly.yml because a called reusable
+    # workflow's own conclusion is the worst conclusion of ANY job inside it
+    # regardless of gate membership (CI run 33641966166). Plan 12 (2026-09-02)
+    # moved it back into `_test-suite.yml` as a blocking, gate-enumerated job now
+    # that the build is green -- see BLOCKING_CHECKS and
+    # GATE_MEMBERSHIP["_test-suite.yml"].
 }
 
 
@@ -1256,7 +1328,8 @@ def test_every_job_is_connected_to_its_workflows_gate():
         offenders += [
             f"{path.name}: `{job_id}` is in neither direction of the {aggregators} DAG"
             for job_id in sorted(jobs)
-            if job_id not in connected and (path.name, job_id) not in GATE_DISCONNECTED_JOBS
+            if job_id not in connected
+            and (path.name, job_id) not in GATE_DISCONNECTED_JOBS
         ]
     # Non-vacuity: this is a "must not find" scan, and it examines only gated
     # workflows -- so a discovery predicate that stops matching turns it green.
@@ -1425,7 +1498,9 @@ GATE_MEMBERSHIP = {
         "nextflow-stub",
         "nf-test-stub",
         "security-tests",
+        "format-tests",
         "ruff",
+        "docs",
     },
 }
 
@@ -1471,7 +1546,9 @@ def test_each_gate_needs_exactly_the_jobs_written_down_here():
             )
         for job_id in expected:
             if job_id not in jobs:
-                problems.append(f"{name}: GATE_MEMBERSHIP names `{job_id}`, which does not exist")
+                problems.append(
+                    f"{name}: GATE_MEMBERSHIP names `{job_id}`, which does not exist"
+                )
     assert not problems, (
         "gate membership changed:\n  " + "\n  ".join(problems) + "\n\n"
         "If a check really should stop blocking, say so HERE in the same commit. "

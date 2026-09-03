@@ -50,7 +50,7 @@ def test_one_process_per_module_file():
 
     assert not offending, (
         f"{len(offending)} module file(s) violate CLAUDE.md's \"one process per "
-        "file in modules/local/\" convention. Split each offending file so it "
+        'file in modules/local/" convention. Split each offending file so it '
         "defines exactly one process, and update its include sites:\n"
         + "\n".join(offending)
     )

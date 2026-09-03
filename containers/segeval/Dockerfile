@@ -13,7 +13,12 @@
 #
 # OPT-IN in the pipeline (skip_seg_quality_eval defaults to true), so this image is
 # only pulled by a run that asked for it.
-FROM python:3.11-slim
+# DIGEST-PINNED (ruling R6). The tag stays for readability; the digest is what makes the
+# build reproducible -- a version tag is republished, so rebuilding from the tag alone can
+# produce a different image than the one that generated the published results. Resolved
+# 2026-09-02; Dependabot updates the digest in place. Guarded by
+# tests/test_base_images_are_digest_pinned.py.
+FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
 
 LABEL description="Mirage SEG_QUALITY_EVAL: vendored CellSegmentationEvaluator (2D) metrics"
 
@@ -63,3 +68,13 @@ ENV XDG_CACHE_HOME=/tmp/.cache \
     NUMBA_CACHE_DIR=/tmp/.numba
 
 CMD ["python", "--version"]
+
+# OCI provenance. LAST IN THE FILE ON PURPOSE: VCS_REF changes on every commit, and an ARG
+# referenced earlier would invalidate the layer cache for everything below it on every
+# build. Here it invalidates one metadata layer. .github/workflows/containers.yml passes
+# both values; a local `docker build` gets "unknown", which is honest.
+ARG VCS_REF=unknown
+ARG IMAGE_VERSION=unknown
+LABEL org.opencontainers.image.source="https://github.com/sceriff0/mirage" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${IMAGE_VERSION}"

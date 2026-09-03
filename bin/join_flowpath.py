@@ -107,6 +107,24 @@ def build_positivity(df: pd.DataFrame) -> Tuple[np.ndarray, List[str]]:
 
 
 def read_flowpath_csv(path: str) -> pd.DataFrame:
+    """Read a FlowPath phenotype export, rejecting anything that is not one.
+
+    Parameters
+    ----------
+    path : str
+        CSV written by FlowPath's ``PhenotypeCsvExporter``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The table as read.
+
+    Raises
+    ------
+    ValueError
+        If any of ``phenotype``, ``centroid_x``, ``centroid_y`` is absent -- the
+        three columns the join depends on.
+    """
     df = pd.read_csv(path)
     missing = [
         c for c in ("phenotype", "centroid_x", "centroid_y") if c not in df.columns
@@ -258,6 +276,23 @@ def apply_flowpath(adata, flow: pd.DataFrame, idx: np.ndarray, stats: Dict) -> N
 
 # ── per-patient processing ─────────────────────────────────────────────────────
 def load_table(zarr_path: str):
+    """Open a MIRAGE SpatialData store and return it with its cell table.
+
+    Parameters
+    ----------
+    zarr_path : str
+        Path to a ``.zarr`` written by ``export_spatialdata.py``.
+
+    Returns
+    -------
+    tuple
+        ``(sdata, table)`` -- the ``SpatialData`` object and its ``tables['table']``.
+
+    Raises
+    ------
+    ValueError
+        If the store has no ``table`` element.
+    """
     import spatialdata as sd
 
     sdata = sd.read_zarr(zarr_path)
@@ -266,7 +301,7 @@ def load_table(zarr_path: str):
     return sdata, sdata.tables["table"]
 
 
-def process_one(zarr_path: str, csv_path: str, args) -> Tuple[object, Dict]:
+def _process_one(zarr_path: str, csv_path: str, args) -> Tuple[object, Dict]:
     """Join one patient and return its (updated) AnnData plus join stats."""
     logger.info("Patient store: %s", zarr_path)
     sdata, table = load_table(zarr_path)
@@ -339,7 +374,7 @@ def pair_inputs(zarrs: List[str], csvs: List[str]) -> List[Tuple[str, str]]:
 
 
 # ── cohort assembly ────────────────────────────────────────────────────────────
-def concat_cohort(tables: List[object]):
+def _concat_cohort(tables: List[object]):
     import anndata as ad
 
     if len(tables) == 1:
@@ -387,6 +422,20 @@ def flatten(adata) -> pd.DataFrame:
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
 def parse_args(argv=None):
+    """Parse the FlowPath-join CLI.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Argument vector; ``None`` reads ``sys.argv[1:]``.
+
+    Returns
+    -------
+    argparse.Namespace
+        ``zarr`` and ``flowpath`` (parallel lists, paired by ``pair_inputs``),
+        plus the output selectors ``out_h5ad`` / ``out_table`` / ``out_stats`` /
+        ``update_zarr``.
+    """
     ap = argparse.ArgumentParser(
         description="Join MIRAGE SpatialData stores with FlowPath phenotype CSVs.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -417,7 +466,9 @@ def parse_args(argv=None):
         action="store_true",
         help="also write phenotype/positivity back into each source store",
     )
-    ap.add_argument("--pixel-size", type=str, default=None, help="µm per pixel, or 'auto'")
+    ap.add_argument(
+        "--pixel-size", type=str, default=None, help="µm per pixel, or 'auto'"
+    )
     ap.add_argument(
         "--centroid-join-max-px",
         type=float,
@@ -434,6 +485,19 @@ def parse_args(argv=None):
 
 
 def main(argv=None) -> int:
+    """CLI entry point: join each patient's store with its FlowPath CSV and write the cohort.
+
+    Returns
+    -------
+    int
+        0 on success.
+
+    Raises
+    ------
+    SystemExit
+        If none of ``--out-h5ad``, ``--out-table``, ``--update-zarr`` was given --
+        the run would do work and write nothing.
+    """
     configure_logging(level=logging.INFO)
     a = parse_args(argv)
 
@@ -447,11 +511,11 @@ def main(argv=None) -> int:
 
     tables, all_stats = [], []
     for zarr_path, csv_path in pairs:
-        table, stats = process_one(zarr_path, csv_path, a)
+        table, stats = _process_one(zarr_path, csv_path, a)
         tables.append(table)
         all_stats.append(stats)
 
-    cohort = concat_cohort(tables)
+    cohort = _concat_cohort(tables)
     logger.info("Cohort: %d cells x %d measurements", cohort.n_obs, cohort.n_vars)
 
     if a.out_h5ad:

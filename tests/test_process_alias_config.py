@@ -33,9 +33,7 @@ NF_DIRS = (ROOT / "workflows", ROOT / "subworkflows")
 
 # `include { BASE as ALIAS } from '...'` -- the only form that creates a second name
 # for one process. A plain `include { NAME }` needs nothing from this test.
-ALIAS_INCLUDE_RE = re.compile(
-    r"include\s*\{\s*(\w+)\s+as\s+(\w+)\s*\}", re.MULTILINE
-)
+ALIAS_INCLUDE_RE = re.compile(r"include\s*\{\s*(\w+)\s+as\s+(\w+)\s*\}", re.MULTILINE)
 
 WITH_NAME_OPEN_RE = re.compile(r"withName:\s*(?:'([^']+)'|\"([^\"]+)\")\s*\{")
 

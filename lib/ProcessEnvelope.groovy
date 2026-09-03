@@ -2,11 +2,16 @@
 ========================================================================================
     ProcessEnvelope — the versions.yml boilerplate, rendered once
 ========================================================================================
-    Every process in modules/local/ ends its script: block with a versions.yml heredoc.
-    (Most also begin their script: block with a hand-written size-log line — this class
-    renders none of that; every module still writes its own.) The versions.yml heredoc
-    was written out by hand in every module, and written TWICE per module — once in
-    script:, once in stub: with every value replaced by the literal `stub`.
+    Every process in modules/local/ ends its script: block with a versions.yml heredoc,
+    and 21 of them begin it with a *.size.csv row. This class renders BOTH, for both
+    blocks, from one call each. The size-log half was hand-written 21 times in script:
+    and 21 times in stub:, and the two halves were not comparable: the stub copies wrote
+    the literal `STUB` as the process name, and the byte computation had grown ~25
+    spellings across the 21 (three `find ... -printf` variants, `du -sLb`, and
+    `stat || echo 0`), three of which yielded an empty string rather than 0.
+    The versions.yml heredoc was written out by hand in every module, and written TWICE
+    per module — once in script:, once in stub: with every value replaced by the
+    literal `stub`.
 
     WHY THAT WAS DANGEROUS RATHER THAN MERELY REPETITIVE. `-stub` never evaluates a
     script: block. So the stub copy is not a mirror the test suite compares against the
@@ -43,9 +48,12 @@ class ProcessEnvelope {
      * name differs from their reported name need an entry; everything else reports under
      * its own name.
      *
-     * bin/generate_qc_report.py's parse_versions_yml is a hand-rolled two-level parser
-     * keyed on these strings, and the report renders them verbatim in its Process | Tool |
-     * Version table. Changing a value here changes a published report.
+     * These strings are the KEYS of every published versions.yml, collated into the
+     * report's mirage_qc_data_<run-id> bundle as collated_versions.yml. The HTML QC
+     * report no longer renders them as a table (it never read them well: the parser
+     * was hand-rolled and two-level), so changing a value here changes a published
+     * DATA file rather than a published rendering — which is the harder break,
+     * because the consumer is a script.
      */
     private static final Map<String, String> YAML_KEY = [
         'skimage'   : 'scikit-image',
@@ -82,16 +90,15 @@ class ProcessEnvelope {
     /**
      * The full versions.yml heredoc for a `script:` block.
      *
-     * `python:` is prepended automatically — at the time this class was introduced, 27
+     * `python:` is prepended automatically. At the time this class was introduced, 27
      * of the then-28 modules reported it (`aggregate_size_logs.nf`, bash-only, was the
      * sole exception; two others called `python3` instead of `python` — still a
-     * `python:` report, just a different interpreter name, not a non-report). Four of
-     * those 28 modules have since gone (`compile_panel.nf`, `phenotype.nf`,
-     * `tiled_register.nf`, `warp_seg_qc_tiled.nf`), so the count as of this comment is
-     * 23 of 24 — still the one bash-only exception. Pass tools in the order they should
-     * appear in the report.
+     * `python:` report, just a different interpreter name, not a non-report).
+     * `aggregate_size_logs.nf` now renders through `versionsBash()` instead, so all 28
+     * modules under `modules/local/` go through this class.
+     * Pass tools in the order they should appear in the report.
      */
-    static String versions(String process, List<String> tools) {
+    static String versions(String process, List<String> tools, String container = null) {
         def lines = ['cat <<-END_VERSIONS > versions.yml',
                      "\"${process}\":",
                      // Single-quoted Groovy string: `$` has no interpolation meaning here
@@ -99,6 +106,12 @@ class ProcessEnvelope {
                      // must land in .command.sh for bash to execute it. See probe()'s
                      // comment for what happens when this is over-escaped instead.
                      '    python: $(python --version 2>&1 | sed \'s/Python //\')']
+        // Immediately after python:, before the tool probes. `container` is task.container,
+        // which is NON-NULL even with no container engine enabled (measured 2026-09-02 on
+        // 25.04.7: a plain `nextflow run` with no -profile rendered the image name), so in
+        // practice this line is always present. The null branch keeps the 2-arg form honest
+        // rather than writing the string 'null' into a published report.
+        if (container) { lines << "    container: ${container}" }
         lines += tools.collect { probe(it) }
         lines << 'END_VERSIONS'
         return lines.join('\n')
@@ -110,12 +123,125 @@ class ProcessEnvelope {
      * Takes the SAME tools list as versions(). That is the whole point: the two blocks
      * can no longer name different tools.
      */
-    static String versionsStub(String process, List<String> tools) {
+    static String versionsStub(String process, List<String> tools, String container = null) {
         def lines = ['cat <<-END_VERSIONS > versions.yml',
                      "\"${process}\":",
                      '    python: stub']
+        // `stub`, never the real image name: a stub run produced no evidence about any
+        // image, and versions.yml is the provenance artifact.
+        if (container) { lines << '    container: stub' }
         lines += tools.collect { "    ${yamlKey(it)}: stub" }
         lines << 'END_VERSIONS'
         return lines.join('\n')
+    }
+
+    /**
+     * The heredoc for a module with NO Python interpreter.
+     *
+     * modules/local/aggregate_size_logs.nf runs in
+     * `container 'bolt3x/mirage-preprocess:1.0.0'` and is the only such module.
+     * It hand-wrote its heredoc for exactly this reason, and
+     * tests/test_versions_envelope.py carried it as a documented exception. That is no
+     * longer necessary: the reason was never "this module is special", it was "versions()
+     * always prepends python:", and `python --version 2>&1` in an image without Python
+     * writes the shell's own error message into the report as a version number.
+     */
+    static String versionsBash(String process, String container = null) {
+        def lines = ['cat <<-END_VERSIONS > versions.yml',
+                     "\"${process}\":",
+                     '    bash: $(bash --version | head -n1 | sed \'s/GNU bash, version //\')']
+        if (container) { lines << "    container: ${container}" }
+        lines << 'END_VERSIONS'
+        return lines.join('\n')
+    }
+
+    /** The same heredoc for a `stub:` block, every value the literal `stub`. */
+    static String versionsBashStub(String process, String container = null) {
+        def lines = ['cat <<-END_VERSIONS > versions.yml',
+                     "\"${process}\":",
+                     '    bash: stub']
+        if (container) { lines << '    container: stub' }
+        lines << 'END_VERSIONS'
+        return lines.join('\n')
+    }
+
+    /**
+     * Column order of every *.size.csv row and of AGGREGATE_SIZE_LOGS' header.
+     *
+     * THE OWNER OF THE ORDER, not a description of it: sizeLog/sizeLogStub build
+     * their row by looking each column up in this list, and
+     * modules/local/aggregate_size_logs.nf renders its header with
+     * ${ProcessEnvelope.SIZE_LOG_COLUMNS.join(',')}. Reordering here reorders
+     * both. bin/generate_resource_report.py declares the same tuple and
+     * tests/test_size_log_schema_has_one_owner.py fails if the two drift.
+     */
+    static final List<String> SIZE_LOG_COLUMNS = ['process', 'sample_id', 'filename', 'bytes'].asImmutable()
+
+    /**
+     * The `filename` cell for a row: the basename of the sole path, or the literal
+     * `inputs/` when the measurement covers more than one file.
+     *
+     * A glob is more than one file by construction, so it takes `inputs/` too --
+     * naming a row after its own wildcard ('*', from 'channels/*') would be worse
+     * than saying nothing. A staged prefix is dropped ('mov/x.tif' -> 'x.tif')
+     * because stageAs positioning is not part of the file's identity, and because
+     * that is exactly what the hand-written rows interpolated (`${moving.name}`).
+     */
+    private static String filenameCell(List<String> shellPaths) {
+        if (shellPaths.size() != 1) { return 'inputs/' }
+        def p = shellPaths[0]
+        if (p.contains('*') || p.contains('?')) { return 'inputs/' }
+        def slash = p.lastIndexOf('/')
+        return slash < 0 ? p : p.substring(slash + 1)
+    }
+
+    private static String row(Map cells, String outFile) {
+        return 'echo "' + SIZE_LOG_COLUMNS.collect { cells[it] }.join(',') + '" > ' + outFile
+    }
+
+    /**
+     * The size-log lines for a `script:` block: one `stat` of every path in
+     * `shellPaths`, summed, then ONE row into `outFile`.
+     *
+     * `shellPaths` entries are text that reaches BASH. A module passes a staged
+     * input as "${image_file}" -- DOUBLE quotes, so the call site interpolates it
+     * to the staged name before this method ever sees it -- or a literal glob as
+     * 'channels/*'. Single-quoting a `${...}` at the call site would hand this
+     * method the four characters `${x}`, which land verbatim in .command.sh and
+     * expand to an UNSET SHELL VARIABLE: an empty stat operand and a silent zero.
+     *
+     * Every path is stat'ed in ONE invocation and summed by awk, replacing the ~25
+     * spellings the modules had grown (`stat || echo 0`, `du -sLb`, three different
+     * `find ... -printf` forms), three of which returned an empty string rather
+     * than 0 for a missing file and relied on a `${x:-0}` at the echo site.
+     */
+    static String sizeLog(String process, String sampleId, List<String> shellPaths, String outFile) {
+        if (!shellPaths) {
+            throw new IllegalArgumentException(
+                "ProcessEnvelope.sizeLog: shellPaths must not be empty (${process})")
+        }
+        // Single-quoted Groovy fragments: `$` has no interpolation meaning here, and a
+        // bare `$(`/`${` is exactly what must land in .command.sh. `\\n` inside a
+        // single-quoted string is backslash + n -- the two characters bash's `--printf`
+        // needs -- not a newline. See probe()'s comment for what over-escaping does.
+        def stat = 'size_bytes=$(stat -L --printf="%s\\n" ' + shellPaths.join(' ') +
+                   ' 2>/dev/null | awk \'{s+=$1} END {print s+0}\')'
+        def cells = [process: process, sample_id: sampleId,
+                     filename: filenameCell(shellPaths), bytes: '${size_bytes}']
+        return stat + '\n' + row(cells, outFile)
+    }
+
+    /**
+     * The size-log line for a `stub:` block: `process,sampleId,stub,0`.
+     *
+     * The process name is the REAL one, not the literal `STUB` the 21 hand-written
+     * stub blocks wrote. A stub CSV whose first column says `STUB` cannot be
+     * compared with a real one at all -- it groups every process in the run into a
+     * single fake row -- and bin/generate_resource_report.py carried a special case
+     * to drop it. Same name, zero bytes, is honest and comparable.
+     */
+    static String sizeLogStub(String process, String sampleId, String outFile) {
+        def cells = [process: process, sample_id: sampleId, filename: 'stub', bytes: '0']
+        return row(cells, outFile)
     }
 }

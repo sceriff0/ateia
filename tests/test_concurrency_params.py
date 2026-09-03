@@ -115,7 +115,9 @@ def test_process_max_forks_reads_the_parameter(nf):
     match = re.search(r"^\s*maxForks\s*=\s*(.+)$", nf, flags=re.M)
     assert match, "nextflow.config's `process` scope must assign maxForks"
     expr = match.group(1).strip()
-    assert not re.fullmatch(r"\d+", expr), "process.maxForks must not be a bare integer literal"
+    assert not re.fullmatch(r"\d+", expr), (
+        "process.maxForks must not be a bare integer literal"
+    )
     assert "params.max_forks" in expr and "params.concurrency" in expr, (
         "nextflow.config's `process` scope must derive `maxForks` from BOTH "
         f"params.max_forks and params.concurrency (found: {expr!r}); a literal, or "
@@ -221,7 +223,9 @@ def test_the_includes_still_precede_the_process_and_executor_scopes(nf):
     them. Pinned because the fix for the params-timing problem was to move the includes,
     and moving them one line too far would silently invert this.
     """
-    last_include = max(m.start() for m in re.finditer(r"^includeConfig ", nf, flags=re.M))
+    last_include = max(
+        m.start() for m in re.finditer(r"^includeConfig ", nf, flags=re.M)
+    )
     for scope in ("\nprocess {", "\nexecutor {"):
         assert nf.index(scope) > last_include, (
             f"nextflow.config's `{scope.strip()}` scope must come after the includeConfig "

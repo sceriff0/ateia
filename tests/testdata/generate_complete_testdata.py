@@ -9,8 +9,10 @@ Creates realistic test data including:
 """
 
 import json
+import struct
 from pathlib import Path
 
+import h5py
 import numpy as np
 import tifffile
 
@@ -242,8 +244,41 @@ def create_segmentation_mask(filename, size=(128, 128), n_cells=15):
     return mask
 
 
-create_segmentation_mask(OUT_DIR / "P001_cell_mask.npy", n_cells=20)
+p001_cell_mask = create_segmentation_mask(OUT_DIR / "P001_cell_mask.npy", n_cells=20)
 create_segmentation_mask(OUT_DIR / "P002_cell_mask.npy", n_cells=15)
+
+
+def create_nuclei_mask(cell_mask, filename, shrink=0.6):
+    """Write a nuclei label mask NESTED inside ``cell_mask``'s labels.
+
+    Production nuclei masks come from SEGMENT as uint32 TIFFs whose label IDs are
+    the SAME IDs as the cell mask's -- EXTRACT_NUCLEI_PROPERTIES re-keys nucleus
+    contours onto the cell label and every downstream join is an identity on it.
+    So this derives the nuclei from the cell mask rather than drawing a second,
+    independent set of blobs: for each label, keep the pixels within
+    ``shrink`` x the label's equivalent radius of its centroid.
+
+    NO RANDOM DRAWS. Every other fixture in this file is seeded off the module-level
+    np.random stream (or one of the two dedicated Generators), and inserting a draw
+    here would shift every fixture written after it -- a whole-tree content change
+    for a file that only needed to exist. This function is pure geometry over an
+    array that has already been written.
+    """
+    nuclei = np.zeros(cell_mask.shape, dtype=np.uint32)
+    yy, xx = np.indices(cell_mask.shape)
+    for label in np.unique(cell_mask):
+        if label == 0:
+            continue
+        sel = cell_mask == label
+        cy, cx = yy[sel].mean(), xx[sel].mean()
+        radius = np.sqrt(sel.sum() / np.pi) * shrink
+        nuclei[sel & (((yy - cy) ** 2 + (xx - cx) ** 2) <= radius**2)] = label
+    tifffile.imwrite(filename, nuclei, compression="zlib")
+    print(f"  Created {Path(filename).name} - {len(np.unique(nuclei)) - 1} nuclei")
+    return nuclei
+
+
+create_nuclei_mask(p001_cell_mask, OUT_DIR / "P001_nuclei_mask.tif")
 
 # =============================================================================
 # 3. Generate valid input CSVs for each pipeline entry point
@@ -297,7 +332,9 @@ print("  Created valid_checkpoint_postprocessing.csv")
 # pixel_size (this task) is required the same way -- appended last, 0.325 to match
 # conf/test.config's pin.
 with open(OUT_DIR / "valid_checkpoint_segmented.csv", "w") as f:
-    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size\n")
+    f.write(
+        "patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size\n"
+    )
     f.write(
         f"P001,P001_ref,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
@@ -314,7 +351,9 @@ print("  Created valid_checkpoint_segmented.csv")
 # under --quantify_compartments false actually has (EXTRACT_NUCLEI_PROPERTIES never
 # ran, but SEGMENT always produces nuclei_mask regardless of that flag).
 with open(OUT_DIR / "valid_checkpoint_segmented_no_compartments.csv", "w") as f:
-    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size\n")
+    f.write(
+        "patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size\n"
+    )
     f.write(
         f"P001,P001_ref,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
@@ -343,7 +382,9 @@ print("  Created valid_checkpoint_segmented_no_compartments.csv")
 #         classpath (which does not have lib/ available -- see tests/layout.nf.test's
 #         header comment).
 with open(OUT_DIR / "segmented.csv", "w") as f:
-    f.write("patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size\n")
+    f.write(
+        "patient_id,id,registered_image,is_reference,channels,cell_mask,nuclei_mask,contours,nucleus_contours,pixel_size\n"
+    )
     f.write(
         f"P001,P001_ref,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA,"
         f"{TESTDATA_ABS}/P001_cell_mask.tif,{TESTDATA_ABS}/P001_nuclei_mask.tif,"
@@ -379,6 +420,71 @@ with open(PRIOR_DIR / "postprocessed.csv", "w") as f:
     )
 print("  Created prior_run/csv/{registered,postprocessed}.csv")
 
+# 3d-bis. The prior run's two IMAGE fixtures, named by the two checkpoint CSVs above.
+#
+#   P001_image.tiff       -- the prior run's registered reference. registered.csv
+#                            declares it DAPI|PANCK, so it carries exactly those two.
+#   P001_pyramid.ome.tiff -- the prior run's combined pyramid, WITH the mask series.
+#                            bin/extract_mask_series.py exits non-zero unless series 1
+#                            is a (2, H, W) unsigned-integer [cell, nuclei] stack, and
+#                            add_cycle.nf reads the prior channel names off series 0.
+#
+# A DEDICATED Generator, like the keep-set fixtures above: drawing from _img_rng here
+# would shift the stream that renders every image written before this point.
+#
+# Written with an explicit `ome=True` / TiffWriter rather than through
+# create_multichannel_image, because tifffile only emits OME-XML by default for a
+# name ending in `.ome.tif`/`.ome.tiff` -- and the first of these two deliberately
+# does not (the checkpoint CSV names it `P001_image.tiff`).
+_prior_rng = np.random.default_rng(44)
+_prior_channels = ["DAPI", "PANCK"]
+_prior_planes = np.stack(
+    [
+        _render_channel(
+            p001_anatomy, (128, 128), (0, 0), 1.0 if ch == 0 else 0.5, _prior_rng
+        )
+        for ch in range(len(_prior_channels))
+    ]
+)
+tifffile.imwrite(
+    OUT_DIR / "P001_image.tiff",
+    _prior_planes,
+    photometric="minisblack",
+    ome=True,
+    metadata={"axes": "CYX", "Channel": {"Name": _prior_channels}},
+)
+print(
+    f"  Created P001_image.tiff - shape: {_prior_planes.shape}, channels: {_prior_channels}"
+)
+
+_prior_masks = np.stack(
+    [
+        tifffile.imread(OUT_DIR / "P001_cell_mask.tif").astype(np.uint32),
+        tifffile.imread(OUT_DIR / "P001_nuclei_mask.tif").astype(np.uint32),
+    ]
+)
+with tifffile.TiffWriter(
+    OUT_DIR / "P001_pyramid.ome.tiff", ome=True, bigtiff=True
+) as _tif:
+    # subifds=1 reserves one sub-resolution level, exactly as
+    # bin/merge_channels_pyramid.py does; the next write with subfiletype=1 fills it.
+    _tif.write(
+        _prior_planes,
+        photometric="minisblack",
+        subifds=1,
+        metadata={"axes": "CYX", "Channel": {"Name": _prior_channels}},
+    )
+    _tif.write(_prior_planes[:, ::2, ::2], photometric="minisblack", subfiletype=1)
+    # A separate top-level write with its own metadata becomes OME Image:1.
+    _tif.write(
+        _prior_masks,
+        photometric="minisblack",
+        metadata={"axes": "CYX", "Channel": {"Name": ["cell_mask", "nuclei_mask"]}},
+    )
+print(
+    f"  Created P001_pyramid.ome.tiff - 2 series (image {_prior_planes.shape} + masks {_prior_masks.shape})"
+)
+
 # 3e. The NEW-CYCLE samplesheet that goes with prior_run/ — i.e. what a real
 #     `--mode add_cycle --prior_outdir <prior_run> --input <this>` run consumes.
 #     By design it has NO reference row: the registration reference is the frozen
@@ -394,6 +500,21 @@ with open(OUT_DIR / "new_cycle.csv", "w") as f:
     f.write("patient_id,path_to_file,is_reference,channels\n")
     f.write(f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n")
 print("  Created new_cycle.csv (add_cycle new-cycle samplesheet for prior_run/)")
+
+# 3f. The SAME new-cycle samplesheet, plus one unknown column -- the add_cycle-mode
+# counterpart of extra_column_input.csv (section 10i). workflows/mirage.nf's
+# add_cycle branch calls CsvUtils.validateInputCSV(params.input,
+# ParamUtils.requiredColumnsForStep('preprocessing')) exactly like the linear
+# path, but until fix round 1 nothing warned about a column that call ignores --
+# a mistyped column in a new-cycle samplesheet stayed silent. This pins the fix:
+# warnUnknownColumns (workflows/mirage.nf) fires on THIS path too, with the
+# literal step 'preprocessing' (add_cycle has no --start/--stop choice).
+with open(OUT_DIR / "new_cycle_extra_column.csv", "w") as f:
+    f.write("patient_id,path_to_file,is_reference,channels,operator\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8,AB\n")
+print(
+    "  Created new_cycle_extra_column.csv (add_cycle samplesheet with one unknown column)"
+)
 
 # =============================================================================
 # 4. Generate INVALID input CSVs for validation testing
@@ -536,11 +657,41 @@ print("  - tiles_12_rows_blank_interspersed.csv, tiles_header_only.csv")
 # =============================================================================
 print("\n6. Creating additional test fixtures for module tests...")
 
-# 6a. Merged quantification CSV for export/QC module tests
+# 6a. Merged quantification CSV for export/QC module tests.
+#
+# COLUMN ORDER IS bin/merge_quant_csvs.reorder_columns': fov, cell_size, then
+# MORPHOLOGY_COLS' order for whatever morphology is present, then the markers. It is
+# the same list written to expected/merged_quant_columns.txt at the bottom of this
+# file, and the same one sample_morphology.csv uses.
+#
+# It used to be `label,centroid_x,centroid_y,...`, which NO producer writes.
+# bin/export_geojson._iter_rows_positional looks up "x"/"y", got None for both, and
+# dropped all 20 rows at its `pd.isna(x_px)` guard -- red cause (2) in
+# .github/workflows/nightly.yml's header, "0 features against 20 CSV rows".
+#
+# The eleven np.random draws below are UNCHANGED in count, order and distribution
+# from the version that wrote the wrong header. Every fixture this script writes
+# after this block is seeded off the same stream; changing the draws would rewrite
+# all of them for no reason. `solidity` is still drawn -- it now produces
+# convex_area, which is what it physically determines (solidity = area / convex_area).
+_merged_quant_cols = [
+    "fov",
+    "cell_size",
+    "label",
+    "y",
+    "x",
+    "area",
+    "eccentricity",
+    "perimeter",
+    "convex_area",
+    "axis_major_length",
+    "axis_minor_length",
+    "DAPI",
+    "PANCK",
+    "SMA",
+]
 with open(OUT_DIR / "sample_merged_quant.csv", "w") as f:
-    f.write(
-        "label,centroid_x,centroid_y,area,perimeter,eccentricity,major_axis,minor_axis,solidity,DAPI,PANCK,SMA\n"
-    )
+    f.write(",".join(_merged_quant_cols) + "\n")
     for i in range(1, 21):
         cx = np.random.uniform(10, 118)
         cy = np.random.uniform(10, 118)
@@ -554,9 +705,64 @@ with open(OUT_DIR / "sample_merged_quant.csv", "w") as f:
         panck = np.random.randint(1500, 8000)
         sma = np.random.randint(1000, 5000)
         f.write(
-            f"{i},{cx:.1f},{cy:.1f},{area},{perimeter:.1f},{eccentricity:.2f},{major:.1f},{minor:.1f},{solidity:.2f},{dapi},{panck},{sma}\n"
+            f"P001,{area},{i},{cy:.1f},{cx:.1f},{area},{eccentricity:.2f},{perimeter:.1f},"
+            f"{int(round(area / solidity))},{major:.1f},{minor:.1f},{dapi},{panck},{sma}\n"
         )
 print("  Created sample_merged_quant.csv (20 cells)")
+
+# 6a-bis. The PRIOR RUN's merged quantification CSV, named by
+# prior_run/csv/postprocessed.csv's `cell_csv` and `merged_csv` columns.
+#
+# TWO markers, not three. The prior run has exactly one slide, declared DAPI|PANCK
+# in prior_run/csv/registered.csv, and Task 3's P001_pyramid.ome.tiff carries those
+# two channels. Reusing sample_merged_quant.csv here (three markers, SMA included)
+# would hand ADD_CYCLE's MERGE_QUANT_CSVS a prior marker that appears in no prior
+# image.
+#
+# Column order is bin/merge_quant_csvs.reorder_columns': fov, cell_size, then
+# MORPHOLOGY_COLS' order for whatever morphology is present, then the markers. It is
+# the same order written down in expected/merged_quant_columns.txt below.
+#
+# A DEDICATED Generator, like the keep-set fixtures above (_img_rng at seed 42,
+# _prior_rng at seed 44): this block sits BEFORE several pre-existing fixtures that
+# still draw from the shared np.random stream (sample_{DAPI,PANCK,SMA}.tif,
+# sample_morphology.csv, sample_contours.json, sample_{DAPI,PANCK,SMA}_intensity.csv)
+# -- drawing from that shared stream here would consume 180 of its draws and shift
+# every one of those fixtures' content on regeneration.
+_quant_rng = np.random.default_rng(45)
+_prior_quant_cols = [
+    "fov",
+    "cell_size",
+    "label",
+    "y",
+    "x",
+    "area",
+    "eccentricity",
+    "perimeter",
+    "convex_area",
+    "axis_major_length",
+    "axis_minor_length",
+    "DAPI",
+    "PANCK",
+]
+with open(OUT_DIR / "P001_merged_quant.csv", "w") as f:
+    f.write(",".join(_prior_quant_cols) + "\n")
+    for i in range(1, 21):
+        x = _quant_rng.uniform(10, 118)
+        y = _quant_rng.uniform(10, 118)
+        area = _quant_rng.integers(150, 350)
+        perimeter = _quant_rng.uniform(45, 75)
+        eccentricity = _quant_rng.uniform(0.3, 0.6)
+        major = _quant_rng.uniform(12, 25)
+        minor = _quant_rng.uniform(8, 18)
+        solidity = _quant_rng.uniform(0.85, 0.98)
+        dapi = _quant_rng.integers(6000, 12000)
+        panck = _quant_rng.integers(1500, 8000)
+        f.write(
+            f"P001,{area},{i},{y:.1f},{x:.1f},{area},{eccentricity:.2f},{perimeter:.1f},"
+            f"{int(round(area / solidity))},{major:.1f},{minor:.1f},{dapi},{panck}\n"
+        )
+print("  Created P001_merged_quant.csv (20 cells, DAPI+PANCK -- the prior run's panel)")
 
 # 6d. Sample features JSON
 # 6h. Single channel TIF images (already exist but ensure proper format)
@@ -650,7 +856,13 @@ for i in range(1, 21):
         [round(cx + r * np.cos(a), 1), round(cy + r * np.sin(a), 1)] for a in angles
     ]
     coords.append(coords[0])  # close polygon
-    contours[str(i)] = {"coordinates": coords}
+    # str(label) -> [[x, y], ...], a BARE closed ring. This is what
+    # bin/extract_cell_properties.extract_contours returns and what
+    # bin/export_geojson._polygon_geometry uses directly as the polygon ring
+    # (`{"type": "Polygon", "coordinates": [contours[label_str]]}`). Wrapping it in a
+    # {"coordinates": ...} dict -- which this line used to do -- produced a Polygon
+    # whose one "ring" was a dict, and nothing in bin/ reads such a key back out.
+    contours[str(i)] = coords
 
 with open(OUT_DIR / "sample_contours.json", "w") as f:
     json.dump(contours, f, indent=2)
@@ -791,8 +1003,21 @@ _DELTA_KEYS = (
 )
 
 
-def _stage_record(n_pairs, n_scored, iou_mean, iou_p10, iou_p50, iou_p90, iou_max,
-                   disp_mean, disp_p10, disp_p50, disp_p90, disp_max, dice):
+def _stage_record(
+    n_pairs,
+    n_scored,
+    iou_mean,
+    iou_p10,
+    iou_p50,
+    iou_p90,
+    iou_max,
+    disp_mean,
+    disp_p10,
+    disp_p50,
+    disp_p90,
+    disp_max,
+    dice,
+):
     return {
         "n_pairs": n_pairs,
         "n_pairs_scored": n_scored,
@@ -814,10 +1039,18 @@ def _stage_record(n_pairs, n_scored, iou_mean, iou_p10, iou_p50, iou_p90, iou_ma
 
 
 stage_records = {
-    "native": _stage_record(20, 18, 0.41, 0.20, 0.40, 0.62, 0.70, 18.2, 9.5, 17.8, 27.6, 34.0, 0.39),
-    "rigid": _stage_record(20, 19, 0.68, 0.50, 0.69, 0.85, 0.92, 6.4, 2.1, 6.0, 11.2, 14.5, 0.66),
-    "non_rigid": _stage_record(20, 19, 0.83, 0.68, 0.84, 0.94, 0.97, 2.1, 0.6, 1.9, 3.8, 5.0, 0.82),
-    "micro": _stage_record(20, 20, 0.91, 0.80, 0.92, 0.98, 0.99, 0.9, 0.2, 0.8, 1.7, 2.3, 0.90),
+    "native": _stage_record(
+        20, 18, 0.41, 0.20, 0.40, 0.62, 0.70, 18.2, 9.5, 17.8, 27.6, 34.0, 0.39
+    ),
+    "rigid": _stage_record(
+        20, 19, 0.68, 0.50, 0.69, 0.85, 0.92, 6.4, 2.1, 6.0, 11.2, 14.5, 0.66
+    ),
+    "non_rigid": _stage_record(
+        20, 19, 0.83, 0.68, 0.84, 0.94, 0.97, 2.1, 0.6, 1.9, 3.8, 5.0, 0.82
+    ),
+    "micro": _stage_record(
+        20, 20, 0.91, 0.80, 0.92, 0.98, 0.99, 0.9, 0.2, 0.8, 1.7, 2.3, 0.90
+    ),
 }
 anchor_rec = stage_records[ANCHOR_STAGE]
 delta_vs_anchor = {
@@ -973,6 +1206,469 @@ with open(OUT_DIR / "shipped_defaults_input.csv", "w") as f:
     f.write(f"P900,{TESTDATA_ABS}/P900_ref_scaled.ome.tiff,true,DAPI|PANCK|SMA\n")
     f.write(f"P900,{TESTDATA_ABS}/P900_mov_scaled.ome.tiff,false,DAPI|CD3|CD8\n")
 print("  Created shipped_defaults_input.csv (pixel_size='auto' happy path)")
+
+
+def _label_connected(mask):
+    """Number the 4-connected True regions of a 2-D boolean mask.
+
+    A tiny flood fill rather than `scipy.ndimage.label`: this generator's
+    dependency set is numpy + tifffile (requirements/testdata.txt), and it has to
+    run in CI's generate-testdata action without pulling scipy in for one call.
+    Returns (labels, count).
+    """
+    labels = np.zeros(mask.shape, dtype=np.int32)
+    count = 0
+    for start in zip(*np.nonzero(mask)):
+        if labels[start]:
+            continue
+        count += 1
+        stack = [start]
+        labels[start] = count
+        while stack:
+            y, x = stack.pop()
+            for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                if (
+                    0 <= ny < mask.shape[0]
+                    and 0 <= nx < mask.shape[1]
+                    and mask[ny, nx]
+                    and not labels[ny, nx]
+                ):
+                    labels[ny, nx] = count
+                    stack.append((ny, nx))
+    return labels, count
+
+
+# ======================================================================
+# 10. SEGMENTATION fixture -- separated, StarDist-shaped nuclei
+# ======================================================================
+# Why a SECOND image instead of segmenting P001_ref.ome.tiff like everything
+# else: P001_ref's anatomy is 40 blobs of radius 6-13 packed into 128x128, and
+# `_render_channel` merges them with np.maximum. Measured on the generated file:
+#
+#     foreground (DAPI > 1000)              37.7 % of the frame
+#     connected components in that mask     1
+#     largest component / total foreground  1.00
+#
+# There are no separate nuclei in it to find. StarDist's `2D_versatile_fluo`
+# fits a star-convex polygon per object and then runs NMS; handed one amorphous
+# 6169-pixel region it returns nothing, which is exactly what nightly run
+# 33633986188 recorded -- a 145-byte (all-zero) cell mask and a 147-byte nuclei
+# mask, family 7 (tests 503bcf40 and 7d267e97).
+#
+# That density is not a defect in P001_ref: it is what makes it a good
+# REGISTRATION fixture. VALIS needs dense shared texture across the reference
+# and the shifted moving slides to recover a transform, and the file's own
+# docstring says so ("Without a shared structure ... VALIS legitimately fails").
+# Thinning it to satisfy StarDist would trade a green SEGMENT case for a
+# possibly-red REGISTER one. So segmentation gets its own image, and nothing
+# else in the suite changes.
+#
+# The contract this fixture has to meet is the one P001_ref fails: N nuclei must
+# come out as N connected components, none touching. Enforced below by rejection
+# sampling on centre distance, and ASSERTED after writing rather than assumed --
+# a fixture that silently regained a merged blob would put family 7 straight
+# back without any test noticing.
+print("\n10. Creating the segmentation fixture (separated nuclei)...")
+
+# Its own stream, like _keepset_rng / _prior_rng / _quant_rng above: drawing from
+# _img_rng here would shift every later draw and rewrite fixtures this section
+# has nothing to do with.
+_seg_rng = np.random.default_rng(47)
+
+SEG_FIXTURE_SIZE = (256, 256)
+SEG_FIXTURE_NUCLEI = 45
+# 5-9 px radius => 10-18 px diameter, inside the ~10-40 px range 2D_versatile_fluo
+# was trained on (DSB2018). SEG_FIXTURE_MIN_GAP is the clearance between the two
+# circles' EDGES, so neighbouring nuclei cannot merge under np.maximum.
+SEG_FIXTURE_RADIUS = (5, 10)
+SEG_FIXTURE_MIN_GAP = 6
+
+
+def make_separated_nuclei(size, n_nuclei, rng, margin=14):
+    """Place `n_nuclei` non-touching round nuclei by rejection sampling.
+
+    Returns the same (cy, cx, radius, intensity) tuples `_render_channel` takes,
+    so the rendering path is shared with every other image this script writes --
+    only the PLACEMENT differs. Raises rather than silently returning fewer
+    nuclei: a short fixture would weaken the tests that read it without saying so.
+    """
+    placed = []
+    attempts = 0
+    while len(placed) < n_nuclei:
+        attempts += 1
+        if attempts > 20000:
+            raise RuntimeError(
+                f"could not place {n_nuclei} separated nuclei in {size} after "
+                f"{attempts} attempts -- lower SEG_FIXTURE_NUCLEI or the radius"
+            )
+        radius = int(rng.integers(*SEG_FIXTURE_RADIUS))
+        cy = int(rng.integers(margin, size[0] - margin))
+        cx = int(rng.integers(margin, size[1] - margin))
+        if any(
+            (cy - py) ** 2 + (cx - px) ** 2 < (radius + pr + SEG_FIXTURE_MIN_GAP) ** 2
+            for py, px, pr, _ in placed
+        ):
+            continue
+        placed.append((cy, cx, radius, int(rng.integers(8000, 15000))))
+    return placed
+
+
+seg_anatomy = make_separated_nuclei(SEG_FIXTURE_SIZE, SEG_FIXTURE_NUCLEI, _seg_rng)
+create_multichannel_image(
+    OUT_DIR / "P001_seg_nuclei.ome.tiff",
+    seg_anatomy,
+    size=SEG_FIXTURE_SIZE,
+    channel_names=["DAPI", "PANCK", "SMA"],
+    shift=(0, 0),
+    rng=_seg_rng,
+)
+
+# The assertion the whole section exists for. Re-read from disk (not from the
+# array in memory) so it covers the write path too, and use the same
+# `DAPI > 1000` threshold the measurement above quotes for P001_ref, so the two
+# numbers are comparable.
+_seg_written = tifffile.imread(OUT_DIR / "P001_seg_nuclei.ome.tiff")[0]
+_seg_fg = _seg_written > 1000
+_seg_labels, _seg_n = _label_connected(_seg_fg)
+if _seg_n != SEG_FIXTURE_NUCLEI:
+    raise AssertionError(
+        f"P001_seg_nuclei.ome.tiff has {_seg_n} connected foreground components "
+        f"but {SEG_FIXTURE_NUCLEI} nuclei were placed -- some merged, which is the "
+        f"exact property that made P001_ref.ome.tiff unsegmentable"
+    )
+print(
+    f"  Created P001_seg_nuclei.ome.tiff - {_seg_n} separate nuclei, "
+    f"foreground {_seg_fg.mean():.1%} of the frame"
+)
+
+
+# =============================================================================
+# 11. FORMAT-COVERAGE FIXTURES
+# =============================================================================
+# RULING R3: no committable vendor fixtures. Everything the generator CAN write
+# is written here and tested on real bytes by tests/integration/formats/; the
+# four vendor formats (.czi/.nd2/.lif/.svs) are validated on the cluster and the
+# report is committed as docs/validation/format_validation.md.
+#
+# Numbered 11, not 10 -- section 10 above (SEGMENTATION fixture) already claimed
+# that slot when family 7 of plan 07's own Task 0 landed on this branch, after
+# this section's brief was written. A pure renumbering; nothing here depends on
+# section 10's fixtures or RNG state.
+#
+# Every fixture below is deliberately SMALL (<=256 px a side): these exercise a
+# reader's dispatch and metadata handling, not its throughput, and the format
+# suite runs on every push.
+print("\n11. Creating format-coverage fixtures...")
+
+_fmt_rng = np.random.default_rng(101)
+
+# 11a. PYRAMIDAL OME-TIFF (2 levels, via subIFDs). A whole-slide export from
+#      QuPath or bioformats2raw is pyramidal, and nothing in this repo had ever
+#      read one: a reader that returns the LOWEST level instead of level 0
+#      silently halves every coordinate downstream. Level 0 is 256x256, level 1
+#      is 128x128, so a reader picking the wrong one is visible in the shape.
+_fmt_pyramid = _fmt_rng.integers(0, 3000, (2, 256, 256)).astype(np.uint16)
+with tifffile.TiffWriter(OUT_DIR / "fmt_pyramid.ome.tiff", ome=True) as _tw:
+    _tw.write(
+        _fmt_pyramid,
+        subifds=1,
+        photometric="minisblack",
+        metadata={
+            "axes": "CYX",
+            "Channel": {"Name": ["DAPI", "CD3"]},
+            "PhysicalSizeX": 0.5,
+            "PhysicalSizeXUnit": "µm",
+            "PhysicalSizeY": 0.5,
+            "PhysicalSizeYUnit": "µm",
+        },
+    )
+    _tw.write(_fmt_pyramid[:, ::2, ::2], subfiletype=1, photometric="minisblack")
+print("  Created fmt_pyramid.ome.tiff (2 levels: 256x256 -> 128x128)")
+
+# 11b. BIGTIFF INPUT. The pipeline WRITES BigTIFF unconditionally
+#      (bin/convert_image.py's write_ome_tiff passes bigtiff=True), and that
+#      write side is covered -- but nothing had ever READ one, so the 8-byte
+#      offset path was untested on the input side. bigtiff=True is forced here
+#      rather than earned by size: a fixture big enough to earn it would be 2 GB.
+_fmt_small = _fmt_rng.integers(0, 3000, (2, 64, 64)).astype(np.uint16)
+tifffile.imwrite(
+    OUT_DIR / "fmt_bigtiff.ome.tiff",
+    _fmt_small,
+    bigtiff=True,
+    photometric="minisblack",
+    metadata={
+        "axes": "CYX",
+        "Channel": {"Name": ["DAPI", "CD3"]},
+        "PhysicalSizeX": 0.5,
+        "PhysicalSizeXUnit": "µm",
+        "PhysicalSizeY": 0.5,
+        "PhysicalSizeYUnit": "µm",
+    },
+)
+print("  Created fmt_bigtiff.ome.tiff (BigTIFF, 2 channels)")
+
+# 11c. INTERLEAVED RGB, 8-bit. This is the ONLY fixture that exercises the
+#      S-as-C remap in bin/convert_image.py (the 'S' dimension branch), which
+#      until now was reachable only through a fake reader in
+#      tests/test_convert_lazy_read.py. bioio reports this file as TCZYXS with
+#      C=1 and S=3, and its channel names as ['Channel:0:0'] -- so anything
+#      converting it must be given --channels.
+tifffile.imwrite(
+    OUT_DIR / "fmt_rgb.tiff",
+    _fmt_rng.integers(0, 255, (64, 64, 3)).astype(np.uint8),
+    photometric="rgb",
+)
+print("  Created fmt_rgb.tiff (interleaved RGB, uint8)")
+
+# 11d. 8-BIT SINGLE CHANNEL and 11e. FLOAT32 SINGLE CHANNEL. Every other image
+#      fixture in this file is uint16, so dtype preservation through the reader
+#      and the writer was asserted against exactly one dtype. A float32 slide is
+#      what a deconvolved or ratiometric channel arrives as.
+tifffile.imwrite(
+    OUT_DIR / "fmt_gray8.tiff",
+    _fmt_rng.integers(0, 255, (64, 64)).astype(np.uint8),
+    photometric="minisblack",
+)
+print("  Created fmt_gray8.tiff (uint8, single channel)")
+
+tifffile.imwrite(
+    OUT_DIR / "fmt_float32.tiff",
+    _fmt_rng.random((64, 64)).astype(np.float32),
+    photometric="minisblack",
+)
+print("  Created fmt_float32.tiff (float32, single channel)")
+
+# 11f. A TRUNCATED OME-TIFF. The corrupt-input path was covered only for the
+#      pixel-size probe (tests/test_pixel_size.py); nothing asserted that the
+#      CONVERTER refuses a damaged slide with a message rather than a traceback
+#      or, worse, a partial output. 100 bytes is past the TIFF header and short
+#      of the first IFD.
+(OUT_DIR / "fmt_truncated.ome.tiff").write_bytes(
+    (OUT_DIR / "fmt_bigtiff.ome.tiff").read_bytes()[:100]
+)
+print("  Created fmt_truncated.ome.tiff (first 100 bytes of fmt_bigtiff)")
+
+# 11g. HDF5. bin/convert_image.py's read_image_h5 / _extract_h5_pixel_sizes have
+#      never been exercised by any test. The attribute names below are the ones
+#      that function actually looks for, in its own order of preference:
+#      element_size_um is tried first (the ilastik/Fiji convention, ZYX-ordered,
+#      so the LAST TWO entries are Y and X), and channel_names is read off either
+#      the dataset or the file root. A nested group is used deliberately:
+#      _find_first_image_dataset recurses, and a flat file would not test that.
+_fmt_h5 = np.stack(
+    [
+        _fmt_rng.integers(0, 3000, (64, 64)).astype(np.uint16),
+        _fmt_rng.integers(0, 3000, (64, 64)).astype(np.uint16),
+        _fmt_rng.integers(0, 3000, (64, 64)).astype(np.uint16),
+    ]
+)
+with h5py.File(OUT_DIR / "fmt_image.h5", "w") as _h5:
+    _grp = _h5.create_group("experiment")
+    _ds = _grp.create_dataset("image", data=_fmt_h5)
+    _ds.attrs["element_size_um"] = np.array([1.0, 0.5, 0.5])
+    _ds.attrs["channel_names"] = np.array(["DAPI", "PANCK", "SMA"], dtype=object)
+print("  Created fmt_image.h5 (nested group, element_size_um, channel_names)")
+
+# 11h. NDPI / NDPIS. bin/convert_image.py's parse_ndpis (hand-written INI
+#      parsing) and read_single_ndpi had ZERO tests, and could not have had one
+#      by renaming a TIFF: tifffile picks the NDPI 64-bit-offset format from the
+#      FILE EXTENSION alone (tifffile.py:4317), so a classic TIFF called .ndpi
+#      opens with zero pages and `tf.series[0]` raises IndexError. Measured
+#      2026-09-02.
+#
+#      What tifffile actually expects for an NDPI IFD (tifffile.py:7648-7656):
+#        2-byte tag count
+#        tagno x 12-byte CLASSIC entries
+#        8-byte next-IFD offset
+#        tagno x 4 bytes of value HIGH bits (one uint32 per tag)
+#      plus a 64-bit first-IFD offset in the header. Zeroing the high-bits table
+#      makes every value's 64-bit read equal its 32-bit low word, which is what
+#      makes a small hand-built file legal. Verified to read identically under
+#      tifffile 2024.12.12 (the format-tests env) and 2025.5.10 (the main env).
+#
+#      x_res_per_cm=20000 is exact as a rational and gives read_single_ndpi
+#      exactly 10000/20000 = 0.5 um. A float such as 30769.23 comes back as the
+#      rational (4294967295, 139586) and yields 0.3249978..., which would force
+#      every downstream assertion to be approximate for no reason.
+
+
+def write_minimal_ndpi(path, arr, x_res_per_cm=20000, y_res_per_cm=20000):
+    """Write a minimal single-strip NDPI (classic TIFF with 64-bit IFD offsets).
+
+    ``arr`` must be a 2-D uint16 array. Uncompressed, one strip, twelve tags,
+    all values inline except the two RATIONAL resolutions which sit after the
+    IFD. See the block comment above for the layout and why it cannot be a
+    renamed TIFF.
+    """
+    height, width = arr.shape
+    data = arr.tobytes()
+    data_off = 12  # 'II' + 42 (4 bytes) + an 8-byte first-IFD offset
+    ifd_off = data_off + len(data)
+    tags = [
+        (256, 3, 1, ("short", width)),  # ImageWidth
+        (257, 3, 1, ("short", height)),  # ImageLength
+        (258, 3, 1, ("short", 16)),  # BitsPerSample
+        (259, 3, 1, ("short", 1)),  # Compression = none
+        (262, 3, 1, ("short", 1)),  # PhotometricInterpretation = minisblack
+        (273, 4, 1, ("long", data_off)),  # StripOffsets
+        (277, 3, 1, ("short", 1)),  # SamplesPerPixel
+        (278, 4, 1, ("long", height)),  # RowsPerStrip
+        (279, 4, 1, ("long", len(data))),  # StripByteCounts
+        (282, 5, 1, ("ratx", 0)),  # XResolution
+        (283, 5, 1, ("raty", 0)),  # YResolution
+        (296, 3, 1, ("short", 3)),  # ResolutionUnit = centimetre
+    ]
+    n = len(tags)
+    ifd_size = 2 + n * 12 + 8 + 4 * n
+    ratx_off = ifd_off + ifd_size
+    raty_off = ratx_off + 8
+    entries = b""
+    for tag, typ, count, (kind, value) in tags:
+        if kind == "short":
+            packed = struct.pack("<HH", value, 0)
+        elif kind == "long":
+            packed = struct.pack("<I", value)
+        elif kind == "ratx":
+            packed = struct.pack("<I", ratx_off)
+        else:
+            packed = struct.pack("<I", raty_off)
+        entries += struct.pack("<HHI4s", tag, typ, count, packed)
+    ifd = struct.pack("<H", n) + entries + struct.pack("<Q", 0) + b"\x00" * (4 * n)
+    Path(path).write_bytes(
+        struct.pack("<2sH", b"II", 42)
+        + struct.pack("<Q", ifd_off)
+        + data
+        + ifd
+        + struct.pack("<II", x_res_per_cm, 1)
+        + struct.pack("<II", y_res_per_cm, 1)
+    )
+
+
+write_minimal_ndpi(
+    OUT_DIR / "fmt_cy5.ndpi", _fmt_rng.integers(0, 3000, (64, 64)).astype(np.uint16)
+)
+write_minimal_ndpi(
+    OUT_DIR / "fmt_tritc.ndpi", _fmt_rng.integers(0, 3000, (64, 64)).astype(np.uint16)
+)
+print("  Created fmt_cy5.ndpi and fmt_tritc.ndpi (0.5 um/px, RESUNIT.CENTIMETER)")
+
+# The NDPIS manifest. Its exact key shape ("Image<N>=<basename>") is what
+# parse_ndpis splits on, and the referenced files are resolved against the
+# manifest's own RESOLVED parent directory -- so basenames, never paths.
+with open(OUT_DIR / "fmt_set.ndpis", "w") as f:
+    f.write("[NanoZoomer Digital Pathology Image Set]\n")
+    f.write("NoImages=2\n")
+    f.write("Image0=fmt_cy5.ndpi\n")
+    f.write("Image1=fmt_tritc.ndpi\n")
+print("  Created fmt_set.ndpis (2-channel manifest)")
+
+# =============================================================================
+# 10i. SAMPLESHEET-SHAPE FIXTURES
+# =============================================================================
+# Six shapes a real operator's CSV arrives in that nothing here had ever read.
+# All but the last carry ABSOLUTE paths (TESTDATA_ABS), so they work from any
+# launch directory; relative_paths_input.csv is the deliberate exception and is
+# asserted only by tests/run_validation_tests.sh, which cd's to the repo root
+# first -- see that script, and note that an nf-test cannot host this case
+# because its launch directory is a per-test .nf-test/tests/<hash>/ path that is
+# not knowable when this file runs.
+#
+# Numbered 10i (conceptually a continuation of section 10, the SEGMENTATION
+# fixture) but physically appended here, after section 11: section 11's own
+# _fmt_rng stream is reused below rather than opening a fresh one, and section
+# 10 ends well before _fmt_rng exists. Appending here is append-only -- it does
+# not reorder any earlier draw, so no previously-generated fixture's bytes move.
+print("\n10i. Creating samplesheet-shape fixtures...")
+
+REPO_ROOT = OUT_DIR.resolve().parent.parent
+TESTDATA_REL = OUT_DIR.resolve().relative_to(REPO_ROOT).as_posix()
+
+_SHEET_HEADER = "patient_id,path_to_file,is_reference,channels"
+_SHEET_ROWS = [
+    f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA",
+    f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8",
+]
+
+# CRLF. Excel on Windows writes \r\n. MEASURED on NXF_VER=25.04.7 and 26.04.6
+# (plan 07 Tasks 7-10's own verification): both Groovy's readLines() (CsvUtils)
+# AND Nextflow's splitCsv() (input_check.nf's actual reader) already strip the
+# trailing \r cleanly -- neither leaves it on the last field. So this fixture is
+# not currently exercising a live bug; it is kept as a REGRESSION GUARD against
+# (a) a future Nextflow engine version changing splitCsv's line-ending handling,
+# and (b) any reader added later that splits on "\n" by hand instead of going
+# through readLines()/splitCsv, which would NOT get the same protection.
+# CsvUtils.parseCsvLine trims and input_check.nf's .map trims too, so even a
+# reader that somehow saw a stray \r would still not produce a marker literally
+# named "CD8\r" -- belt and braces, asserted by
+# tests/subworkflows/local/input_check_samplesheet_shapes.nf.test.
+with open(OUT_DIR / "crlf_input.csv", "wb") as f:
+    f.write(("\r\n".join([_SHEET_HEADER] + _SHEET_ROWS) + "\r\n").encode("utf-8"))
+print("  Created crlf_input.csv (CRLF line endings)")
+
+# UTF-8 BOM. CsvUtils.readCsvLines strips U+FEFF from the header (lib/CsvUtils.
+# groovy) because otherwise the first column reads as "﻿patient_id" and
+# every lookup returns -1 -- a silent hang in the sized groupTuples rather than
+# an error. That strip had no test.
+with open(OUT_DIR / "bom_input.csv", "w", encoding="utf-8-sig") as f:
+    f.write("\n".join([_SHEET_HEADER] + _SHEET_ROWS) + "\n")
+print("  Created bom_input.csv (UTF-8 BOM on the header)")
+
+# A path containing a SPACE, quoted. Shared microscopy drives are full of
+# "Patient 001/scan 3.ome.tiff". The quoting exercises CsvUtils.parseCsvLine's
+# quote handling on a PATH (only a quoted --outdir was covered before, in
+# tests/checkpoint_manifest.nf.test), and the space exercises every place the
+# path is later interpolated into a shell command.
+_SPACE_DIR = OUT_DIR / "with space"
+_SPACE_DIR.mkdir(exist_ok=True)
+create_multichannel_image(
+    _SPACE_DIR / "P001 ref.ome.tiff",
+    p001_anatomy,
+    channel_names=["DAPI", "PANCK", "SMA"],
+    shift=(0, 0),
+    rng=_fmt_rng,
+)
+with open(OUT_DIR / "space_path_input.csv", "w") as f:
+    f.write(_SHEET_HEADER + "\n")
+    f.write(f'P001,"{TESTDATA_ABS}/with space/P001 ref.ome.tiff",true,DAPI|PANCK|SMA\n')
+print("  Created space_path_input.csv (quoted path containing a space)")
+
+# A NON-ASCII filename. Patient exports out of European institutes carry
+# umlauts and accents routinely, and nothing in this repo had ever named such a
+# file -- so any place that encodes a path as bytes, or builds a regex from it,
+# was untested.
+create_multichannel_image(
+    OUT_DIR / "P001_ünïcode.ome.tiff",
+    p001_anatomy,
+    channel_names=["DAPI", "PANCK", "SMA"],
+    shift=(0, 0),
+    rng=_fmt_rng,
+)
+with open(OUT_DIR / "unicode_input.csv", "w", encoding="utf-8") as f:
+    f.write(_SHEET_HEADER + "\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_ünïcode.ome.tiff,true,DAPI|PANCK|SMA\n")
+print("  Created unicode_input.csv (non-ASCII filename)")
+
+# EXTRA, UNKNOWN COLUMNS. Nothing validated these: CsvUtils.validateInputCSV
+# checks that the REQUIRED columns are present and ignores everything else, so a
+# typo'd `channles` column sat silently beside a missing `channels` -- and a
+# checkpoint CSV legitimately carries extra columns, so rejecting unknown ones
+# outright is wrong. The rule this fixture pins is WARN AND IGNORE (Task 8).
+with open(OUT_DIR / "extra_column_input.csv", "w") as f:
+    f.write(_SHEET_HEADER + ",operator,scan_date\n")
+    for _row in _SHEET_ROWS:
+        f.write(_row + ",AB,2026-01-31\n")
+print("  Created extra_column_input.csv (two unknown columns)")
+
+# RELATIVE paths, resolved against the LAUNCH DIRECTORY. Every other fixture in
+# this file uses TESTDATA_ABS, so CsvUtils' documented relative-path behaviour
+# ("resolved against the launch directory") was never executed. Asserted only by
+# tests/run_validation_tests.sh, which cd's to the repo root first.
+with open(OUT_DIR / "relative_paths_input.csv", "w") as f:
+    f.write(_SHEET_HEADER + "\n")
+    f.write(f"P001,{TESTDATA_REL}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
+    f.write(f"P001,{TESTDATA_REL}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n")
+print("  Created relative_paths_input.csv (paths relative to the repo root)")
+
 
 print("\n" + "=" * 70)
 print("All test data generation complete!")

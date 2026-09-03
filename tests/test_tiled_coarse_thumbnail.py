@@ -95,14 +95,22 @@ def _run(tmp_path, ref_f, mov_f, max_dim, nuclear_index=1, tile=256, halo=32):
     tiles_f = tmp_path / "tiles.csv"
     tiled_coarse.main(
         [
-            "--reference", str(ref_f),
-            "--moving", str(mov_f),
-            "--nuclear-index", str(nuclear_index),
-            "--tile", str(tile),
-            "--halo", str(halo),
-            "--max-dim", str(max_dim),
-            "--out-m0", str(m0_f),
-            "--out-tiles", str(tiles_f),
+            "--reference",
+            str(ref_f),
+            "--moving",
+            str(mov_f),
+            "--nuclear-index",
+            str(nuclear_index),
+            "--tile",
+            str(tile),
+            "--halo",
+            str(halo),
+            "--max-dim",
+            str(max_dim),
+            "--out-m0",
+            str(m0_f),
+            "--out-tiles",
+            str(tiles_f),
         ]
     )
     return json.loads(m0_f.read_text()), tiles_f
@@ -200,7 +208,9 @@ def test_banded_read_is_numerically_identical_to_full_decimation(tmp_path):
     full = tifffile.imread(str(ref_f))[1].astype(np.float32)
 
     tiny_budget = 8 * n * 4  # ~8 rows per band -> many bands, several per factor stride
-    assert band_rows_for(n, factor, tiny_budget) < n, "budget must force more than one band"
+    assert band_rows_for(n, factor, tiny_budget) < n, (
+        "budget must force more than one band"
+    )
 
     src, _dtype, close = open_lazy(ref_f)
     try:
@@ -231,7 +241,10 @@ def test_m0_is_written_in_full_resolution_coordinates(tmp_path):
     column scales.
     """
     n, max_dim = 1024, 256  # factor 4
-    tx, ty = 16, -12  # multiples of 4, so the decimated pair is related by exactly (4, -3)
+    tx, ty = (
+        16,
+        -12,
+    )  # multiples of 4, so the decimated pair is related by exactly (4, -3)
     ref_f, mov_f = _write_pair(tmp_path, n=n, shift=(tx, ty))
 
     m0_doc, _ = _run(tmp_path, ref_f, mov_f, max_dim=max_dim)
@@ -239,8 +252,12 @@ def test_m0_is_written_in_full_resolution_coordinates(tmp_path):
 
     # moving pixel p maps to reference pixel M0 @ p; content was shifted by (tx, ty), so the
     # recovered forward map must translate by (-tx, -ty).
-    assert m0[0, 2] == pytest.approx(-tx, abs=2.0), f"M0 x-translation {m0[0, 2]} != {-tx}"
-    assert m0[1, 2] == pytest.approx(-ty, abs=2.0), f"M0 y-translation {m0[1, 2]} != {-ty}"
+    assert m0[0, 2] == pytest.approx(-tx, abs=2.0), (
+        f"M0 x-translation {m0[0, 2]} != {-tx}"
+    )
+    assert m0[1, 2] == pytest.approx(-ty, abs=2.0), (
+        f"M0 y-translation {m0[1, 2]} != {-ty}"
+    )
     # near-identity rotation/scale
     assert np.allclose(m0[:2, :2], np.eye(2), atol=0.02)
     assert m0_doc["n_inliers"] > 0
@@ -251,13 +268,17 @@ def test_ref_dims_and_tile_plan_stay_full_resolution(tmp_path):
     n, max_dim, tile, halo = 1024, 128, 256, 32
     ref_f, mov_f = _write_pair(tmp_path, n=n, shift=(8, -8))
 
-    m0_doc, tiles_f = _run(tmp_path, ref_f, mov_f, max_dim=max_dim, tile=tile, halo=halo)
+    m0_doc, tiles_f = _run(
+        tmp_path, ref_f, mov_f, max_dim=max_dim, tile=tile, halo=halo
+    )
 
     assert m0_doc["ref_h"] == n and m0_doc["ref_w"] == n
 
     with open(tiles_f) as f:
         rows = list(csv.DictReader(f))
-    assert len(rows) == (n // tile) ** 2, f"tile plan has {len(rows)} tiles, expected full frame"
+    assert len(rows) == (n // tile) ** 2, (
+        f"tile plan has {len(rows)} tiles, expected full frame"
+    )
     assert max(int(r["x1"]) for r in rows) == n
     assert max(int(r["y1"]) for r in rows) == n
 

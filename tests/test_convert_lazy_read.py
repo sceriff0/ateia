@@ -62,7 +62,11 @@ class _FakeDims:
         raise AttributeError(name)
 
     def __repr__(self):
-        return "<Dimensions [" + " ".join(f"{d}: {self._sizes[d]}" for d in self.order) + "]>"
+        return (
+            "<Dimensions ["
+            + " ".join(f"{d}: {self._sizes[d]}" for d in self.order)
+            + "]>"
+        )
 
 
 class _FakePixelSizes:
@@ -123,8 +127,13 @@ def _planar_image(array):
     return _FakeBioImage(
         array,
         order="TCZYX",
-        sizes={"T": array.shape[0], "C": array.shape[1], "Z": array.shape[2],
-               "Y": array.shape[3], "X": array.shape[4]},
+        sizes={
+            "T": array.shape[0],
+            "C": array.shape[1],
+            "Z": array.shape[2],
+            "Y": array.shape[3],
+            "X": array.shape[4],
+        },
         channel_names=["DAPI", "CD3", "CD8"],
         pixel_sizes=_FakePixelSizes(0.5, 0.5, None),
     )
@@ -134,8 +143,14 @@ def _s_as_c_image(array):
     return _FakeBioImage(
         array,
         order="TCZYXS",
-        sizes={"T": array.shape[0], "C": array.shape[1], "Z": array.shape[2],
-               "Y": array.shape[3], "X": array.shape[4], "S": array.shape[5]},
+        sizes={
+            "T": array.shape[0],
+            "C": array.shape[1],
+            "Z": array.shape[2],
+            "Y": array.shape[3],
+            "X": array.shape[4],
+            "S": array.shape[5],
+        },
         channel_names=["DAPI"],
         pixel_sizes=_FakePixelSizes(None, None, None),
     )
@@ -176,7 +191,9 @@ def test_the_returned_handle_is_still_unmaterialised(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_s_as_c_remap_and_singleton_squeeze_are_preserved(monkeypatch, tmp_path, caplog):
+def test_s_as_c_remap_and_singleton_squeeze_are_preserved(
+    monkeypatch, tmp_path, caplog
+):
     array = _sample_last()
     _install_fake_bioio(monkeypatch, _s_as_c_image(array))
 
@@ -195,7 +212,9 @@ def test_s_as_c_remap_and_singleton_squeeze_are_preserved(monkeypatch, tmp_path,
     assert "Remapped dimension order: TZYXC" in text
 
 
-def test_s_as_c_without_a_singleton_c_keeps_the_full_stack(monkeypatch, tmp_path, caplog):
+def test_s_as_c_without_a_singleton_c_keeps_the_full_stack(
+    monkeypatch, tmp_path, caplog
+):
     """The `else` half of the same branch: no C in the order, so nothing is squeezed."""
     array = _sample_last(shape=(1, 1, 12, 10, 3))
     img = _FakeBioImage(

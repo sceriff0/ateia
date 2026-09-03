@@ -21,6 +21,20 @@ nextflow_pipeline {
                 seg_gpu = false
 
                 preproc_tile_size = 64
+
+                // Both `preprocessed_image` and `registered_image` name INTERMEDIATE
+                // artifacts, and their publishDir carries `enabled:
+                // params.cleanup_level == 'none'` -- a PLAIN boolean, evaluated
+                // eagerly where it appears in conf/modules.config, which
+                // `includeConfig` pulls in BEFORE `profiles {}` runs. So
+                // conf/test.config's own `cleanup_level = 'none'` pin never reaches
+                // the gate, and the file is produced in work/ but never copied to
+                // <outdir>. Setting it HERE does reach it: nf-test hands a `params
+                // {}` block to Nextflow as a -params-file, and that is in the
+                // binding before conf/modules.config is parsed. Measured on nightly
+                // 33633986188 -- these two cases were family 3, and the sole reason
+                // both nightly jobs were red.
+                cleanup_level = 'none'
             }
         }
 
@@ -68,6 +82,9 @@ nextflow_pipeline {
                 max_cpus = 2
                 max_memory = '6.GB'
                 skip_registration_qc = true
+
+                // Same eager-publish-gate reason as the preprocessing case above.
+                cleanup_level = 'none'
             }
         }
 

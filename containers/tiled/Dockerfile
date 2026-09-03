@@ -26,7 +26,12 @@
 # TILED_COARSE, and the CPU path must stay correct since the default deployment exercises
 # nothing else. `torch.cuda.is_available()` must report False out of this image; True means
 # the wrong (CUDA) wheel got installed, and the final verification RUN below asserts it.
-FROM python:3.11-slim
+# DIGEST-PINNED (ruling R6). The tag stays for readability; the digest is what makes the
+# build reproducible -- a version tag is republished, so rebuilding from the tag alone can
+# produce a different image than the one that generated the published results. Resolved
+# 2026-09-02; Dependabot updates the digest in place. Guarded by
+# tests/test_base_images_are_digest_pinned.py.
+FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
 
 # scikit-image / scipy import cleanly on slim with no extra *Python-facing* system libs, but
 # `procps` is not optional: Nextflow's task-metrics wrapper hard-exits BEFORE the script block
@@ -90,5 +95,28 @@ RUN bash /usr/local/bin/mirage-smoke.sh
 # Nextflow's .command.out as they happen rather than at exit.
 ENV PYTHONUNBUFFERED=1
 
-# The bin/ scripts redirect numba/matplotlib caches to /tmp themselves (read-only-$HOME safe).
+# Read-only $HOME safety, the same three variables containers/segeval and
+# containers/spatialdata set. Several of these libraries default their caches to ~/.cache;
+# nextflow.config's docker profile runs tasks with `-u $(id -u):$(id -g)` and the cluster's
+# $HOME is a read-only mount, so a cache write turns into a crash far from its cause -- the
+# same class of failure as the VALIS JVM/jgo cache. MPLCONFIGDIR is not decoration here:
+# matplotlib writes ~/.config/matplotlib on its first import.
+ENV XDG_CACHE_HOME=/tmp/.cache \
+    MPLCONFIGDIR=/tmp/.mplconfig \
+    NUMBA_CACHE_DIR=/tmp/.numba
+
+# The bin/ scripts also redirect numba/matplotlib themselves; these ENV lines make the
+# image correct for a script that forgets to, and match containers/segeval and
+# containers/spatialdata. TORCH_HOME above is separate and must NOT follow XDG_CACHE_HOME:
+# the DISK/LightGlue checkpoints are baked under /opt/torch.
 CMD ["python", "--version"]
+
+# OCI provenance. LAST IN THE FILE ON PURPOSE: VCS_REF changes on every commit, and an ARG
+# referenced earlier would invalidate the layer cache for everything below it on every
+# build. Here it invalidates one metadata layer. .github/workflows/containers.yml passes
+# both values; a local `docker build` gets "unknown", which is honest.
+ARG VCS_REF=unknown
+ARG IMAGE_VERSION=unknown
+LABEL org.opencontainers.image.source="https://github.com/sceriff0/mirage" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${IMAGE_VERSION}"

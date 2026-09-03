@@ -30,9 +30,7 @@ process CONVERT_IMAGE {
     // convert_image.py's nargs="+" with exit 2 halfway through the run.
     def nuclear_markers = MarkerUtils.markerList(params.nuclear_markers).join(' ')
     """
-    # Log input size for tracing (-L follows symlinks)
-    input_bytes=\$(stat -L --printf="%s" ${image_file} 2>/dev/null || echo 0)
-    echo "${task.process},${meta.patient_id},${image_file.name},\${input_bytes}" > ${meta.patient_id}_${image_file.simpleName}.CONVERT_IMAGE.size.csv
+    ${ProcessEnvelope.sizeLog(task.process, meta.patient_id, ["${image_file}"], "${meta.patient_id}_${image_file.simpleName}.CONVERT_IMAGE.size.csv")}
 
     convert_image.py \\
         --input_file ${image_file} \\
@@ -43,7 +41,7 @@ process CONVERT_IMAGE {
         --nuclear-markers ${nuclear_markers} \\
         ${args}
 
-    ${ProcessEnvelope.versions(task.process, ['tifffile', 'aicsimageio', 'h5py'])}
+    ${ProcessEnvelope.versions(task.process, ['tifffile', 'bioio', 'h5py'], task.container)}
     """
 
     stub:
@@ -52,8 +50,8 @@ process CONVERT_IMAGE {
     """
     touch ${prefix}.ome.tif
     echo "${channels}" > ${prefix}_channels.txt
-    echo "STUB,${meta.patient_id},stub,0" > ${meta.patient_id}_${image_file.simpleName}.CONVERT_IMAGE.size.csv
+    ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${meta.patient_id}_${image_file.simpleName}.CONVERT_IMAGE.size.csv")}
 
-    ${ProcessEnvelope.versionsStub(task.process, ['tifffile', 'aicsimageio', 'h5py'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['tifffile', 'bioio', 'h5py'], task.container)}
     """
 }

@@ -19,16 +19,12 @@ _SPEC.loader.exec_module(mcp)
 
 def test_cd4_and_cd45_get_distinct_colors():
     # Before the fix, "CD4" (substring of "CD45") resolved to CD45's color.
-    assert mcp.generate_channel_color("CD4", 0) != mcp.generate_channel_color(
-        "CD45", 1
-    )
+    assert mcp.generate_channel_color("CD4", 0) != mcp.generate_channel_color("CD45", 1)
 
 
 def test_cd1_and_cd14_get_distinct_colors():
     # Before the fix, "CD1" (substring of "CD14") resolved to CD14's color.
-    assert mcp.generate_channel_color("CD1", 0) != mcp.generate_channel_color(
-        "CD14", 1
-    )
+    assert mcp.generate_channel_color("CD1", 0) != mcp.generate_channel_color("CD14", 1)
 
 
 def test_known_key_maps_to_its_predefined_color():

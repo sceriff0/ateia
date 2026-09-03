@@ -59,8 +59,9 @@ class RegPresets {
      * `tile` + 2*`halo` is the per-task window that drives TILED_REG_TILE's memory request, and
      * `out_tile` drives TILED_STITCH's, so these three are the memory axis. `coarse_max_dim` is
      * the resolution the global transform is solved at -- STARE's counterpart to VALIS's
-     * `reg_max_image_dim`, and its dominant runtime-and-accuracy knob (see
-     * benchmarks/tests/test_build_run_plan.py::test_project_stare_resolution_axis_mirrors_the_valis_one).
+     * `reg_max_image_dim`, and its dominant runtime-and-accuracy knob. (The guard that ties this
+     * axis to VALIS's is benchmarks/tests/test_build_run_plan.py, which exists only on the
+     * `benchmarking` branch -- there is no benchmarks/ directory on this one.)
      *
      * Gating and quality knobs -- reg_tiled_gate_tre, reg_tiled_max_error, reg_tiled_max_disp,
      * reg_tiled_nuclear_index -- are deliberately NOT tiered. They set what counts as an
@@ -68,18 +69,12 @@ class RegPresets {
      * them to a cost tier would silently change which control points are accepted when a user
      * asked only to use less memory.
      *
-     * `coarse_max_dim` was 4096/2048/1024 when COARSE ran a classical corner detector (~2 GB at
-     * 4096, and that cost is nearly flat in thumbnail size). DISK+LightGlue is a U-Net: its
-     * activation memory is linear in image AREA and ~20x that peak at equal size, and it is what
-     * TILED_COARSE's memory request is now derived from. Measured on the pinned stack: 3.03 GB at
-     * 512 px, 8.78 GB at 1024 px, which fits `GB ~= 1.1 + 7.3 * Mpx` and puts 4096 px at ~123 GB
-     * -- above the 64 GB ceiling the flat `8.GB * 2**(attempt-1)` ramp used to top out at, which
-     * is what made the re-base necessary. (That ramp is now itself gone: the request derives from
-     * this column, so 4096 would simply ask for ~185 GB and be clamped by params.max_memory.)
-     * The column moves down one tier.
-     * Accuracy is bought back by DISK's sub-pixel fit: a 0.99 px thumbnail residual at a 1/13
-     * decimation on a 26k slide is ~13 px full-res, well inside the 256 px `halo` the anchor
-     * only has to land within.
+     * `coarse_max_dim` is one tier lower than the columns around it because DISK+LightGlue is a
+     * U-Net: activation memory is linear in thumbnail AREA, not nearly flat the way the classical
+     * corner detector it replaced was. Measured on the pinned stack: 3.03 GB at 512 px, 8.78 GB at
+     * 1024 px, i.e. `GB ~= 1.1 + 7.3 * Mpx` -- so 4096 px would ask ~123 GB. Accuracy is bought
+     * back by DISK's sub-pixel fit: a 0.99 px thumbnail residual at 1/13 decimation on a 26k slide
+     * is ~13 px full-res, well inside the 256 px `halo` the anchor only has to land within.
      */
     static final Map<String, Map<String, Integer>> STARE = [
         high  : [tile: 2048, halo: 256, out_tile: 1024, coarse_max_dim: 2048, upsample: 10],
@@ -113,7 +108,7 @@ class RegPresets {
      * value means validation was bypassed, and a resource closure is the worst possible place to
      * raise (conf/modules.config's errorStrategy has an 'ignore' branch that would swallow it).
      */
-    static Map<String, Integer> stareRow(String mode) {
+    private static Map<String, Integer> stareRow(String mode) {
         return STARE[(mode == 'custom' || !mode) ? DEFAULT_MODE : mode] ?: STARE[DEFAULT_MODE]
     }
 

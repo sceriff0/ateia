@@ -46,6 +46,7 @@ install (see tests/test_cleanup_validation.py's identical rationale), so they
 skip cleanly there; CI's `nextflow-stub` job runs tests/lib_probe.nf directly,
 and tests/lib_probe.nf.test runs it again through nf-test.
 """
+
 import shutil
 import subprocess
 

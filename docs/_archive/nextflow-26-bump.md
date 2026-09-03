@@ -1,5 +1,11 @@
 # Follow-up: bump `nextflowVersion` and `nf-schema`
 
+> **Archived 2026-09-02.** This write-up records a `nextflowVersion` / `nf-schema`
+> bump that was NOT performed, in a branch (`fix/red-build-bad-mesh`) that no
+> longer exists. It is kept because the measurements in it are real and the bump
+> is still open; it is excluded from the published site because it describes work
+> that has not happened.
+
 **Status: NOT performed in this branch (`fix/red-build-bad-mesh`), by ruling.**
 This document is the write-up requested by Task 5 — it exists so the
 follow-up survives even though it lives in a gitignored `CLAUDE.md`-adjacent

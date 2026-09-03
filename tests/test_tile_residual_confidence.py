@@ -304,7 +304,9 @@ def test_a_control_point_without_an_error_key_is_accepted_with_a_warning(caplog)
     import logging
 
     controls = [_control(ix=0, iy=0, dx=4.0, dy=0.0, error=None)]
-    assert "error" not in controls[0], "premise: the legacy control JSON has no error key"
+    assert "error" not in controls[0], (
+        "premise: the legacy control JSON has no error key"
+    )
 
     with caplog.at_level(logging.WARNING):
         _gx, _gy, disp = tiled_solve._grid_from_controls(
@@ -427,7 +429,9 @@ def test_the_shipped_max_error_default_actually_rejects_the_measured_garbage():
     ctx = f"shipped reg_tiled_max_error = {shipped}\n{table}"
 
     assert verdicts["tissue_4px"][1], f"the shipped default rejects REAL TISSUE:\n{ctx}"
-    assert verdicts["tissue_0px"][1], f"the shipped default rejects an aligned tile:\n{ctx}"
+    assert verdicts["tissue_0px"][1], (
+        f"the shipped default rejects an aligned tile:\n{ctx}"
+    )
     assert not verdicts["blank_vs_blank"][1], (
         f"the shipped default ADMITS BACKGROUND into the mesh:\n{ctx}"
     )
@@ -631,7 +635,15 @@ def _sweep_band(seed, geom):
             _control(0, 0, dx, dy, error), MAX_ERROR, HALO
         )
         rows.append(
-            (blanked, dx, dy, tre, error, accepted, abs(dx - 4.0) < 0.6 and abs(dy) < 0.6)
+            (
+                blanked,
+                dx,
+                dy,
+                tre,
+                error,
+                accepted,
+                abs(dx - 4.0) < 0.6 and abs(dy) < 0.6,
+            )
         )
     return rows
 

@@ -25,6 +25,7 @@ import re
 from pathlib import Path
 
 from tests.nfmodel import block_extent as _block_extent
+from tests.nfmodel import strip_comments as _strip_comments
 from tests.nfmodel import strip_comments_and_strings as _strip_comments_and_strings
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -134,9 +135,9 @@ def test_no_caller_reimplements_the_work_hash_heuristic():
     # work-hash width, in either order, and any 30/32 length comparison, across
     # modules/ as well (see _sweep_files).
     hash_test = re.compile(
-        r"\[(?:0-9a-f|a-f0-9|0-9A-Fa-f)\]\s*\{\s*3[02]"     # [0-9a-f]{32} and friends
-        r"|\.\s*(?:length\(\)|size\(\))\s*==\s*3[02]"      # .length() == 32
-        r"|==\s*3[02]\s*&&.*(?:hex|hash)"                     # == 32 && ...hash
+        r"\[(?:0-9a-f|a-f0-9|0-9A-Fa-f)\]\s*\{\s*3[02]"  # [0-9a-f]{32} and friends
+        r"|\.\s*(?:length\(\)|size\(\))\s*==\s*3[02]"  # .length() == 32
+        r"|==\s*3[02]\s*&&.*(?:hex|hash)"  # == 32 && ...hash
     )
     offenders = [
         f"{f.relative_to(ROOT)}:{i}"
@@ -183,7 +184,12 @@ def test_every_kind_asked_of_layout_is_published_by_modules_config():
     )
     asked = []
     for f in _callers():
-        text = f.read_text()
+        # Comment-stripped, string-preserving view: the needle (a call whose last
+        # argument is a quoted `kind` literal) lives inside a string, but a call
+        # merely ILLUSTRATED in a comment must not be counted as a real call site --
+        # this is a POSITIVE rule (asserting real call sites exist and agree with
+        # conf/modules.config), so a comment satisfying it would blind the guard.
+        text = _strip_comments(f.read_text())
         # Scanned over the whole file, not line by line: registration.nf's call is
         # wrapped across two lines and a per-line scan would silently skip it.
         for m in call.finditer(text):
@@ -209,12 +215,12 @@ def test_the_unregistered_slide_path_has_its_own_owner():
 
     The writer moved out of registration.nf into its own subworkflow so the
     add_cycle path could share it (an add_cycle run used to write no
-    csv/registered.csv at all). The property is unchanged; only its owner moved."""
-    writer = (
-        ROOT / "subworkflows" / "local" / "registered_checkpoint.nf"
-    ).read_text()
+    csv/registered.csv at all), and then back into register_patient.nf once the
+    WRITE itself moved to checkpoint_writer.nf and the separate file had nothing
+    left to own. The property is unchanged; only its owner moved, twice."""
+    writer = (ROOT / "subworkflows" / "local" / "register_patient.nf").read_text()
     assert "Layout.passthroughPath(" in writer, (
-        "the registered-checkpoint writer no longer routes unregistered slides "
+        "the registered-checkpoint row builder no longer routes unregistered slides "
         "through Layout.passthroughPath — see tests/checkpoint_manifest.nf.test"
     )
     assert "is_passthrough" in writer
@@ -228,7 +234,9 @@ def test_the_unregistered_slide_path_has_its_own_owner():
         "REGISTER_PATIENT's single-slide passthrough branch no longer marks the "
         "slide — its checkpoint row would name a file nothing publishes"
     )
-    tiled = (ROOT / "subworkflows" / "local" / "adapters" / "tiled_adapter.nf").read_text()
+    tiled = (
+        ROOT / "subworkflows" / "local" / "adapters" / "tiled_adapter.nf"
+    ).read_text()
     assert "is_passthrough" in tiled, (
         "TILED_ADAPTER's reference passes through unregistered but is not marked "
         "is_passthrough — its registered.csv row would name a file nothing publishes"
@@ -246,7 +254,7 @@ def _per_patient_publish_leaves() -> set[str]:
     text = MODULES_CONFIG.read_text()
     leaves = set()
     for m in re.finditer(
-        r'\$\{params\.outdir\}/\$\{meta\.patient_id\}/([A-Za-z0-9_/]+)', text
+        r"\$\{params\.outdir\}/\$\{meta\.patient_id\}/([A-Za-z0-9_/]+)", text
     ):
         first = m.group(1).split("/")[0]
         if first == "qc":
@@ -258,16 +266,16 @@ def _per_patient_publish_leaves() -> set[str]:
 def _declared_kinds() -> set[str]:
     """Layout.PUBLISHED_KINDS, parsed from the Groovy source."""
     text = LAYOUT.read_text()
-    block = re.search(
-        r"PUBLISHED_KINDS\s*=\s*\[(.*?)\]\.asImmutable\(\)", text, re.S
-    )
+    block = re.search(r"PUBLISHED_KINDS\s*=\s*\[(.*?)\]\.asImmutable\(\)", text, re.S)
     assert block, "Layout.PUBLISHED_KINDS not found — did the constant move?"
     body = block.group(1)
     kinds = set(re.findall(r"'([^']+)'", body))
     # Bare constant references (PREPROCESSED, REGISTERED) resolve to their own literals.
     for const in re.findall(r"^\s*([A-Z_]+),\s*$", body, re.M):
         lit = re.search(rf"static final String {const}\s*=\s*'([^']+)'", text)
-        assert lit, f"Layout.PUBLISHED_KINDS names {const}, which has no String constant"
+        assert lit, (
+            f"Layout.PUBLISHED_KINDS names {const}, which has no String constant"
+        )
         kinds.add(lit.group(1))
     return kinds
 

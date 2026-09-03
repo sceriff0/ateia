@@ -87,7 +87,10 @@ def _accept(control, max_error, max_disp):
 
     Returns ``(accepted, reason)``; ``reason`` is None when accepted.
     """
-    if max_disp is not None and float(np.hypot(control["dx"], control["dy"])) >= max_disp:
+    if (
+        max_disp is not None
+        and float(np.hypot(control["dx"], control["dy"])) >= max_disp
+    ):
         return False, "disp"
     if "error" not in control:
         return True, None
@@ -124,7 +127,9 @@ def _median_filter_accepted(disp, accepted, radius=1):
     return out
 
 
-def _grid_from_controls(controls, gate_tre, max_error=None, max_disp=None, median_radius=1):
+def _grid_from_controls(
+    controls, gate_tre, max_error=None, max_disp=None, median_radius=1
+):
     nx = max(c["ix"] for c in controls) + 1
     ny = max(c["iy"] for c in controls) + 1
     grid_x = [0.0] * nx
@@ -170,6 +175,17 @@ def _grid_from_controls(controls, gate_tre, max_error=None, max_disp=None, media
 
 
 def main(argv=None) -> int:
+    """CLI entry point: fold the per-tile control points into one warp manifest.
+
+    Applies the accept/reject gate, median-filters the accepted displacement
+    field, and writes the manifest ``tiled_stitch.py`` warps from, plus the TRE
+    JSON the QC report renders.
+
+    Returns
+    -------
+    int
+        0 on success.
+    """
     configure_logging()
     ap = argparse.ArgumentParser(
         description="STARE manifest assembly from control points."

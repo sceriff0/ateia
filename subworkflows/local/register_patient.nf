@@ -26,8 +26,9 @@
         ch_grouped: [patient_id, reference_item, all_items]
                     reference_item = [meta, file]
                     all_items      = [[meta, file], ...]  (INCLUDING the reference)
-        method:     registration backend name — 'tiled' selects TILED_ADAPTER (STARE),
-                    anything else the classic VALIS_ADAPTER.
+        method:     registration backend name — one of RegBackends.methods().
+                    lib/RegBackends.groovy maps it to an adapter; an unknown name
+                    throws there rather than falling through to VALIS.
 
                     A plain String, not a channel: Nextflow binds workflow `take:`
                     values verbatim (same pattern as INPUT_CHECK's image_column).
@@ -43,7 +44,7 @@
         images_multi     [meta, file] — the native (pre-registration) slides of
                                         multi-slide patients only; seg-QC input
         checkpoint_csv   the registration checkpoint manifest (see
-                         REGISTERED_CHECKPOINT / Layout)
+                         CHECKPOINT_WRITER / Layout)
         transform          [patient_id, registrar.pickle | manifest] — seg-QC warper
         transform_by_slide [meta, manifest] — one per moving slide (empty under VALIS)
         stage_checkpoint   [patient_id, reg_stage_checkpoint/] (VALIS, reg_qc>=2 only)
@@ -57,14 +58,14 @@
 ========================================================================================
 */
 
-include { VALIS_ADAPTER         } from './adapters/valis_adapter'
-include { TILED_ADAPTER         } from './adapters/tiled_adapter'
-include { REGISTERED_CHECKPOINT } from './registered_checkpoint'
+include { VALIS_ADAPTER     } from './adapters/valis_adapter'
+include { TILED_ADAPTER     } from './adapters/tiled_adapter'
+include { CHECKPOINT_WRITER } from './checkpoint_writer'
 
 workflow REGISTER_PATIENT {
     take:
     ch_grouped   // [patient_id, ref_item, all_items]
-    method       // String: 'tiled' | 'valis'
+    method       // String: one of RegBackends.methods() — see the Input doc above
 
     main:
     // Single-slide patients (only the reference, nothing to register) must NOT
@@ -112,24 +113,34 @@ workflow REGISTER_PATIENT {
     // instead of a per-emit translation table plus the pre-declared empty channels that
     // used to exist only so the union of the vocabularies could be assembled here.
     //
-    // EVERY BACKEND IS NAMED EXPLICITLY, AND THE FALLBACK IS AN ERROR. This used to read
-    // `if (tiled) ... else VALIS`, which meant any method name the schema enum gained but
-    // this file did not know about registered with VALIS and reported success — the whole
-    // arm would have measured VALIS twice under two labels. An unknown method is now loud.
+    // WHICH ADAPTER IS lib/RegBackends.groovy's ANSWER, NOT THIS FILE'S. It used to be a
+    // three-arm if/else over method-name literals, which was itself a repair of an
+    // earlier `if (tiled) ... else VALIS` that registered any unknown method with VALIS
+    // and reported success. RegBackends.of() throws on a name the table does not know,
+    // so the unknown-METHOD case is closed before this branch runs; the else-arm's own
+    // check below closes the other half — a method the table knows whose adapter this
+    // dispatch has no arm for, which is what a third backend would be on the day it is
+    // added to the table and not here.
+    //
+    // A two-arm `if` and not a lookup: a Nextflow workflow cannot be invoked by name out
+    // of a map, so the CALL has to be written out. Only the DECISION moved.
     //
     // NOTE: the *old distributed-VALIS* low-memory path was archived 2026-07-24
-    // (git tag archive/tiled-valis-2026-07-24). `method == 'tiled'` is a SEPARATE,
+    // (git tag archive/tiled-valis-2026-07-24). The 'tiled' backend is a SEPARATE,
     // live STARE backend — don't confuse the two.
-    if (method == 'tiled') {
+    def adapter = RegBackends.of(method).adapter
+    if (adapter == 'TILED_ADAPTER') {
         TILED_ADAPTER(ch_grouped_multi)
         ch_adapter = TILED_ADAPTER.out
-    } else if (method == 'valis') {
+    } else {
+        if (adapter != 'VALIS_ADAPTER')
+            error "REGISTER_PATIENT: RegBackends.of('${method}').adapter is '${adapter}', " +
+                  "which this dispatch has no arm for. A Nextflow workflow cannot be " +
+                  "invoked by name from a table, so a new adapter needs an arm here as " +
+                  "well as a row in lib/RegBackends.groovy. Known methods: " +
+                  "${RegBackends.methods()}."
         VALIS_ADAPTER(ch_grouped_multi)
         ch_adapter = VALIS_ADAPTER.out
-    } else {
-        error "REGISTER_PATIENT: unknown registration method '${method}'. " +
-              "Valid: valis, tiled. (nextflow_schema.json's registration_method " +
-              "enum and this dispatch must be widened together.)"
     }
 
     // Re-introduce single-slide patients (reference passed through unregistered)
@@ -139,12 +150,50 @@ workflow REGISTER_PATIENT {
     // ========================================================================
     // CHECKPOINT
     // ========================================================================
-    REGISTERED_CHECKPOINT(ch_registered)
+    // The manifest is not a nicety of the linear path: it is the file
+    // `--start postprocessing` reads, and the file `mode='add_cycle'` reads out of
+    // `--prior_outdir` to recover the frozen reference. It used to be owned by
+    // subworkflows/local/registration.nf alone, so an add_cycle run -- which never goes
+    // through REGISTRATION -- wrote none at all, and its `--outdir` could therefore
+    // never be a second add_cycle's `--prior_outdir`. Writing it HERE, in the one
+    // registration core both modes go through, is what closes that; it briefly lived in
+    // a file of its own for the same reason, which stopped being necessary once the
+    // WRITE itself moved to CHECKPOINT_WRITER.
+    //
+    // The row format is the contract with every reader (add_cycle.nf's `ch_prior_ref`,
+    // CsvUtils' checkpoint validation, the `--start` samplesheet parser). It is owned by
+    // lib/Checkpoint.groovy -- the columns are named nowhere here, they are asked for.
+    ch_checkpoint_rows = ch_registered
+        .map { meta, file ->
+            // Where the file WILL be published. This must agree with REGISTER's /
+            // TILED_*'s publishDir in conf/modules.config, including the producer
+            // subdirectory those blocks' `pattern:` carries along ('registered_slides/'
+            // for VALIS, 'registered/' for tiled). Both rules live in Layout.
+            //
+            // A passthrough slide was never registered, so no registration process
+            // published it and <pid>/registered/ may not even exist; Layout.passthroughPath
+            // records where it actually is instead.
+            def published_path = meta.is_passthrough
+                ? Layout.passthroughPath(params.outdir, meta.patient_id, file)
+                : Layout.publishedPath(params.outdir, meta.patient_id, Layout.REGISTERED, file)
+            [
+                patient_id      : meta.patient_id,
+                // RULING R17: carried forward from meta, never re-derived from
+                // registered_image's basename below -- see lib/Checkpoint.groovy.
+                id              : meta.id,
+                registered_image: published_path,
+                is_reference    : meta.is_reference,
+                channels        : meta.channels.join('|'),
+                pixel_size      : meta.pixel_size,
+            ]
+        }
+
+    CHECKPOINT_WRITER(Layout.REGISTERED, ch_checkpoint_rows)
 
     emit:
     registered         = ch_registered
     images_multi       = ch_images_multi
-    checkpoint_csv     = REGISTERED_CHECKPOINT.out.csv
+    checkpoint_csv     = CHECKPOINT_WRITER.out.csv
     // Straight through from the adapter, under the adapter's own names — see the header.
     transform          = ch_adapter.transform
     transform_by_slide = ch_adapter.transform_by_slide

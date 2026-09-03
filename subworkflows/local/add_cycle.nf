@@ -34,8 +34,7 @@
 
 include { PREPROCESSING            } from './preprocess'
 // The registration adapter dispatch, the single-slide passthrough branch and the
-// checkpoint manifest are REGISTER_PATIENT's, shared with registration.nf. This file
-// used to call VALIS_ADAPTER directly and rebuild the surrounding wiring by hand.
+// checkpoint manifest are REGISTER_PATIENT's, shared with registration.nf.
 include { REGISTER_PATIENT         } from './register_patient'
 include { EXTRACT_MASK_SERIES      } from '../../modules/local/extract_mask_series'
 include { EXTRACT_CELL_PROPERTIES  } from '../../modules/local/extract_cell_properties'
@@ -45,11 +44,8 @@ include { SPLIT_CHANNELS as SPLIT_PRIOR_PYRAMID } from '../../modules/local/spli
 include { MERGE_QUANT_CSVS         } from '../../modules/local/merge_quant_csvs'
 include { GENERATE_REGISTRATION_QC } from '../../modules/local/generate_registration_qc'
 include { SEG_QC                   } from './seg_qc'
-// Shared with subworkflows/local/postprocess.nf. These used to be copied inline here;
-// the copy had already drifted (bare .groupTuple() instead of the sized groupKey).
-// groupTiffsByPatient is a plain function, not a process/workflow, but Nextflow's
-// `include` pulls in either — it is the fix for this file's OWN pyramid-channel
-// grouping, which had drifted the same way (see its call site below).
+// Shared with subworkflows/local/postprocess.nf. groupTiffsByPatient is a plain
+// function, not a process/workflow, but Nextflow's `include` pulls in either.
 include { QUANTIFY_MARKERS; groupTiffsByPatient } from './quantify_markers'
 include { ASSEMBLE_EXPORT          } from './assemble_export'
 // The postprocessing checkpoint writer, shared with postprocess.nf. Writing it from
@@ -57,7 +53,7 @@ include { ASSEMBLE_EXPORT          } from './assemble_export'
 // ParamUtils.validateAddCycle requires both of Layout.ADD_CYCLE_CHECKPOINTS, and
 // without this call cycle 3 refused at launch with "required checkpoint
 // 'csv/postprocessed.csv' not found". Same repair, one step later, as
-// registered_checkpoint.nf.
+// register_patient.nf's CHECKPOINT_WRITER call.
 include { POSTPROCESSED_CHECKPOINT } from './postprocessed_checkpoint'
 
 workflow ADD_CYCLE {
@@ -96,16 +92,12 @@ workflow ADD_CYCLE {
     // workflows/mirage.nf before this subworkflow is ever invoked.
 
     // Columns come from lib/Checkpoint.groovy, the writer's owner: this reader
-    // never restates the schema.
-    //
-    // Fail loudly here if the writer's schema drifts from what this reader indexes.
-    ['patient_id', 'registered_image', 'is_reference', 'channels'].each { col ->
-        if (!(col in Checkpoint.columns(Layout.REGISTERED))) {
-            throw new IllegalStateException(
-                "add_cycle reads '${col}' from ${Layout.checkpointCsvRelative(Layout.REGISTERED)}, " +
-                "which Checkpoint no longer declares")
-        }
-    }
+    // never restates the schema. Fail loudly here if the writer's schema drifts
+    // from what this reader indexes -- see Checkpoint.requireColumns for why a
+    // drift is otherwise silent (splitCsv creates keys only for columns the FILE
+    // declares, so a lost column reads as an empty path).
+    Checkpoint.requireColumns(Layout.REGISTERED,
+        ['patient_id', 'registered_image', 'is_reference', 'channels'])
     ch_prior_ref = Channel
         .fromPath(Layout.checkpointCsv(params.prior_outdir, Layout.REGISTERED), checkIfExists: true)
         .splitCsv(header: true)
@@ -117,17 +109,10 @@ workflow ADD_CYCLE {
 
     // Columns come from lib/Checkpoint.groovy, the writer's owner: this reader
     // never restates the schema. Only `merged_csv`, `cell_mask` and `pyramid` are
-    // used here — the masks are re-extracted from the pyramid's Image:1 series by
+    // used here -- the masks are re-extracted from the pyramid's Image:1 series by
     // EXTRACT_MASK_SERIES below, so the cell_mask column is read and discarded.
-    //
-    // Fail loudly here if the writer's schema drifts from what this reader indexes.
-    ['patient_id', 'merged_csv', 'cell_mask', 'pyramid'].each { col ->
-        if (!(col in Checkpoint.columns(Layout.POSTPROCESSED))) {
-            throw new IllegalStateException(
-                "add_cycle reads '${col}' from ${Layout.checkpointCsvRelative(Layout.POSTPROCESSED)}, " +
-                "which Checkpoint no longer declares")
-        }
-    }
+    Checkpoint.requireColumns(Layout.POSTPROCESSED,
+        ['patient_id', 'merged_csv', 'cell_mask', 'pyramid'])
     ch_prior_rows = Channel
         .fromPath(Layout.checkpointCsv(params.prior_outdir, Layout.POSTPROCESSED), checkIfExists: true)
         .splitCsv(header: true)
@@ -213,12 +198,21 @@ workflow ADD_CYCLE {
     // Level 2 needs the classic registrar pickle, which the classic VALIS adapter produces.
     def do_seg_qc = reg_qc_level >= 2
 
-    // Level >= 1: DAPI-overlay image QC — new registered vs prior reference.
+    // Level >= 1: before/after DAPI-overlay QC — the new cycle's NATIVE image and its
+    // registered counterpart, both against the frozen prior reference.
+    //
+    // The native is ch_new_pre, which is also what ch_grouped hands to REGISTER_PATIENT
+    // above: on this path the only moving slide is the new cycle, and the prior reference
+    // is a fixed frame with no "before" of its own. Joined on meta.id for the reason
+    // registration.nf's twin of this block gives -- a meta MAP key is one `meta + [k: v]`
+    // away from never matching, and join() drops an unmatched pair silently.
     if (reg_qc_level >= 1) {
         ch_for_qc = ch_new_registered
-            .map { meta, f -> [meta.patient_id, meta, f] }
+            .map { meta, f -> [meta.id, meta, f] }
+            .join(ch_new_pre.map { meta, f -> [meta.id, f] }, by: 0)
+            .map { _id, meta, reg_f, nat_f -> [meta.patient_id, meta, reg_f, nat_f] }
             .combine(ch_prior_assets.map { pid, prior -> [pid, prior.ref_image] }, by: 0)
-            .map { _pid, meta, reg_f, ref_f -> [meta, reg_f, ref_f] }
+            .map { _pid, meta, reg_f, nat_f, ref_f -> [meta, reg_f, nat_f, ref_f] }
         GENERATE_REGISTRATION_QC(ch_for_qc)
         ch_qc = GENERATE_REGISTRATION_QC.out.qc
     }

@@ -23,6 +23,7 @@ answer less wrong -- it lands in a container log nobody reads, while the
 zeroed cytoplasm reaches the published measurements.csv. If a model cannot
 produce two masks, the run should say so at the point it finds out.
 """
+
 import numpy as np
 import pytest
 from segment_instantseg import _extract_2d_masks
@@ -41,10 +42,13 @@ def _two_channel(y=8, x=8):
     return np.stack([nuclei, cells])
 
 
-@pytest.mark.parametrize("wrapping", [
-    lambda a: a,                       # (2, Y, X)
-    lambda a: a[np.newaxis, ...],      # (1, 2, Y, X) -- batch axis
-])
+@pytest.mark.parametrize(
+    "wrapping",
+    [
+        lambda a: a,  # (2, Y, X)
+        lambda a: a[np.newaxis, ...],  # (1, 2, Y, X) -- batch axis
+    ],
+)
 def test_all_outputs_returns_two_genuinely_different_masks(wrapping):
     nuclei, cells = _extract_2d_masks(wrapping(_two_channel()), "all_outputs")
     assert nuclei.shape == cells.shape == (8, 8)

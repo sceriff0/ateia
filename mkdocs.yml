@@ -15,8 +15,37 @@ copyright: >-
 exclude_docs: |
   superpowers/
   _archive/
+  perf/
   parallel_registration_design.md
   parallel_registration_research.md
+
+# ---------------------------------------------------------------------------
+# Link and navigation validation
+# ---------------------------------------------------------------------------
+# mkdocs 1.6 has no `error` level -- `mkdocs/config/defaults.py`'s _LogLevel accepts
+# exactly warn / info / ignore. Raising these categories from their default `info`
+# to `warn` is what makes `mkdocs build --strict` abort on them, which is how the
+# BLOCKING `docs` job in .github/workflows/_test-suite.yml turns a dangling
+# anchor into a failed build instead of a line nobody reads. (It sat in
+# nightly.yml as an advisory job from 2026-09-02, while the build carried four
+# pre-existing warnings; plan 12 cleared them and moved it back on 2026-09-03.)
+#
+# `nav.omitted_files: warn` is the orphan-page rule: a Markdown file in docs/ that
+# no nav entry points at is unreachable from the site. The two former orphans
+# (nextflow-26-bump.md, migration-2026-08-24.md) now live under docs/_archive/,
+# which `exclude_docs` covers; docs/perf/ is excluded in place because bin/ and
+# tests/ cite those notes by path.
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+  nav:
+    omitted_files: warn
+    not_found: warn
+  links:
+    not_found: warn
+    anchors: warn
 
 # ---------------------------------------------------------------------------
 # Theme
@@ -97,6 +126,7 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Usage: usage.md
+  - Format validation: validation/format_validation.md
   - Pipeline: pipeline.md
   - Parameters: parameters.md
   - Inputs & outputs: outputs.md
@@ -107,8 +137,15 @@ nav:
   - SpatialData & FlowPath: spatialdata.md
   - Benchmarks: benchmarks.md
   - Benchmarks (real samples): benchmarks_real.md
-  - Migration (2026-08-24): migration-2026-08-24.md
   - Citation: citation.md
+  # NOTE (plan 12, 2026-09-02; trimmed 2026-09-03): the brief for this phase
+  # also specifies `- Developing: developing.md` here. That target does not
+  # exist on this branch -- plan 03 (docs/developing.md) has not merged. Adding
+  # the entry now would fail `mkdocs build --strict` on `nav.not_found` for a
+  # page that does not exist, which is worse than the orphan-page warning this
+  # phase exists to fix. Add the line above `- Citation:` in the commit that
+  # lands plan 03.
+  # (Format validation is already navigated above, at `validation/format_validation.md`.)
 
 # ---------------------------------------------------------------------------
 # Appearance extras

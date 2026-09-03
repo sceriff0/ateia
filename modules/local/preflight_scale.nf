@@ -40,29 +40,53 @@ process PREFLIGHT_SCALE {
     script:
     def pixel_size = params.pixel_size
     """
-    # Log input size for tracing (-L follows symlinks). This task fans in over every
-    # slide in the run, so one aggregate line rather than one per file.
-    total_bytes=\$(find -L input_* -maxdepth 1 -type f -exec stat -L --printf="%s\\n" {} + 2>/dev/null | awk '{sum+=\$1} END {print sum+0}')
-    echo "${task.process},all,inputs/,\${total_bytes:-0}" > PREFLIGHT_SCALE.size.csv
+    # This task fans in over every slide in the run, so one aggregate row, sample id `all`.
+    ${ProcessEnvelope.sizeLog(task.process, 'all', ['input_*/*'], 'PREFLIGHT_SCALE.size.csv')}
 
+    # NUL-delimited find, read into an array by hand -- NOT `--images \$(find ...
+    # | sort)`: an unquoted command substitution word-splits on every space in a
+    # staged filename, so "P001 ref.ome.tiff" became TWO argv elements ("P001"
+    # and "ref.ome.tiff") -- both nonexistent, so preflight_scale.py resolved no
+    # scale for the real file and reported it missing. `read -r -d ''` is used
+    # rather than bash 4's `mapfile -d ''`: this script also runs, unchanged,
+    # under the container-less local stub loop (CLAUDE.md), where the shell is
+    # whatever `bash` the host provides -- macOS ships bash 3.2, which has no
+    # `mapfile` (measured: "mapfile: command not found").
+    images=()
+    while IFS= read -r -d '' _img; do
+        images+=("\$_img")
+    done < <(find -L input_* -maxdepth 1 -type f -print0 | sort -z)
     preflight_scale.py \\
-        --images \$(find -L input_* -maxdepth 1 -type f | sort) \\
+        --images "\${images[@]}" \\
         --pixel-size ${pixel_size} \\
         --output preflight_scale_report.json
 
-    ${ProcessEnvelope.versions(task.process, ['tifffile'])}
+    ${ProcessEnvelope.versions(task.process, ['tifffile'], task.container)}
     """
 
     stub:
     def pixel_size = params.pixel_size
     """
-    echo "STUB,all,stub,0" > PREFLIGHT_SCALE.size.csv
+    ${ProcessEnvelope.sizeLogStub(task.process, 'all', 'PREFLIGHT_SCALE.size.csv')}
 
+    # NUL-delimited find, read into an array by hand -- NOT `--images \$(find ...
+    # | sort)`: an unquoted command substitution word-splits on every space in a
+    # staged filename, so "P001 ref.ome.tiff" became TWO argv elements ("P001"
+    # and "ref.ome.tiff") -- both nonexistent, so preflight_scale.py resolved no
+    # scale for the real file and reported it missing. `read -r -d ''` is used
+    # rather than bash 4's `mapfile -d ''`: this script also runs, unchanged,
+    # under the container-less local stub loop (CLAUDE.md), where the shell is
+    # whatever `bash` the host provides -- macOS ships bash 3.2, which has no
+    # `mapfile` (measured: "mapfile: command not found").
+    images=()
+    while IFS= read -r -d '' _img; do
+        images+=("\$_img")
+    done < <(find -L input_* -maxdepth 1 -type f -print0 | sort -z)
     preflight_scale.py \\
-        --images \$(find -L input_* -maxdepth 1 -type f | sort) \\
+        --images "\${images[@]}" \\
         --pixel-size ${pixel_size} \\
         --output preflight_scale_report.json
 
-    ${ProcessEnvelope.versionsStub(task.process, ['tifffile'])}
+    ${ProcessEnvelope.versionsStub(task.process, ['tifffile'], task.container)}
     """
 }

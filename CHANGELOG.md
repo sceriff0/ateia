@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Seven changes alter what a run produces or what its outputs MEAN, and every one of
 them is silent from the consumer's side. The first six are collected, each with what
 changed and what to do about it, in
-[`docs/migration-2026-08-24.md`](docs/migration-2026-08-24.md); the seventh landed
+[`docs/_archive/migration-2026-08-24.md`](docs/_archive/migration-2026-08-24.md); the seventh landed
 after that doc and is detailed inline below:
 
 1. **Darkfield correction is gone** — nf-core `BASICPY` runs at
@@ -170,8 +170,88 @@ after that doc and is detailed inline below:
   `add_cycle` runs is still **not** supported: `csv/postprocessed.csv` is still not written
   (`add_cycle` has no `POSTPROCESSING` step), and `ParamUtils.validateAddCycle` requires both
   checkpoints to be present.
+- **Two new supplementary figures.** `docs/figures/coarse-schematic.html` (S5) walks the DISK +
+  LightGlue coarse front-end that replaced the four-way `reg_tiled_frontend` dispatch above;
+  `docs/figures/accuracy-schematic.html` (S6) distinguishes what each of the pipeline's accuracy
+  measures actually measures (intrinsic TRE, the residual-confidence gate, the reconciliation
+  scatter) so a reviewer stops conflating them. The set is now six files, mutually linked via a
+  shared `figset` nav.
+- **`tests/test_figures_have_no_retired_names.py`** — a NEGATIVE guard: no figure may say a
+  backend, front-end or harness the pipeline retired (the ten stale `ORB` mentions in
+  `registration-schematic.html` were the motivating case — `ORB` still parsed as a real word, so
+  no *positive* name check had anything to fail on). Reads raw text, not the comment-stripped
+  `_prose()` the positive checks use, so a retired name hidden in an HTML comment still fails it.
+- **`tests/test_figures_match_the_pipeline.py` gained a fourth claim class**: figure prose is
+  checked against `RegBackends.methods()` so the shipped registration-backend names (currently
+  `valis`, `tiled`) are exactly what the figure set advertises — no deleted backend lingering in
+  prose, no shipped backend the figures never mention.
+- **A samplesheet with a mistyped or extra column now warns, naming it.**
+  `validateInputCSV` only ever asserted the *required* columns were present and said
+  nothing about the rest, so `channles` sitting beside a missing `channels` failed
+  later, elsewhere, on a null. Rejecting unknown columns outright would be wrong — a
+  `csv/registered.csv` read back by `--start segmentation` legitimately carries `id`
+  and `pixel_size` beyond that step's four required columns — so
+  `CsvUtils.unknownColumns` (known set = `ParamUtils.requiredColumnsForStep(step)` ∪
+  `Checkpoint.STEPS.collectMany { it.columns }`) reports the extras and
+  `workflows/mirage.nf` warns once, by name, on **both** the linear `--start`/`--stop`
+  path and the `--mode add_cycle` path (the latter added in a review follow-up — it
+  shares the same `validateInputCSV` call but had no warning at all until then). A
+  legitimate checkpoint header warns about nothing.
+- **The format matrix, and the cluster kit that validates the formats CI cannot
+  synthesise.** `tests/integration/formats/` now exercises pyramidal OME-TIFF,
+  BigTIFF, interleaved RGB, 8-bit, float32, HDF5 and NDPI/NDPIS on real bytes in
+  their own `format-tests` CI job (`requirements/format-tests.txt`, pinned to
+  `containers/convert`'s own reader stack -- it cannot coexist with the harmonised
+  set). `.czi`, `.nd2`, `.lif`, `.ndpi` and `.svs` cannot be synthesised at all
+  (RULING R3: no vendor fixture may be committed), so `tests/cluster/` ships a kit -- a
+  samplesheet template, a probe script run inside the convert container, and a
+  driver -- an operator runs by hand against private images to produce
+  `docs/validation/format_validation.md`, the evidence committed in place of the
+  data. That page ships with this phase in an explicit `kit-validated: pending`
+  state; `tests/test_validation_report_is_real.py` guards it in both states -- it
+  must never regress to the template or to a page claiming success no run
+  produced, and once a real run lands it must name the commit, the probe
+  container, and carry at least one successful row for one of the five vendor
+  formats.
+- **Three corrected `ome_io` return values, found by the synthesised fixtures.**
+  `read_info` on an interleaved-RGB plain TIFF (`YXS`) now reports
+  `shape_cyx=(3, Y, X)` with `channels_are_samples=True` on the tifffile path too
+  (it reported `(Y, X, S)` -- a channel count that was the image height);
+  `read_info` on an `.ndpi` now carries the pixel size from its
+  `XResolution`/`ResolutionUnit` tags (it reported `None`); and `read_plane`'s
+  tifffile branch selects a SAMPLE when `channels_are_samples`, on both the lazy
+  and eager paths, deriving the axis from `series.axes` (`read_plane(rgb, 1)`
+  returned a `(Y, S)` slice). No shipped behaviour changes: the pipeline's only
+  `read_info`/`read_plane` consumer reads planar OME-TIFFs that `CONVERT_IMAGE`
+  has already normalised -- but `ome_io` is a frozen shared interface, so its
+  corrected contract is recorded here.
 
 ### Changed
+- **The resource report is plots, not tables.** The per-process rollup,
+  resource-vs-input-size, top-10-by-RSS, top-10-by-runtime and per-task
+  retry/failure tables are replaced by four hand-rolled SVG panels: wall-time by
+  process, memory headroom (requested `memory` vs observed `peak_rss` — the
+  trace column the report never read), the reserved GB·hours lost to failures
+  and retries, and input size against runtime on log-log axes. Run Totals
+  survives as the one remaining table and gains the peak single-task %CPU. Two
+  behaviour changes: a zero-byte matched input is dropped from the scatter (a
+  log axis cannot place a zero) and the panel states how many were dropped, and
+  a per-task status/exit string is no longer rendered. The script remains
+  standard-library only, now guarded.
+- **The HTML QC report is plots, not tables.** `bin/generate_qc_report.py` renders
+  per-stage registration-error distributions (STARE per-tile TRE, accepted tiles
+  only; warp-seg cell displacement, one point per slide), a log-log feature-TRE vs
+  cell-displacement scatter with the 3× divergence band drawn as two diagonals, and
+  a per-cell residual distribution — replacing the per-slide TRE tables, the
+  flattened warp-seg metric table, the reconciliation verdict table and the 500-row
+  head-of-CSV residual dump. All hand-rolled inline SVG; the script remains
+  stdlib-only and is now guarded as such.
+- **The Software Versions and Sample Manifest sections are gone from the report.**
+  Both content sources are unchanged and still published:
+  `qc/mirage_qc_data_<timestamp>/collated_versions.yml` and `run_summary.json`
+  (whose `manifest` block `final_qc.nf` still builds). `--versions` and
+  `--run-summary` are still passed to the script, which still copies both into the
+  data bundle — the rendering was cut, not the artifact.
 - **`pixel_size` default: `null` → `'auto'`.** It used to have no shipped default —
   `ParamUtils.validatePixelSize` forced an operator to assert a positive number of
   micrometres per pixel, or pass `'auto'` explicitly, before a run could start.
@@ -384,8 +464,111 @@ after that doc and is detailed inline below:
   for DISPATCH, in `subworkflows/local/registration.nf`; `WARP_SEG_QC`'s
   `--jvm-heap-gb 8` (VALIS-only) is resolved from the `method` process input via
   `lib/WarpBackends.groovy`, not from the param, so the two can never disagree.
+- **The blocking `nf-test test --tag stub` job is sharded four ways** (a
+  `shard-strategy round-robin` matrix in `_test-suite.yml`'s `nf-test-stub` job),
+  cutting that leg's wall time from roughly 30 minutes to roughly 9.
+- **`ruff format` in check mode is now also blocking**, in the same `_test-suite.yml`
+  `ruff` job that already runs `ruff check`, after the whole tree was normalised to
+  its output in one commit (133 files). See `tests/README.md`'s CI Jobs section.
+- **`versions.yml` from every process now records `container:`** — the image the
+  task ran in (`stub` under `-stub`) — via `lib/ProcessEnvelope.groovy`'s shared
+  `versions()`/`versionsStub()` rendering.
+- **Stub-mode `*.size.csv` rows carry the real process name instead of the literal
+  `STUB`**; `sample_id` for `QUANTIFY` is now `patient_id` in both halves.
+- **`bin/generate_resource_report.py`'s `parse_size_log` rejects a size log whose
+  header is not `process,sample_id,filename,bytes`** — one owner,
+  `ProcessEnvelope.SIZE_LOG_COLUMNS`.
+- **The measured byte set moved** for `REGISTER` (everything under `ref/` +
+  `input_*/`), `PREFLIGHT_SCALE` (`input_*/*`), `MERGE_AND_PYRAMID` (sum of
+  `channels/*`, no longer the directory inode) and `WARP_SEG_QC` (real bytes, was
+  hard-coded 0) — size-vs-runtime plots are not comparable across this change.
+- **`bin/utils/ome_io.py` is the one image I/O seam.** Every `bin/` TIFF write goes
+  through `write_tiff`/`write_ome_tiff`/`ome_tiff_writer`; format dispatch goes
+  through `detect_reader`/`require_reader`. An unclaimed samplesheet extension now
+  fails at launch with `UnsupportedFormatError` naming the suffix — it used to fall
+  through to `bioio` and fail several frames inside `BioImage`, naming a problem
+  that was not the problem. `.svs`/`.qptiff`/`.vsi`/`.scn`/`.mrxs`/`.bif`/`.ims` are
+  declared Bio-Formats routes that raise a named `ImportError` until
+  `bioio-bioformats` is installed in the convert image (plan 06).
+- **`CONVERT_IMAGE`'s `versions.yml` now records `bioio`** where it recorded
+  `aicsimageio`.
+- **`APPLY_PROFILES`'s OME-XML header attribute order moved onto `ome_metadata`'s**
+  — the order `convert_image` already used. Pixels and values are unchanged, but a
+  byte-diff against a pre-change preprocessed slide's header will differ, and
+  `-resume` across the change will miss for that step.
+- **`subworkflows/local/checkpoint_writer.nf` (`CHECKPOINT_WRITER`) is the one
+  checkpoint-CSV writer**, and the only reader of `params.cleanup_level` under
+  `subworkflows/`; `registered_checkpoint.nf` is folded into `register_patient.nf`
+  and deleted. `Checkpoint.requireColumns` now runs at every checkpoint reader.
+- **`lib/RegBackends.groovy` is the one table of what a registration backend is**;
+  the three decision sites (the adapter, the seg-QC join, and the add_cycle gate)
+  route through it.
+- **`expand_labels_tiled` has one owner, `bin/utils/segment_io.py`** — both
+  `segment.py` and `segment_cellsam.py` import it rather than carrying their own
+  copy.
+- **Registration QC is a before/after pair.** `GENERATE_REGISTRATION_QC` now
+  receives the moving slide's native, pre-registration image alongside the
+  registered one and renders two composites side by side on the reference
+  canvas: *Before* (reference + native) and *After* (reference + registered),
+  separated by a blue band. Differing dimensions are reconciled by pad-or-crop
+  at the origin, never by rescaling, so the "before" panel cannot understate the
+  error it exists to show. Published names are unchanged
+  (`*_QC_RGB.{png,tif}`, `*_QC_RGB_fullres.tif`) — the figure is twice as wide,
+  not differently named. Applies at every `reg_qc >= 1`, on both the linear path
+  and `--mode add_cycle`. `GENERATE_REGISTRATION_QC`'s input tuple grows from
+  three elements to four — `[meta, registered, native, reference]`, with `native`
+  staged under its own `native/` subdirectory — so any caller invoking the
+  process directly must now supply the native image; the two existing call sites
+  (`subworkflows/local/registration.nf`, `subworkflows/local/add_cycle.nf`) join
+  it in on `meta.id`. `bin/generate_registration_qc.py` gains `--native`;
+  omitting it renders the previous single panel, so the script stays usable by
+  hand. `GENERATE_REGISTRATION_QC`'s memory tier is now keyed on all three
+  inputs' combined size, not two. Both the fullres composite and the preview
+  TIFF now carry a stamped pixel size (ImageJ `unit=um` metadata on the former,
+  OME `PhysicalSizeX/Y` in µm on the latter via `bin/generate_registration_qc.py
+  --pixel-size-um`), so a viewer's scale bar on either output is real.
+- **Every `FROM` in `containers/`, and both external runtime images the pipeline pulls
+  (`cdgatenbee/valis-wsi`, `labsyspharm/basicpy-docker-mcmicro`), are pinned by content
+  digest** (R6) — the basicpy digest lives in `conf/modules.config`'s
+  `withName: 'BASICPY'` block; the vendored `modules/nf-core/basicpy` module itself is
+  untouched.
+- **`AGGREGATE_SIZE_LOGS` now runs in `bolt3x/mirage-preprocess`**, replacing a bare
+  `ubuntu:22.04` container.
+- **Every first-party image now installs `procps`.**
+- **`containers/regqc` is stripped to what `GENERATE_REGISTRATION_QC` actually
+  executes** — TensorFlow, StarDist, Miniconda and `bftools` are gone. Dead installs
+  were removed across the other images too, and StarDist's accelerators
+  (`gputools`/`edt`) are pinned.
+- **`containers/convert` installs `bioio-bioformats`, with the Bio-Formats jars baked
+  at build time and the JVM cache redirected off a read-only `$HOME`** on the
+  pipeline's own read path (R2) — `.svs`/`.qptiff`/`.vsi`/`.scn`/`.mrxs`/`.bif`/`.ims`
+  now convert offline.
+- **`requirements/spatialdata.txt` is locked to exact versions resolved on
+  linux/amd64.**
+- **All 11 first-party images carry OCI provenance labels.**
+- **`containers/README.md` is rewritten and pinned to the Dockerfiles by a guard.**
+- **The container-requirements guards now derive from module-scope imports plus a
+  positive `REQUIRED_RUNTIME_IMPORTS` table** — the 16-entry unreachable-import
+  allowlist is gone — and a reverse rule now forbids installing what nothing reaches.
+- **`docs/figures/` rewritten to match the current pipeline**: two registration backends (VALIS,
+  tiled/STARE) instead of three, the DISK + LightGlue coarse front-end, the QC report's
+  plots-first rework, and the registration-QC two-panel (native + registered) overlay. The
+  parameter defaults, pipeline names and registration-method words each figure states are now
+  drift-checked against `nextflow.config`, the pipeline source and `RegBackends.methods()`
+  respectively — see the guards listed under Added.
+- **`tests/test_no_cli_boolean_params_in_docs.py` now scans `docs/figures/*.html`**, not just
+  prose docs, so a figure can no longer show the CLI-rejected `--dry_run true` form.
 
 ### Fixed
+- **The resource report is found where Nextflow wrote it.** `main.nf` resolved
+  `trace_dir` against the JVM's working directory while Nextflow resolves
+  `trace.file` against the launch directory; when a wrapper or an `sbatch` that
+  changes directory made those differ, the report was generated from an empty
+  trace and announced as a success. It is now resolved through
+  `lib/ResourceReport.groovy`, and when no trace is found the run logs a warning
+  **naming the path it looked for and whether tracing was on**, and writes no
+  page at all — an empty report that says "not available" is worse than no
+  report, because it looks like one.
 - **The release workflow built a release from three different commits.**
   `.github/workflows/release.yml` gated on a bare `actions/checkout` (`github.ref`),
   tagged `ref: main` regardless, and gave `artifacts`, `publish-images` and
@@ -753,6 +936,27 @@ after that doc and is detailed inline below:
   of the same commit could produce differently-ordered (though content-identical) CSVs. Rows are
   now sorted (`sort: true`, patient ID then path). **Published-output change (explicitly
   authorised):** row order in the three manifests changes; contents and column order do not.
+- **A quoted samplesheet path (e.g. a filename with a space) was silently read wrong.**
+  `subworkflows/local/input_check.nf`'s `.splitCsv(header: true)` had no `quote:`
+  option, so a quoted field came back with its surrounding quote characters still
+  attached; `file()` then saw a value not starting with `/`, treated it as relative,
+  and staged a symlink to nothing. Fixed with `quote: '"'`. Even with that fixed,
+  `modules/local/preflight_scale.nf`'s rendered command built its `--images` list via
+  an unquoted `$(find ... | sort)` command substitution, which word-splits on every
+  space in a staged filename — fixed by reading `find`'s NUL-delimited output into a
+  bash array by hand (`while read -r -d ''`, not bash 4's `mapfile -d ''`: this script
+  runs unchanged under the container-less local stub loop, and macOS ships bash 3.2).
+  Both surfaced from a new nf-test exercising real-world samplesheet shapes (CRLF, a
+  UTF-8 BOM, a quoted path with a space, a non-ASCII filename), not from a synthetic
+  probe.
+- **`bin/utils/qc.py`'s `create_registration_qc` silently fell back to channel 0 when no
+  configured nuclear/fiducial marker matched a slide's OME channel names** — at all three
+  sites (reference, registered, and native), with only a `logger.warning`. It now raises
+  `ValueError` instead. The old behaviour was correct only by accident (channel 0 happens
+  to be `CONVERT_IMAGE`'s reserved nuclear slot); the dangerous case is a real
+  misregistration silently rendered as an apparently-aligned QC overlay. See
+  [`docs/registration_qc.md`](docs/registration_qc.md) for the one-line note on the
+  channel-selection contract.
 
 ### Removed
 - **The `ashlar` registration backend is removed; v1.0.0 ships exactly two, `valis` and
@@ -854,6 +1058,22 @@ after that doc and is detailed inline below:
   hold at production scale). `TILE_FOR_BASIC` and `APPLY_PROFILES` read through the same
   lazy primitive by construction (`docs/figures/zarr-schematic.html` panel **c**, "the
   fifth site").
+- **`bin/registration_benchmark.py` — deleted from the pipeline branches**; it
+  survives on the `benchmarking` branch, where the benchmark harness that calls it
+  lives. `bin/utils/reg_benchmark.py` lost its only production importer with it and
+  is now covered by an allowlisted skip
+  (`tests/test_no_dead_bin_modules.py::test_bin_utils_module_has_a_real_importer[reg_benchmark.py]`,
+  `tests/expected_skips.txt`) rather than deleted, since it is still imported by
+  `tests/test_reg_benchmark.py` and `tests/test_tiled_fanout.py`.
+- **`segeval_tag` parameter — removed.** The segeval image now follows `manifest.version`
+  like every other first-party image, so there is no separate tag to override. An old
+  `-params-file` that still carries the key now fails schema validation at launch; delete
+  the key rather than updating its value.
+- **`docs/figures/failure-schematic.html` is retired.** It was a draft never wired into
+  the published set — linked from no docs page and from no sibling figure's `figset`
+  nav — and it claimed "Supplementary Figure S4", a number `zarr-schematic.html`
+  already holds. `.gitignore` keeps the filename listed so a stray re-creation cannot
+  become a tracked figure by accident.
 
 ## [1.0.0] - 2026-07-29
 

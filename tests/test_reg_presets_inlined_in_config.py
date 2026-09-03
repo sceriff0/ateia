@@ -193,7 +193,9 @@ def test_custom_is_not_a_preset_row(valis_config):
         "the overrides given' -- a row of its own contradicts that."
     )
 
-    assert "custom" not in valis_config.MEMORY_PRESETS, "MEMORY_PRESETS grew a 'custom' row -- same problem"
+    assert "custom" not in valis_config.MEMORY_PRESETS, (
+        "MEMORY_PRESETS grew a 'custom' row -- same problem"
+    )
     assert valis_config.resolve_memory_mode("custom") == "high"
 
 

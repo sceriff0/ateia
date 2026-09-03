@@ -215,9 +215,7 @@ class TestCompartmentQuantification:
         # Without a nuclei mask -> whole-cell Cell compartment only, still Median default.
         wholecell = quantify_single_channel(cell_mask, channel, "CD3")
         assert list(wholecell.columns) == ["label", "CD3", "CD3: Cell: Median"]
-        assert not any(
-            "Nucleus" in c or "Cytoplasm" in c for c in wholecell.columns
-        )
+        assert not any("Nucleus" in c or "Cytoplasm" in c for c in wholecell.columns)
         # Bare marker column is whole-cell mean in both paths.
         assert wholecell.iloc[0]["CD3"] == pytest.approx(comp.iloc[0]["CD3"])
 

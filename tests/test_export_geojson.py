@@ -23,7 +23,8 @@ import numpy as np
 import pandas as pd
 
 _SPEC = importlib.util.spec_from_file_location(
-    "export_geojson", Path(__file__).resolve().parent.parent / "bin" / "export_geojson.py"
+    "export_geojson",
+    Path(__file__).resolve().parent.parent / "bin" / "export_geojson.py",
 )
 eg = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(eg)
@@ -37,19 +38,32 @@ def test_no_panel_supplied_is_constant_cell_classification(tmp_path):
     treats as a per-object UUID — a shared id across every detection breaks re-import
     for the whole cohort.
     """
-    quant = pd.DataFrame({"label": [1, 2], "x": [5, 6], "y": [7, 8],
-                          "PanCK: Cytoplasm: Mean": [10.0, 0.0], "area": [100, 100]})
+    quant = pd.DataFrame(
+        {
+            "label": [1, 2],
+            "x": [5, 6],
+            "y": [7, 8],
+            "PanCK: Cytoplasm: Mean": [10.0, 0.0],
+            "area": [100, 100],
+        }
+    )
     out = tmp_path / "cells.geojson"
-    eg.export_geojson(quant, str(out), pixel_size=0.325,
-                      marker_cols=["PanCK: Cytoplasm: Mean"], contours=None)
+    eg.export_geojson(
+        quant,
+        str(out),
+        pixel_size=0.325,
+        marker_cols=["PanCK: Cytoplasm: Mean"],
+        contours=None,
+    )
     gj = json.loads(out.read_text())
     f0 = gj["features"][0]
     assert "id" not in f0
     assert f0["properties"]["classification"] == {
-        "name": "Cell", "colorRGB": eg.rgb_to_qupath_color(*eg.CELL_COLOR_RGB)
+        "name": "Cell",
+        "colorRGB": eg.rgb_to_qupath_color(*eg.CELL_COLOR_RGB),
     }
     names = {m["name"] for m in f0["properties"]["measurements"]}
-    assert "PanCK: Cytoplasm: Mean" in names        # the marker key is still emitted
+    assert "PanCK: Cytoplasm: Mean" in names  # the marker key is still emitted
     assert "pheno_score: Tumour" not in names
     assert not any(n.startswith("pheno_score:") for n in names)
 
@@ -62,14 +76,28 @@ def test_label_is_emitted_as_a_measurement(tmp_path):
     (CellIndex.resolveMeasurementKey) and filters it out of the marker panel
     (DetectionIngest.MORPHOLOGY_PREFIXES), so emitting it costs nothing there.
     """
-    quant = pd.DataFrame({"label": [7, 9], "x": [5, 6], "y": [7, 8],
-                          "PanCK: Cytoplasm: Mean": [10.0, 0.0], "area": [100, 100]})
+    quant = pd.DataFrame(
+        {
+            "label": [7, 9],
+            "x": [5, 6],
+            "y": [7, 8],
+            "PanCK: Cytoplasm: Mean": [10.0, 0.0],
+            "area": [100, 100],
+        }
+    )
     out = tmp_path / "cells.geojson"
-    eg.export_geojson(quant, str(out), pixel_size=0.325,
-                      marker_cols=["PanCK: Cytoplasm: Mean"], contours=None)
+    eg.export_geojson(
+        quant,
+        str(out),
+        pixel_size=0.325,
+        marker_cols=["PanCK: Cytoplasm: Mean"],
+        contours=None,
+    )
     features = json.loads(out.read_text())["features"]
     labels = [
-        next(m["value"] for m in f["properties"]["measurements"] if m["name"] == "label")
+        next(
+            m["value"] for m in f["properties"]["measurements"] if m["name"] == "label"
+        )
         for f in features
     ]
     assert labels == [7, 9]
@@ -82,15 +110,24 @@ def test_label_survives_a_skipped_row(tmp_path):
     index and CSV row index diverge. The emitted label is what stays correct: the
     second feature must be label 3, not the label of CSV row 1.
     """
-    quant = pd.DataFrame({"label": [1, 2, 3], "x": [5, float("nan"), 6],
-                          "y": [7, 8, 9], "area": [100, 100, 100]})
+    quant = pd.DataFrame(
+        {
+            "label": [1, 2, 3],
+            "x": [5, float("nan"), 6],
+            "y": [7, 8, 9],
+            "area": [100, 100, 100],
+        }
+    )
     out = tmp_path / "cells.geojson"
-    n = eg.export_geojson(quant, str(out), pixel_size=0.325, marker_cols=[],
-                          contours=None)
+    n = eg.export_geojson(
+        quant, str(out), pixel_size=0.325, marker_cols=[], contours=None
+    )
     features = json.loads(out.read_text())["features"]
     assert n == 2 and len(features) == 2
     labels = [
-        next(m["value"] for m in f["properties"]["measurements"] if m["name"] == "label")
+        next(
+            m["value"] for m in f["properties"]["measurements"] if m["name"] == "label"
+        )
         for f in features
     ]
     assert labels == [1, 3]
@@ -140,7 +177,12 @@ def test_iter_rows_positional_matches_iterrows_exactly():
     field_cols = ["label", "x", "y", "area", "CD3: Cell: Mean"]
 
     expected = [
-        (idx, row.get("x"), row.get("y"), {c: row.get(c) for c in field_cols if c in df.columns})
+        (
+            idx,
+            row.get("x"),
+            row.get("y"),
+            {c: row.get(c) for c in field_cols if c in df.columns},
+        )
         for idx, row in df.iterrows()
     ]
 
@@ -220,7 +262,13 @@ def _reference_export_geojson(df, output_path, pixel_size, marker_cols, contours
 
 
 def _reference_export_combined_geojson(
-    df, output_dir, pixel_size, marker_cols, cell_contours, nucleus_contours, prefix="cells"
+    df,
+    output_dir,
+    pixel_size,
+    marker_cols,
+    cell_contours,
+    nucleus_contours,
+    prefix="cells",
 ):
     color_int = eg.rgb_to_qupath_color(*eg.CELL_COLOR_RGB)
     cells_combined = []
@@ -256,7 +304,8 @@ def _reference_export_combined_geojson(
     combined_path = str(out / f"{prefix}.geojson")
     eg._write_collection(cells_combined, combined_path)
     wholecell = [
-        {k: v for k, v in feat.items() if k != "nucleusGeometry"} for feat in cells_combined
+        {k: v for k, v in feat.items() if k != "nucleusGeometry"}
+        for feat in cells_combined
     ]
     wholecell_path = str(out / f"{prefix}_wholecell.geojson")
     eg._write_collection(wholecell, wholecell_path)
@@ -310,13 +359,17 @@ def test_export_geojson_is_byte_identical_to_iterrows_on_nan_free_input(tmp_path
     assert len(old_path.read_bytes()) > 0
 
 
-def test_export_combined_geojson_is_byte_identical_to_iterrows_on_nan_free_input(tmp_path):
+def test_export_combined_geojson_is_byte_identical_to_iterrows_on_nan_free_input(
+    tmp_path,
+):
     """G1, for export_combined_geojson(): same byte-identity requirement, same NaN-free
     scope note as the export_geojson() case above."""
     df = _nan_free_df()
     marker_cols = ["CD3: Cell: Mean", "CD8: Nucleus: Median"]
     cell_contours = {"7": [[9, 10], [11, 10], [11, 12], [9, 12], [9, 10]]}
-    nucleus_contours = {"7": [[9.5, 10.5], [10.5, 10.5], [10.5, 11.5], [9.5, 11.5], [9.5, 10.5]]}
+    nucleus_contours = {
+        "7": [[9.5, 10.5], [10.5, 10.5], [10.5, 11.5], [9.5, 11.5], [9.5, 10.5]]
+    }
 
     old_dir = tmp_path / "old"
     new_dir = tmp_path / "new"
@@ -377,7 +430,9 @@ def test_export_combined_geojson_survives_a_nan_centroid(tmp_path, caplog):
     features = json.loads((tmp_path / "cells.geojson").read_text())["features"]
     assert len(features) == 2
     labels = [
-        next(m["value"] for m in f["properties"]["measurements"] if m["name"] == "label")
+        next(
+            m["value"] for m in f["properties"]["measurements"] if m["name"] == "label"
+        )
         for f in features
     ]
     assert labels == [1, 3]

@@ -116,7 +116,7 @@ real slide. Changing either number changes an unguarded figure, so change it her
 
 `REGISTER` also carries `maxForks = Math.min(10, params.max_forks)` and its own error
 strategy — see [Retry policy](#retry-policy) and
-[Execution & concurrency](#execution--concurrency).
+[Execution & concurrency](#execution-concurrency).
 
 ### Registration — tiled / STARE
 
@@ -204,14 +204,20 @@ opt-out.
 
 | Process | `cpus` | `memory` (attempt 1) | `time` | Owner |
 |---|---|---|---|---|
-| `GENERATE_REGISTRATION_QC` | `1` *(withName)* | tier on `registered + reference`: `f<20` → 100, `f<50` → 200, else 300 GB, `× attempt` | `12.h × attempt` *(label `process_high`)* | partial |
+| `GENERATE_REGISTRATION_QC` | `1` *(withName)* | tier on `registered + native + reference`: `f<20` → 100, `f<50` → 200, else 300 GB, `× attempt` | `12.h × attempt` *(label `process_high`)* | partial |
 | `SEG_QC_SEGMENT` | `8` | tier on image: `f<10` → 32, `f<30` → 64, else 128 GB, `× attempt` | `4.h × attempt` | `withName` (`SEGMENT`'s, matched via the alias) |
 | `SEG_QC_GEOJSON` | `1` | `64 GB × attempt` | `4.h × attempt` | `withName` |
 | `WARP_SEG_QC` | `2` | `32 GB × 2^(attempt−1)` → 32 / 64 / 128 / 256 | `3.h × attempt` | `withName` |
 
 `GENERATE_REGISTRATION_QC` is the one process whose tier is keyed on the
-**combined** size of two inputs (the registered image *and* the reference), not
-on a single file — it holds both to build the overlay.
+**combined** size of *three* inputs (the registered image, its native
+pre-registration counterpart, and the reference), not on a single file — it
+holds all three to build the before/after pair. Per full-resolution pixel it
+carries three float32 planes plus a six-plane uint8 two-panel composite, about
+1.6× what the single-panel version held; summing the native's bytes into the
+tier is what tracks that. An input read but not summed here is a silent
+under-request, which is why `tests/test_registration_qc_wiring.py` fails when
+the closure omits one of the process's `path()` inputs.
 
 `WARP_SEG_QC` uses a *doubling* ramp rather than a linear one. Its historical
 exit-140 kills came from rasterizing both slides' polygons onto a whole-slide
@@ -304,32 +310,66 @@ parameters:
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `max_cpus` | `128` | Upper bound on any process's `cpus` |
-| `max_memory` | `700.GB` | Upper bound on any process's `memory` |
+| `max_cpus` | *(required, no default)* | Upper bound on any process's `cpus` |
+| `max_memory` | *(required, no default)* | Upper bound on any process's `memory` |
 | `max_time` | `240.h` | Upper bound on any process's `time` |
 
-Profiles override these:
+`max_cpus` and `max_memory` are declared `null` in `nextflow.config` and marked
+`required` in `nextflow_schema.json`, so a run that sets neither is refused at
+launch. Supply them from a `site.config` (`-c site.config`, copied from
+`conf/site.config.template`) or from a profile that pins them:
 
-| Profile | `max_cpus` | `max_memory` | `max_time` |
+| Profile / example | `max_cpus` | `max_memory` | `max_time` |
 |---|---|---|---|
-| *(none)* | `128` | `700.GB` | `240.h` |
+| *(none)* | — required — | — required — | `240.h` |
 | `local` | `4` | `16.GB` | `72.h` |
-| `ieo` | `128` | `700.GB` | `240.h` |
-| `test` | see `conf/test.config` | | |
+| `test` | `2` | `6.GB` | `1.h` |
+| `test_full` | `8` | `32.GB` | `6.h` |
+| `shipped_defaults_test` | `2` | `6.GB` | `1.h` |
+| *(a `site.config` sized for a large SLURM partition, e.g.)* | `128` | `700.GB` | `240.h` |
 
-!!! warning "`resourceLimits` is a closure for a reason"
+!!! note "There is no shipped site profile"
+    `nextflow.config` still carries an internal `ieo` profile pinning
+    `max_cpus=128` / `max_memory=700.GB` / `max_time=240.h` (CI parses it), but
+    it is not something a reader can invoke — its site-local overlay,
+    `conf/ieo.config`, is gitignored and never ships. The row above shows those
+    same numbers only as an example of what a large-partition `site.config`
+    looks like; make your own from `conf/site.config.template` — see
+    [Installation → Make a site config](installation.md#size-your-run).
+
+!!! warning "`-profile slurm` freezes the ceiling; `-c site.config` does not reach it"
     The top-level `process.resourceLimits` in `nextflow.config` is a **closure**,
-    not a plain map, so it is evaluated at task-submission time — *after* the
-    whole profile stack has merged. A plain map would eagerly capture
-    `params.max_*` as they stand at that point in the file (128 / 700 GB / 240 h),
-    silently ignoring a profile's override and *raising* the ceiling instead of
-    enforcing it.
+    so it is evaluated at task-submission time — after the whole profile stack has
+    merged, and after a `-c` file has been layered. That is what makes
+    `-c site.config` work: the closure reads `params.max_*` back lazily.
 
-    The `slurm` profile is the one exception: it assigns `resourceLimits` as a
-    plain map, which shadows the closure and freezes the values. Combining
-    `-profile slurm,ieo` therefore will **not** pick up `ieo`'s pinned `max_*`.
-    Today the two coincide, so there is no observed bug — but no documented
-    invocation combines `slurm` with another profile that sets `max_*`.
+    The `slurm` profile is the one exception. It assigns `resourceLimits` as a
+    **plain map** (`nextflow.config:724`), evaluated eagerly while
+    `nextflow.config` is parsed — before any `-c` file exists. Measured with a
+    `site.config` that actually sets a ceiling (`max_cpus = 64`,
+    `max_memory = '300.GB'`), so the comparison is not against two `null`s:
+
+    ```text
+    $ nextflow -c site.config config . -profile slurm | grep resourceLimits
+       resourceLimits = [cpus:null, memory:null, time:'240.h']
+
+    $ nextflow -c site.config config . | grep resourceLimits
+       resourceLimits = { [ cpus: params.max_cpus, memory: params.max_memory, time: params.max_time ] }
+    ```
+
+    Without `-profile slurm`, `resourceLimits` prints as the **closure literal**
+    (`nextflow config` shows source, not the value it resolves to at
+    submission time) — it reads `site.config`'s `64`/`300.GB` lazily, later, when
+    a task actually submits. *With* `-profile slurm`, the ceiling is frozen at
+    whatever `params.max_*` were at line 719 — `null`/`null`, because that line
+    runs before `-c site.config` is layered — and the `64`/`300.GB` from
+    `site.config` never reaches it, silently. Since `max_cpus`/`max_memory` have
+    **no default**, that frozen map is the reason to prefer
+    `-profile slurm,singularity -c site.config` together with a site config that
+    is layered for the *params* while the executor comes from the profile — and
+    the reason not to rely on `-profile slurm,<site>` picking up the site's
+    ceiling. Fix, if ever needed: make line 719 a closure, matching the
+    top-level default.
 
 ---
 
@@ -505,7 +545,7 @@ SemVer version (`1.0.0`), tied to `manifest.version` — see
 | Image | Processes |
 |---|---|
 | `bolt3x/mirage-convert:1.0.0` | `CONVERT_IMAGE` |
-| `bolt3x/mirage-preprocess:1.0.0` | `TILE_FOR_BASIC`, `APPLY_PROFILES`, `SPLIT_CHANNELS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT` |
+| `bolt3x/mirage-preprocess:1.0.0` | `TILE_FOR_BASIC`, `APPLY_PROFILES`, `SPLIT_CHANNELS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT`, `PREFLIGHT_SCALE`, `AGGREGATE_SIZE_LOGS` |
 | `docker.io/labsyspharm/basicpy-docker-mcmicro:1.2.0-patch5` | `BASICPY` (vendored nf-core module; pulls its own image, and errors under `-profile conda`) |
 | `cdgatenbee/valis-wsi:1.0.0` | `REGISTER` |
 | `bolt3x/mirage-tiled:1.0.0` | `TILED_COARSE`, `TILED_REG_TILE`, `TILED_SOLVE`, `TILED_STITCH` |
@@ -517,7 +557,6 @@ SemVer version (`1.0.0`), tied to `manifest.version` — see
 | `bolt3x/mirage-quantify:1.0.0` | `SEG_QC_GEOJSON`, `QUANTIFY`, `MERGE_QUANT_CSVS`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC` |
 | `bolt3x/mirage-merge:1.0.0` | `MERGE_AND_PYRAMID`, `EXTRACT_MASK_SERIES` |
 | `bolt3x/mirage-spatialdata:1.0.0` | `EXPORT_SPATIALDATA` |
-| `ubuntu:22.04` | `AGGREGATE_SIZE_LOGS` |
 
 `SEGMENT` and `WARP_SEG_QC` resolve their image from a backend table
 (`lib/SegBackends.groovy`, `lib/WarpBackends.groovy`) rather than a literal, so
@@ -529,24 +568,54 @@ back to a different segmenter.
 
 ## Measuring what a run actually used
 
-With `--enable_trace` (default on), every process emits a per-task input-size
-log, `AGGREGATE_SIZE_LOGS` collates them to `<outdir>/size_logs/input_sizes.csv`,
-and Nextflow writes `.trace/trace.txt` with `peak_rss`, `peak_vmem`, `realtime`
-and retry counts.
+With `enable_trace` on (the shipped default), every process emits a per-task
+input-size log, `AGGREGATE_SIZE_LOGS` collates them to
+`<outdir>/size_logs/input_sizes.csv`, and Nextflow writes `trace.txt` into
+`trace_dir` (default `.trace`, resolved against the launch directory) with
+`cpus`, `memory`, `peak_rss`, `peak_vmem` and `realtime` per task.
 
-`<outdir>/qc/mirage_resource_report.html` joins the two into run totals, a
-per-process rollup, resource-vs-input-size fits, the top-N heaviest and slowest
-tasks, and a retry/failure list. Re-runnable by hand:
+`<outdir>/qc/mirage_resource_report.html` joins the two into run totals and
+**four plots**:
+
+| Panel | What it answers | What to do with it |
+|---|---|---|
+| **Wall-time by Process** | Where did the run's time go? Ranked bars, longest first. | The top bar is the only process worth optimising first. Each bar's `%` is that process's share of the RUN's total wall-time, not of the longest bar — the longest bar does not read 100% unless it really is the whole run. |
+| **Memory Headroom** | What was reserved and never used? A light track per process is the request, the dark overlay the observed peak. | A wide track with a sliver of dark is an over-sized `withName:` request — lower it. A dark bar overrunning its track is drawn red: that is the OOM-retry precursor, raise it. |
+| **Retries & Failures** | What did the failures cost, in reserved GB·hours? | A failed attempt holds its full reservation for its whole wall-time and delivers nothing. Across one real run this was 19.6% of all reserved GB·h — invisible in a green build. |
+| **Input Size vs Runtime** | Does this step's cost scale with the data, and where does it stop being linear? | Log-log. The legend is ranked by POINT COUNT, not by first appearance: the processes with the most plotted points get their own colour and a legend entry (up to 8 by default), and everything past that is drawn in one shared grey "other (K processes)" row — so the legend never silently omits the process that actually dominates the run. On the real `traces/tiled_run/trace.txt` fixture, `TILED_REG_TILE` is 95% of all plottable points and is correctly the first legend entry. Each process's own points are additionally capped to 2,000 (a deterministic stride subsample, stated in a caption when it thins the series) so one huge process cannot blow the report up to megabytes. A series that bends upward is super-linear; that is where a size-tiered `memory` closure earns its keep. Zero-size, zero-runtime, and non-finite (`nan`/`inf`) tasks cannot be placed on a log axis and are dropped, with the count stated on the panel — and if EVERY point is dropped, the panel says so rather than falling back to the generic "no size logs matched" sentence. |
+
+Re-runnable by hand against any completed run:
 
 ```bash
-python bin/generate_resource_report.py \
+python3 bin/generate_resource_report.py \
   --trace .trace/trace.txt \
   --size-log results/size_logs/input_sizes.csv \
   --output resource_report.html
 ```
 
-That table is the right starting point for lowering a `withName:` request that
-is over-provisioned for your data.
+The script is **standard-library only, deliberately and permanently.** It runs
+on the head node from `workflow.onComplete`, outside every container and under
+whatever `python3` the operator has, so a single third-party import would make
+the report silently unavailable on most deployments —
+`tests/test_resource_report_is_stdlib_only.py` fails the build on one.
+
+### When no report appears
+
+The run log says which of the two reasons applies, and names the exact path it
+looked for:
+
+```
+WARN  No resource report was generated: no trace at /path/to/launch/.trace/trace.txt.
+      enable_trace was OFF for this run, so Nextflow wrote no trace -- turn it on
+      with a -params-file or a profile to collect one.
+```
+
+`trace_dir` is resolved against the **launch directory**, which is what Nextflow
+itself resolves `trace.file` against — so a relative `trace_dir` means the same
+place to the report as it does to the engine, whatever directory the pipeline
+was launched from. Before that fix the handler resolved it against the JVM's
+working directory instead, and when the two differed the report was generated
+from nothing and announced as a success.
 
 ---
 

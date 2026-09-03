@@ -2,10 +2,10 @@
     "Should emit metrics json - stub": {
         "content": [
             [
-                "versions.yml:md5,00933fab024f95617f49efb79cc16795"
+                "versions.yml:md5,5cc982affff54469752521b81c519437"
             ]
         ],
-        "timestamp": "2026-08-25T21:17:30.37652",
+        "timestamp": "2026-09-03T00:10:42.221093",
         "meta": {
             "nf-test": "0.9.5",
             "nextflow": "25.04.7"

@@ -200,14 +200,28 @@ import json
 
 def _summary(tmp_path):
     p = tmp_path / "run_summary.json"
-    p.write_text(json.dumps({
-        "pipeline": {"name": "mirage", "version": "0.1.0"},
-        "run": {"timestamp": "2026-07-24 10:00:00 UTC", "mode": "standard",
-                "start": "preprocessing", "stop": "postprocessing"},
-        "params": {"registration_method": "valis", "seg_method": "cellsam", "pixel_size": 0.325},
-        "manifest": {"totals": {"patients": 1, "images": 3, "channels": 5},
-                     "patients": {"P001": {"images": 3, "channels": 5}}},
-    }))
+    p.write_text(
+        json.dumps(
+            {
+                "pipeline": {"name": "mirage", "version": "0.1.0"},
+                "run": {
+                    "timestamp": "2026-07-24 10:00:00 UTC",
+                    "mode": "standard",
+                    "start": "preprocessing",
+                    "stop": "postprocessing",
+                },
+                "params": {
+                    "registration_method": "valis",
+                    "seg_method": "cellsam",
+                    "pixel_size": 0.325,
+                },
+                "manifest": {
+                    "totals": {"patients": 1, "images": 3, "channels": 5},
+                    "patients": {"P001": {"images": 3, "channels": 5}},
+                },
+            }
+        )
+    )
     return p
 
 
@@ -227,8 +241,9 @@ def test_run_summary_section(tmp_path):
 
 def test_status_strip(tmp_path):
     gqr = _load()
-    html = gqr.status_strip_section({"Preprocessing": True, "Registration": True,
-                                     "Segmentation & Quant": False})
+    html = gqr.status_strip_section(
+        {"Preprocessing": True, "Registration": True, "Segmentation & Quant": False}
+    )
     assert "Preprocessing" in html and "Registration" in html
     assert "Segmentation" in html
 
@@ -238,7 +253,7 @@ def test_manifest_section(tmp_path):
     s = gqr.parse_run_summary_json(_summary(tmp_path))
     html = gqr.manifest_section(s)
     assert "P001" in html
-    assert ">3<" in html or "3" in html   # image count present
+    assert ">3<" in html or "3" in html  # image count present
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -275,7 +290,9 @@ def _kv_table(pairs):
 def run_summary_section(summary):
     """Top overview card: pipeline, run context, and key parameters used."""
     if not summary:
-        return section("Run Summary", '<p class="empty-notice">Run summary not available.</p>')
+        return section(
+            "Run Summary", '<p class="empty-notice">Run summary not available.</p>'
+        )
     pipe = summary.get("pipeline", {})
     run = summary.get("run", {})
     params = summary.get("params", {})
@@ -308,21 +325,29 @@ def manifest_section(summary):
     """Sample manifest: totals plus a per-patient image/channel table."""
     manifest = (summary or {}).get("manifest", {})
     if not manifest:
-        return section("Sample Manifest", '<p class="empty-notice">Manifest not available.</p>')
+        return section(
+            "Sample Manifest", '<p class="empty-notice">Manifest not available.</p>'
+        )
     totals = manifest.get("totals", {})
     patients = manifest.get("patients", {})
-    head = _kv_table([
-        ("Patients", totals.get("patients")),
-        ("Images", totals.get("images")),
-        ("Channels", totals.get("channels")),
-    ])
-    tbl = ("<table style='margin-top:14px'><thead><tr>"
-           "<th>Patient</th><th>Images</th><th>Channels</th>"
-           "</tr></thead><tbody>")
+    head = _kv_table(
+        [
+            ("Patients", totals.get("patients")),
+            ("Images", totals.get("images")),
+            ("Channels", totals.get("channels")),
+        ]
+    )
+    tbl = (
+        "<table style='margin-top:14px'><thead><tr>"
+        "<th>Patient</th><th>Images</th><th>Channels</th>"
+        "</tr></thead><tbody>"
+    )
     for pid in sorted(patients):
         row = patients[pid]
-        tbl += (f"<tr><td>{pid}</td><td>{row.get('images', '')}</td>"
-                f"<td>{row.get('channels', '')}</td></tr>")
+        tbl += (
+            f"<tr><td>{pid}</td><td>{row.get('images', '')}</td>"
+            f"<td>{row.get('channels', '')}</td></tr>"
+        )
     tbl += "</tbody></table>"
     return section("Sample Manifest", head + tbl)
 ```
@@ -443,7 +468,9 @@ def seg_qc_section(seg_qc_dir):
         try:
             rows = parse_seg_qc_json(jp)
         except Exception as exc:  # noqa: BLE001 - report, never crash
-            parts.append(f'<p class="empty-notice">Could not parse {Path(jp).name}: {exc}</p>')
+            parts.append(
+                f'<p class="empty-notice">Could not parse {Path(jp).name}: {exc}</p>'
+            )
             continue
         tbl = "<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>"
         for k, v in rows:
@@ -546,26 +573,51 @@ def test_end_to_end_cli_smoke(tmp_path):
     v = tmp_path / "v.yml"
     v.write_text('"A:B":\n    tool: 1.0\n')
     out = tmp_path / "report.html"
-    r = subprocess.run([
-        sys.executable, str(SCRIPT),
-        "--preprocess-qc", str(tmp_path / "preprocess_qc"),
-        "--registration-qc", str(tmp_path / "registration_qc"),
-        "--feature-distances", str(tmp_path / "feature_dist"),
-        "--valis-summary", str(tmp_path / "valis_summary"),
-        "--postprocess-qc", str(tmp_path / "postprocess_qc"),
-        "--seg-eval", str(tmp_path / "seg_eval"),
-        "--distance-plots", str(tmp_path / "distance_plots"),
-        "--seg-qc", str(tmp_path / "seg_qc"),
-        "--run-summary", str(rs),
-        "--versions", str(v),
-        "--output", str(out),
-        "--data-dir", str(tmp_path / "data"),
-    ], capture_output=True, text=True)
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--preprocess-qc",
+            str(tmp_path / "preprocess_qc"),
+            "--registration-qc",
+            str(tmp_path / "registration_qc"),
+            "--feature-distances",
+            str(tmp_path / "feature_dist"),
+            "--valis-summary",
+            str(tmp_path / "valis_summary"),
+            "--postprocess-qc",
+            str(tmp_path / "postprocess_qc"),
+            "--seg-eval",
+            str(tmp_path / "seg_eval"),
+            "--distance-plots",
+            str(tmp_path / "distance_plots"),
+            "--seg-qc",
+            str(tmp_path / "seg_qc"),
+            "--run-summary",
+            str(rs),
+            "--versions",
+            str(v),
+            "--output",
+            str(out),
+            "--data-dir",
+            str(tmp_path / "data"),
+        ],
+        capture_output=True,
+        text=True,
+    )
     assert r.returncode == 0, r.stderr
     html = out.read_text()
-    for header in ["Run Summary", "Pipeline Stages", "Sample Manifest",
-                   "Preprocessing QC", "Registration QC", "Segmentation Overlays",
-                   "Postprocessing QC", "Segmentation Quality (CSE)", "Software Versions"]:
+    for header in [
+        "Run Summary",
+        "Pipeline Stages",
+        "Sample Manifest",
+        "Preprocessing QC",
+        "Registration QC",
+        "Segmentation Overlays",
+        "Postprocessing QC",
+        "Segmentation Quality (CSE)",
+        "Software Versions",
+    ]:
         assert header in html, f"missing section: {header}"
 ```
 
@@ -579,11 +631,15 @@ Expected: FAIL (unrecognized args `--run-summary` / missing sections).
 In `parse_args`, add:
 
 ```python
-    p.add_argument("--run-summary", default=None, help="Path to run_summary.json")
-    p.add_argument("--distance-plots", default="distance_plots/",
-                   help="Directory of registration distance-histogram PNGs")
-    p.add_argument("--seg-qc", default="seg_qc/",
-                   help="Directory of warp-segmentation QC JSONs")
+p.add_argument("--run-summary", default=None, help="Path to run_summary.json")
+p.add_argument(
+    "--distance-plots",
+    default="distance_plots/",
+    help="Directory of registration distance-histogram PNGs",
+)
+p.add_argument(
+    "--seg-qc", default="seg_qc/", help="Directory of warp-segmentation QC JSONs"
+)
 ```
 
 Rewrite `main`'s assembly block:
@@ -978,7 +1034,9 @@ def parse_duration(s):
     for value, unit in re.findall(r"([\d.]+)\s*(ms|s|m|h|d)", s):
         found = True
         v = float(value)
-        total += {"ms": v / 1000, "s": v, "m": v * 60, "h": v * 3600, "d": v * 86400}[unit]
+        total += {"ms": v / 1000, "s": v, "m": v * 60, "h": v * 3600, "d": v * 86400}[
+            unit
+        ]
     if found:
         return total
     try:
@@ -1008,20 +1066,22 @@ def parse_trace(path):
     with open(path, newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
         for r in reader:
-            rows.append({
-                "process": (r.get("process") or "").strip(),
-                "tag": (r.get("tag") or "").strip(),
-                "name": (r.get("name") or "").strip(),
-                "status": (r.get("status") or "").strip(),
-                "exit": (r.get("exit") or "").strip(),
-                "realtime_s": parse_duration(r.get("realtime")),
-                "duration_s": parse_duration(r.get("duration")),
-                "cpu_pct": parse_percent(r.get("%cpu")),
-                "peak_rss_b": parse_bytes(r.get("peak_rss")),
-                "peak_vmem_b": parse_bytes(r.get("peak_vmem")),
-                "rchar_b": parse_bytes(r.get("rchar")),
-                "wchar_b": parse_bytes(r.get("wchar")),
-            })
+            rows.append(
+                {
+                    "process": (r.get("process") or "").strip(),
+                    "tag": (r.get("tag") or "").strip(),
+                    "name": (r.get("name") or "").strip(),
+                    "status": (r.get("status") or "").strip(),
+                    "exit": (r.get("exit") or "").strip(),
+                    "realtime_s": parse_duration(r.get("realtime")),
+                    "duration_s": parse_duration(r.get("duration")),
+                    "cpu_pct": parse_percent(r.get("%cpu")),
+                    "peak_rss_b": parse_bytes(r.get("peak_rss")),
+                    "peak_vmem_b": parse_bytes(r.get("peak_vmem")),
+                    "rchar_b": parse_bytes(r.get("rchar")),
+                    "wchar_b": parse_bytes(r.get("wchar")),
+                }
+            )
     return rows
 
 
@@ -1083,10 +1143,28 @@ def test_parse_size_log(tmp_path):
 def test_rollup_by_process():
     grr = _load()
     rows = [
-        {"process": "A", "tag": "P1", "exit": "0", "realtime_s": 10.0, "cpu_pct": 100.0,
-         "peak_rss_b": 200.0, "peak_vmem_b": 300.0, "rchar_b": 5.0, "wchar_b": 2.0},
-        {"process": "A", "tag": "P2", "exit": "0", "realtime_s": 30.0, "cpu_pct": 150.0,
-         "peak_rss_b": 400.0, "peak_vmem_b": 500.0, "rchar_b": 7.0, "wchar_b": 1.0},
+        {
+            "process": "A",
+            "tag": "P1",
+            "exit": "0",
+            "realtime_s": 10.0,
+            "cpu_pct": 100.0,
+            "peak_rss_b": 200.0,
+            "peak_vmem_b": 300.0,
+            "rchar_b": 5.0,
+            "wchar_b": 2.0,
+        },
+        {
+            "process": "A",
+            "tag": "P2",
+            "exit": "0",
+            "realtime_s": 30.0,
+            "cpu_pct": 150.0,
+            "peak_rss_b": 400.0,
+            "peak_vmem_b": 500.0,
+            "rchar_b": 7.0,
+            "wchar_b": 1.0,
+        },
     ]
     roll = {r["process"]: r for r in grr.rollup_by_process(rows)}
     a = roll["A"]
@@ -1105,8 +1183,8 @@ def test_join_size_exact_and_fallback():
     ]
     size = {("A", "P001"): 999}
     joined = grr.join_size(trace, size)
-    assert joined[0]["input_bytes"] == 999          # exact (process, tag)
-    assert joined[1]["input_bytes"] == 999          # fallback: same process, sample prefix
+    assert joined[0]["input_bytes"] == 999  # exact (process, tag)
+    assert joined[1]["input_bytes"] == 999  # fallback: same process, sample prefix
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1159,18 +1237,22 @@ def rollup_by_process(trace_rows):
         rts = [r.get("realtime_s") for r in rows]
         realtime_total = _sumf(rts)
         n = len(rows)
-        out.append({
-            "process": proc,
-            "n_tasks": n,
-            "realtime_total_s": realtime_total,
-            "realtime_mean_s": round(realtime_total / n, 1) if n else 0.0,
-            "cpu_max_pct": _maxf([r.get("cpu_pct") for r in rows]),
-            "peak_rss_max_b": _maxf([r.get("peak_rss_b") for r in rows]),
-            "peak_vmem_max_b": _maxf([r.get("peak_vmem_b") for r in rows]),
-            "rchar_total_b": _sumf([r.get("rchar_b") for r in rows]),
-            "wchar_total_b": _sumf([r.get("wchar_b") for r in rows]),
-            "n_failed": sum(1 for r in rows if r.get("exit") not in ("0", "", None)),
-        })
+        out.append(
+            {
+                "process": proc,
+                "n_tasks": n,
+                "realtime_total_s": realtime_total,
+                "realtime_mean_s": round(realtime_total / n, 1) if n else 0.0,
+                "cpu_max_pct": _maxf([r.get("cpu_pct") for r in rows]),
+                "peak_rss_max_b": _maxf([r.get("peak_rss_b") for r in rows]),
+                "peak_vmem_max_b": _maxf([r.get("peak_vmem_b") for r in rows]),
+                "rchar_total_b": _sumf([r.get("rchar_b") for r in rows]),
+                "wchar_total_b": _sumf([r.get("wchar_b") for r in rows]),
+                "n_failed": sum(
+                    1 for r in rows if r.get("exit") not in ("0", "", None)
+                ),
+            }
+        )
     return out
 
 
@@ -1244,10 +1326,20 @@ def test_cli_writes_report(tmp_path):
         "MIRAGE:PRE:CONVERT_IMAGE,P001,a.tiff,1073741824\n"
     )
     out = tmp_path / "resource.html"
-    r = subprocess.run([
-        sys.executable, str(SCRIPT),
-        "--trace", str(trace), "--size-log", str(size), "--output", str(out),
-    ], capture_output=True, text=True)
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--trace",
+            str(trace),
+            "--size-log",
+            str(size),
+            "--output",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+    )
     assert r.returncode == 0, r.stderr
     html = out.read_text()
     assert "Resource" in html
@@ -1258,12 +1350,20 @@ def test_cli_writes_report(tmp_path):
 
 def test_cli_missing_inputs_is_graceful(tmp_path):
     out = tmp_path / "resource.html"
-    r = subprocess.run([
-        sys.executable, str(SCRIPT),
-        "--trace", str(tmp_path / "nope.txt"),
-        "--size-log", str(tmp_path / "nope.csv"),
-        "--output", str(out),
-    ], capture_output=True, text=True)
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--trace",
+            str(tmp_path / "nope.txt"),
+            "--size-log",
+            str(tmp_path / "nope.csv"),
+            "--output",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+    )
     assert r.returncode == 0, r.stderr
     assert out.exists()
     assert "not available" in out.read_text().lower()
@@ -1322,7 +1422,9 @@ def _section(title, body):
     return f"<section><h2>{title}</h2><div class='body'>{body}</div></section>"
 
 
-def build_html(trace_rows, size_map, timestamp, native_report=None, native_timeline=None):
+def build_html(
+    trace_rows, size_map, timestamp, native_report=None, native_timeline=None
+):
     parts = [
         "<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'>",
         "<meta name='viewport' content='width=device-width, initial-scale=1.0'>",
@@ -1332,9 +1434,13 @@ def build_html(trace_rows, size_map, timestamp, native_report=None, native_timel
     ]
 
     if not trace_rows:
-        parts.append(_section("Resource Usage",
-                     "<p class='empty'>Trace data not available "
-                     "(run with --enable_trace to collect it).</p>"))
+        parts.append(
+            _section(
+                "Resource Usage",
+                "<p class='empty'>Trace data not available "
+                "(run with --enable_trace to collect it).</p>",
+            )
+        )
         parts.append("</main></body></html>")
         return "".join(parts)
 
@@ -1342,30 +1448,36 @@ def build_html(trace_rows, size_map, timestamp, native_report=None, native_timel
     total_wall = _sumf([r.get("realtime_s") for r in trace_rows])
     n_fail = sum(1 for r in trace_rows if r.get("exit") not in ("0", "", None))
     peak = _maxf([r.get("peak_rss_b") for r in trace_rows])
-    totals = (f"<table><tbody>"
-              f"<tr><th>Total tasks</th><td>{len(trace_rows)}</td></tr>"
-              f"<tr><th>Total CPU wall-time</th><td>{fmt_secs(total_wall)}</td></tr>"
-              f"<tr><th>Failed/non-zero exit</th><td>{n_fail}</td></tr>"
-              f"<tr><th>Peak single-task RSS</th><td>{fmt_bytes(peak)}</td></tr>"
-              f"</tbody></table>")
+    totals = (
+        f"<table><tbody>"
+        f"<tr><th>Total tasks</th><td>{len(trace_rows)}</td></tr>"
+        f"<tr><th>Total CPU wall-time</th><td>{fmt_secs(total_wall)}</td></tr>"
+        f"<tr><th>Failed/non-zero exit</th><td>{n_fail}</td></tr>"
+        f"<tr><th>Peak single-task RSS</th><td>{fmt_bytes(peak)}</td></tr>"
+        f"</tbody></table>"
+    )
     parts.append(_section("Run Totals", totals))
 
     # Per-process rollup
     roll = rollup_by_process(trace_rows)
-    tbl = ("<table><thead><tr><th>Process</th><th>Tasks</th><th>Total time</th>"
-           "<th>Mean time</th><th>Max %CPU</th><th>Max peak RSS</th>"
-           "<th>Max peak VMEM</th><th>Read</th><th>Write</th><th>Failed</th>"
-           "</tr></thead><tbody>")
+    tbl = (
+        "<table><thead><tr><th>Process</th><th>Tasks</th><th>Total time</th>"
+        "<th>Mean time</th><th>Max %CPU</th><th>Max peak RSS</th>"
+        "<th>Max peak VMEM</th><th>Read</th><th>Write</th><th>Failed</th>"
+        "</tr></thead><tbody>"
+    )
     for r in roll:
-        tbl += (f"<tr><td>{r['process']}</td><td>{r['n_tasks']}</td>"
-                f"<td>{fmt_secs(r['realtime_total_s'])}</td>"
-                f"<td>{fmt_secs(r['realtime_mean_s'])}</td>"
-                f"<td>{'' if r['cpu_max_pct'] is None else r['cpu_max_pct']}</td>"
-                f"<td>{fmt_bytes(r['peak_rss_max_b'])}</td>"
-                f"<td>{fmt_bytes(r['peak_vmem_max_b'])}</td>"
-                f"<td>{fmt_bytes(r['rchar_total_b'])}</td>"
-                f"<td>{fmt_bytes(r['wchar_total_b'])}</td>"
-                f"<td class='{'fail' if r['n_failed'] else ''}'>{r['n_failed']}</td></tr>")
+        tbl += (
+            f"<tr><td>{r['process']}</td><td>{r['n_tasks']}</td>"
+            f"<td>{fmt_secs(r['realtime_total_s'])}</td>"
+            f"<td>{fmt_secs(r['realtime_mean_s'])}</td>"
+            f"<td>{'' if r['cpu_max_pct'] is None else r['cpu_max_pct']}</td>"
+            f"<td>{fmt_bytes(r['peak_rss_max_b'])}</td>"
+            f"<td>{fmt_bytes(r['peak_vmem_max_b'])}</td>"
+            f"<td>{fmt_bytes(r['rchar_total_b'])}</td>"
+            f"<td>{fmt_bytes(r['wchar_total_b'])}</td>"
+            f"<td class='{'fail' if r['n_failed'] else ''}'>{r['n_failed']}</td></tr>"
+        )
     tbl += "</tbody></table>"
     parts.append(_section("Per-Process Resource Rollup", tbl))
 
@@ -1373,28 +1485,40 @@ def build_html(trace_rows, size_map, timestamp, native_report=None, native_timel
     joined = join_size(trace_rows, size_map)
     with_size = [j for j in joined if j.get("input_bytes")]
     if with_size:
-        tbl = ("<table><thead><tr><th>Process</th><th>Sample (tag)</th>"
-               "<th>Input size</th><th>Peak RSS</th><th>Realtime</th>"
-               "<th>RSS / input GB</th></tr></thead><tbody>")
+        tbl = (
+            "<table><thead><tr><th>Process</th><th>Sample (tag)</th>"
+            "<th>Input size</th><th>Peak RSS</th><th>Realtime</th>"
+            "<th>RSS / input GB</th></tr></thead><tbody>"
+        )
         for j in sorted(with_size, key=lambda x: -(x.get("peak_rss_b") or 0)):
             gb = j["input_bytes"] / 1024**3
-            ratio = (j["peak_rss_b"] / j["input_bytes"]) if j.get("peak_rss_b") else None
-            tbl += (f"<tr><td>{j['process']}</td><td>{j.get('tag', '')}</td>"
-                    f"<td>{fmt_bytes(j['input_bytes'])}</td>"
-                    f"<td>{fmt_bytes(j.get('peak_rss_b'))}</td>"
-                    f"<td>{fmt_secs(j.get('realtime_s'))}</td>"
-                    f"<td>{'' if ratio is None else f'{ratio:.1f}x'}</td></tr>")
+            ratio = (
+                (j["peak_rss_b"] / j["input_bytes"]) if j.get("peak_rss_b") else None
+            )
+            tbl += (
+                f"<tr><td>{j['process']}</td><td>{j.get('tag', '')}</td>"
+                f"<td>{fmt_bytes(j['input_bytes'])}</td>"
+                f"<td>{fmt_bytes(j.get('peak_rss_b'))}</td>"
+                f"<td>{fmt_secs(j.get('realtime_s'))}</td>"
+                f"<td>{'' if ratio is None else f'{ratio:.1f}x'}</td></tr>"
+            )
         tbl += "</tbody></table>"
         parts.append(_section("Resource vs Input Size", tbl))
     else:
-        parts.append(_section("Resource vs Input Size",
-                     "<p class='empty'>No size logs matched trace tasks.</p>"))
+        parts.append(
+            _section(
+                "Resource vs Input Size",
+                "<p class='empty'>No size logs matched trace tasks.</p>",
+            )
+        )
 
     # Top-N heaviest / slowest
-    heaviest = sorted([r for r in trace_rows if r.get("peak_rss_b")],
-                      key=lambda x: -x["peak_rss_b"])[:10]
-    slowest = sorted([r for r in trace_rows if r.get("realtime_s")],
-                     key=lambda x: -x["realtime_s"])[:10]
+    heaviest = sorted(
+        [r for r in trace_rows if r.get("peak_rss_b")], key=lambda x: -x["peak_rss_b"]
+    )[:10]
+    slowest = sorted(
+        [r for r in trace_rows if r.get("realtime_s")], key=lambda x: -x["realtime_s"]
+    )[:10]
 
     def _top(rows, valf, fmt):
         t = "<table><thead><tr><th>Process</th><th>Sample</th><th>Value</th></tr></thead><tbody>"
@@ -1402,39 +1526,57 @@ def build_html(trace_rows, size_map, timestamp, native_report=None, native_timel
             t += f"<tr><td>{r['process']}</td><td>{r.get('tag', '')}</td><td>{fmt(valf(r))}</td></tr>"
         return t + "</tbody></table>"
 
-    parts.append(_section("Top 10 by Peak RSS",
-                 _top(heaviest, lambda r: r["peak_rss_b"], fmt_bytes)))
-    parts.append(_section("Top 10 by Runtime",
-                 _top(slowest, lambda r: r["realtime_s"], fmt_secs)))
+    parts.append(
+        _section(
+            "Top 10 by Peak RSS", _top(heaviest, lambda r: r["peak_rss_b"], fmt_bytes)
+        )
+    )
+    parts.append(
+        _section(
+            "Top 10 by Runtime", _top(slowest, lambda r: r["realtime_s"], fmt_secs)
+        )
+    )
 
     # Retries & failures
     fails = [r for r in trace_rows if r.get("exit") not in ("0", "", None)]
     if fails:
         t = "<table><thead><tr><th>Process</th><th>Sample</th><th>Status</th><th>Exit</th></tr></thead><tbody>"
         for r in fails:
-            t += (f"<tr><td>{r['process']}</td><td>{r.get('tag', '')}</td>"
-                  f"<td>{r.get('status', '')}</td><td class='fail'>{r.get('exit', '')}</td></tr>")
+            t += (
+                f"<tr><td>{r['process']}</td><td>{r.get('tag', '')}</td>"
+                f"<td>{r.get('status', '')}</td><td class='fail'>{r.get('exit', '')}</td></tr>"
+            )
         t += "</tbody></table>"
         parts.append(_section("Retries &amp; Failures", t))
     else:
-        parts.append(_section("Retries &amp; Failures",
-                     "<p class='empty'>No failed or non-zero-exit tasks.</p>"))
+        parts.append(
+            _section(
+                "Retries &amp; Failures",
+                "<p class='empty'>No failed or non-zero-exit tasks.</p>",
+            )
+        )
 
     # Pointers to native reports
     links = []
     if native_report:
-        links.append(f"<li>Interactive execution report: <code>{native_report}</code></li>")
+        links.append(
+            f"<li>Interactive execution report: <code>{native_report}</code></li>"
+        )
     if native_timeline:
         links.append(f"<li>Timeline: <code>{native_timeline}</code></li>")
     if links:
-        parts.append(_section("Nextflow Native Reports", "<ul>" + "".join(links) + "</ul>"))
+        parts.append(
+            _section("Nextflow Native Reports", "<ul>" + "".join(links) + "</ul>")
+        )
 
     parts.append("</main></body></html>")
     return "".join(parts)
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Generate MIRAGE computational-resource report")
+    p = argparse.ArgumentParser(
+        description="Generate MIRAGE computational-resource report"
+    )
     p.add_argument("--trace", default=".trace/trace.txt")
     p.add_argument("--size-log", default=None)
     p.add_argument("--output", default="mirage_resource_report.html")
@@ -1448,8 +1590,9 @@ def main():
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     trace_rows = parse_trace(args.trace)
     size_map = parse_size_log(args.size_log)
-    html = build_html(trace_rows, size_map, timestamp,
-                      args.native_report, args.native_timeline)
+    html = build_html(
+        trace_rows, size_map, timestamp, args.native_report, args.native_timeline
+    )
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")

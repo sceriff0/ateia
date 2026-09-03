@@ -1,0 +1,7 @@
+patient_id,path_to_file,is_reference,channels
+V001,/absolute/path/to/your/slide.czi,true,DAPI|PANCK|SMA
+V002,/absolute/path/to/your/slide.nd2,true,DAPI|CD3|CD8
+V003,/absolute/path/to/your/slide.lif,true,DAPI|PANCK|SMA
+V004,/absolute/path/to/your/slide.ndpi,true,DAPI
+V005,/absolute/path/to/your/slide.svs,true,DAPI|PANCK|SMA
+V006,/absolute/path/to/your/slide.qptiff,true,DAPI|PANCK|SMA

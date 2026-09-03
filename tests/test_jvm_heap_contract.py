@@ -99,7 +99,11 @@ def heap_for_attempt(task_memory_gb: int, attempt: int, reg_jvm_heap_gb=None) ->
     in the assertions below, not just in a separate anchor check."""
     base, per_attempt = _ramp_params()
     headroom = _mem_headroom_gb()
-    heap_request = reg_jvm_heap_gb if reg_jvm_heap_gb is not None else (base + per_attempt * attempt)
+    heap_request = (
+        reg_jvm_heap_gb
+        if reg_jvm_heap_gb is not None
+        else (base + per_attempt * attempt)
+    )
     return min(heap_request, task_memory_gb - headroom)
 
 
@@ -157,10 +161,10 @@ def test_jvm_death_message_names_the_jvm_and_a_remedy():
     though REGISTER's retry-exit1-then-fail policy can't distinguish them by
     exit code alone."""
     text = REGISTER_PY.read_text()
-    jvm_death_msg = (
-        "JVM was killed during registration. Warping cannot proceed. "
+    jvm_death_msg = "JVM was killed during registration. Warping cannot proceed. "
+    assert jvm_death_msg in text, (
+        "expected JVM-death RuntimeError message not found in bin/register.py"
     )
-    assert jvm_death_msg in text, "expected JVM-death RuntimeError message not found in bin/register.py"
     assert "JVM" in jvm_death_msg
     # The surrounding log block is the "remedy" half -- suggested workarounds
     # printed immediately before this RuntimeError is raised.

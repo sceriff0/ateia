@@ -35,11 +35,15 @@ SEGMENT_NF = ROOT / "modules" / "local" / "segment.nf"
 # The backends the pipeline ships, and the image each MUST use. Written out rather
 # than parsed so a silent retag (the class of change that turns a reproducible run
 # into an unreproducible one) shows up as a test diff.
+# stardist's tools were ("deepcell", "tensorflow") until 2026-09-02. deepcell was a
+# phantom -- no image installs it -- and this very assertion is what kept it in place, so
+# the fix had to move both. See
+# tests/test_version_tools_are_importable_in_their_image.py.
 EXPECTED = {
     "stardist": (
         "bolt3x/mirage-stardist:1.0.0",
         "segment.py",
-        ("deepcell", "tensorflow"),
+        ("tensorflow",),
     ),
     "instantseg": (
         "bolt3x/mirage-instanseg:1.0.0",
@@ -145,13 +149,18 @@ def test_segment_renders_both_blocks_from_the_one_backend_list():
         "segment.nf must not hand-write a versions.yml heredoc in either block"
     )
     assert (
-        "ProcessEnvelope.versions(task.process, backend.versionTools)" in text
-        and "ProcessEnvelope.versionsStub(task.process, backend.versionTools)" in text
-    ), "segment.nf must render BOTH blocks from backend.versionTools"
+        "ProcessEnvelope.versions(task.process, backend.versionTools, task.container)"
+        in text
+        and "ProcessEnvelope.versionsStub(task.process, backend.versionTools, task.container)"
+        in text
+    ), "segment.nf must render BOTH blocks from backend.versionTools, task.container"
     # Both blocks must resolve `backend` from the same expression, or two identical
     # `backend.versionTools` reads still name two different backends' tools.
     bindings = re.findall(r"=\s*(SegBackends\.of\([^)\n]*\))", text)
-    assert len(bindings) == 2 and bindings[0] == bindings[1] == "SegBackends.of(params.seg_method)", (
+    assert (
+        len(bindings) == 2
+        and bindings[0] == bindings[1] == "SegBackends.of(params.seg_method)"
+    ), (
         f"segment.nf must bind `backend` from the same SegBackends.of(...) expression in "
         f"script: and stub:, found: {bindings}"
     )

@@ -43,6 +43,7 @@ the import happens to succeed
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -67,8 +68,16 @@ from validation import clip_negative_values  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-def _write_3d_stack(tmp_path, n_channels=3, h=48, w=40, dtype=np.uint16,
-                     compression=None, seed=11, name="stack.ome.tiff"):
+def _write_3d_stack(
+    tmp_path,
+    n_channels=3,
+    h=48,
+    w=40,
+    dtype=np.uint16,
+    compression=None,
+    seed=11,
+    name="stack.ome.tiff",
+):
     rng = np.random.default_rng(seed)
     if np.issubdtype(dtype, np.integer):
         info = np.iinfo(dtype)
@@ -84,13 +93,17 @@ def _write_3d_stack(tmp_path, n_channels=3, h=48, w=40, dtype=np.uint16,
         ome=True,
         photometric="minisblack",
         compression=compression,
-        metadata={"axes": "CYX", "Channel": {"Name": [f"C{i}" for i in range(n_channels)]}},
+        metadata={
+            "axes": "CYX",
+            "Channel": {"Name": [f"C{i}" for i in range(n_channels)]},
+        },
     )
     return path, stack
 
 
-def _write_2d_plane(tmp_path, h=48, w=40, dtype=np.uint16, compression=None,
-                     seed=13, name="plane.tif"):
+def _write_2d_plane(
+    tmp_path, h=48, w=40, dtype=np.uint16, compression=None, seed=13, name="plane.tif"
+):
     rng = np.random.default_rng(seed)
     if np.issubdtype(dtype, np.integer):
         info = np.iinfo(dtype)
@@ -100,7 +113,9 @@ def _write_2d_plane(tmp_path, h=48, w=40, dtype=np.uint16, compression=None,
         plane = (rng.random(size=(h, w)).astype(dtype)) * 1000.0
 
     path = tmp_path / name
-    tifffile.imwrite(str(path), plane, photometric="minisblack", compression=compression)
+    tifffile.imwrite(
+        str(path), plane, photometric="minisblack", compression=compression
+    )
     return path, plane
 
 
@@ -137,7 +152,9 @@ def _old_segment_extract_dapi_channel(multichannel_image_path, dapi_channel_inde
 
         if image_memmap.ndim == 2:
             dapi_image = np.array(image_memmap, copy=True)
-            dapi_image = clip_negative_values(dapi_image, logger, stage_name="extract_dapi")
+            dapi_image = clip_negative_values(
+                dapi_image, logger, stage_name="extract_dapi"
+            )
         elif image_memmap.ndim == 3:
             n_channels = image_memmap.shape[0]
             if dapi_channel_index >= n_channels:
@@ -146,7 +163,9 @@ def _old_segment_extract_dapi_channel(multichannel_image_path, dapi_channel_inde
                     f"for image with {n_channels} channels"
                 )
             dapi_image = np.array(image_memmap[dapi_channel_index, :, :], copy=True)
-            dapi_image = clip_negative_values(dapi_image, logger, stage_name="extract_dapi")
+            dapi_image = clip_negative_values(
+                dapi_image, logger, stage_name="extract_dapi"
+            )
         else:
             raise ValueError(
                 f"Unexpected image dimensions: {image_shape}. "
@@ -156,7 +175,9 @@ def _old_segment_extract_dapi_channel(multichannel_image_path, dapi_channel_inde
     return dapi_image, metadata
 
 
-def _old_segment_cellsam_extract_dapi_channel(multichannel_image_path, dapi_channel_index=0):
+def _old_segment_cellsam_extract_dapi_channel(
+    multichannel_image_path, dapi_channel_index=0
+):
     """Frozen copy of pre-change bin/segment_cellsam.py:extract_dapi_channel."""
     logger = logging.getLogger("old_segment_cellsam")
 
@@ -189,7 +210,9 @@ def _old_segment_cellsam_extract_dapi_channel(multichannel_image_path, dapi_chan
 
 
 @pytest.mark.parametrize("compression", [None, "zlib"])
-def test_extract_dapi_channel_never_calls_asarray_out_memmap(tmp_path, monkeypatch, compression):
+def test_extract_dapi_channel_never_calls_asarray_out_memmap(
+    tmp_path, monkeypatch, compression
+):
     """segment_io must never call tif.asarray(out="memmap") -- that call is
     what decodes the whole image into a full-size temp file (see module
     docstring), for EITHER a compressed or uncompressed source.
@@ -308,7 +331,11 @@ def test_out_of_range_channel_index_raises_with_original_message(tmp_path):
 
 # ---------------------------------------------------------------------------
 # 3. segment_cellsam.py -- importable directly in CI (no heavy top-level
-#    imports); exercise the real backend wrapper end-to-end.
+#    imports). Its two channel-read tests below call segment_io's function
+#    directly (not through segment_cellsam), so they exercise the shared
+#    segment_io.extract_dapi_channel implementation rather than the backend
+#    wrapper end-to-end; the delegation identity check below is what actually
+#    proves segment_cellsam is wired to that same implementation.
 # ---------------------------------------------------------------------------
 
 
@@ -327,11 +354,26 @@ def test_segment_cellsam_module_has_no_heavy_top_level_imports():
             pytest.fail(f"cellSAM import found at module level: {line!r}")
 
 
+def test_segment_cellsam_delegates_to_segment_io():
+    """segment_cellsam.py must delegate its channel read to segment_io, the
+    same shape bin/segment.py is checked against in
+    test_segment_py_delegation_is_live_when_importable below. Without this
+    identity check, the two tests that follow (equivalence, lazy-path) only
+    prove facts about segment_io.extract_dapi_channel itself -- they call it
+    directly -- and say nothing about whether segment_cellsam is actually
+    wired to it.
+    """
+    import segment_cellsam
+
+    assert segment_cellsam.extract_dapi_channel is segment_io.extract_dapi_channel, (
+        "bin/segment_cellsam.py no longer delegates its channel read to "
+        "segment_io.extract_dapi_channel"
+    )
+
+
 @pytest.mark.parametrize("compression", [None, "zlib"])
 @pytest.mark.parametrize("dims", ["2d", "3d"])
 def test_segment_cellsam_extract_dapi_channel_equivalence(tmp_path, compression, dims):
-    import segment_cellsam
-
     if dims == "3d":
         path, stack = _write_3d_stack(tmp_path, compression=compression)
         channel_index = 0
@@ -342,7 +384,7 @@ def test_segment_cellsam_extract_dapi_channel_equivalence(tmp_path, compression,
         expected = plane
 
     old_image = _old_segment_cellsam_extract_dapi_channel(str(path), channel_index)
-    new_image = segment_cellsam.extract_dapi_channel(str(path), channel_index)
+    new_image, _new_meta = segment_io.extract_dapi_channel(str(path), channel_index)
 
     assert new_image.dtype == old_image.dtype
     np.testing.assert_array_equal(new_image, old_image)
@@ -350,8 +392,6 @@ def test_segment_cellsam_extract_dapi_channel_equivalence(tmp_path, compression,
 
 
 def test_segment_cellsam_extract_dapi_channel_uses_lazy_path(tmp_path, monkeypatch):
-    import segment_cellsam
-
     path, _stack = _write_3d_stack(tmp_path, n_channels=3)
 
     calls = []
@@ -363,7 +403,7 @@ def test_segment_cellsam_extract_dapi_channel_uses_lazy_path(tmp_path, monkeypat
 
     monkeypatch.setattr(tifffile.TiffFile, "asarray", spying_asarray)
 
-    segment_cellsam.extract_dapi_channel(str(path), dapi_channel_index=0)
+    segment_io.extract_dapi_channel(str(path), dapi_channel_index=0)
 
     memmap_calls = [c for c in calls if c.get("out") == "memmap"]
     assert memmap_calls == []
@@ -415,29 +455,32 @@ def test_segment_py_delegates_to_segment_io_and_drops_memmap():
     assert "image_memmap = tif.asarray(out=" not in src, (
         "bin/segment.py still calls asarray(out='memmap') directly"
     )
-    assert "from segment_io import extract_dapi_channel" in src, (
-        "bin/segment.py no longer delegates to segment_io.extract_dapi_channel"
-    )
+    # A single `from segment_io import extract_dapi_channel` line, OR that name
+    # sharing an import statement with a sibling (e.g. `expand_labels_tiled`) once
+    # ruff's isort rule merges same-module imports onto one line -- either way,
+    # the import must come from segment_io, not a re-implementation.
+    assert re.search(
+        r"^from segment_io import .*\bextract_dapi_channel\b", src, re.MULTILINE
+    ), "bin/segment.py no longer delegates to segment_io.extract_dapi_channel"
 
 
 @pytest.mark.skipif(
     not _segment_py_is_importable(),
     reason="stardist/csbdeep not importable here; the structural test above is the "
-           "environment-independent check and always runs",
+    "environment-independent check and always runs",
 )
 def test_segment_py_delegation_is_live_when_importable():
     """The stronger form of the check above, where the environment permits it.
 
     Deliberately additive: this NEVER replaces the structural assertions, so a
     change in what pip happens to resolve can only ever ADD coverage here, never
-    remove it. bin/segment.py:32 binds the delegate as
-    `from segment_io import extract_dapi_channel as _extract_dapi_channel_impl`
-    and its wrapper calls that name, so identity against segment_io's function is
-    the real delegation.
+    remove it. bin/segment.py:32 imports the name directly now
+    (`from segment_io import extract_dapi_channel`), so identity against
+    segment_io's function is the real delegation.
     """
     import segment  # noqa: PLC0415
 
-    assert segment._extract_dapi_channel_impl is segment_io.extract_dapi_channel, (
+    assert segment.extract_dapi_channel is segment_io.extract_dapi_channel, (
         "bin/segment.py no longer delegates its channel read to "
         "segment_io.extract_dapi_channel"
     )

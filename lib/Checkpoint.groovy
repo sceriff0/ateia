@@ -177,6 +177,53 @@ class Checkpoint {
         return requireStep(step).columns
     }
 
+    /**
+     * Assert that `step` still declares every column in `cols`.
+     *
+     * WHAT THIS REPLACES. Three readers each carried the same seven-line block —
+     * `['patient_id', 'registered_image', ...].each { col -> if (!(col in
+     * Checkpoint.columns(...))) throw new IllegalStateException(...) }` —
+     * subworkflows/local/add_cycle.nf twice (its registered and postprocessed reads) and
+     * subworkflows/local/segmentation.nf once (READ_SEGMENTED_CHECKPOINT). Three copies
+     * of one rule, each free to word its failure differently, and each an independent
+     * opportunity to fall behind a schema change.
+     *
+     * WHY THE CHECK EXISTS AT ALL, which is easy to lose when it becomes a one-liner.
+     * A reader indexes a checkpoint row by column NAME through
+     * `splitCsv(header: true)`, which creates keys only for columns the FILE's header
+     * declares. So a reader naming a column the writer stopped emitting does not fail —
+     * it reads `null`, which becomes an empty field, which becomes a path that does not
+     * resolve, several steps later and a long way from the cause. Failing at workflow
+     * construction, naming the column, is the whole point.
+     *
+     * Reports EVERY missing column, not just the first: a reader that lost two learns
+     * both in one run rather than one per edit-and-rerun cycle.
+     *
+     * An empty `cols` throws rather than passing. A caller that checks nothing reads as
+     * covered, which is the shape of guard this repo has been bitten by repeatedly.
+     *
+     * Throws {@link UnknownStepException} for an unknown step (via {@link #columns}) and
+     * {@code IllegalStateException} for a declared step missing a requested column — two
+     * types, because "this step never existed" and "this schema changed under me" are
+     * different problems with different fixes.
+     */
+    static void requireColumns(String step, Collection<String> cols) {
+        def declared = columns(step)
+        if (!cols)
+            throw new IllegalArgumentException(
+                "Checkpoint.requireColumns('${step}'): no columns requested. A caller " +
+                "that checks nothing reads as covered; name the columns it indexes.")
+
+        def missing = cols.findAll { !(it in declared) }
+        if (missing)
+            throw new IllegalStateException(
+                "Checkpoint.requireColumns('${step}'): column(s) ${missing as List} are " +
+                "read from the '${step}' checkpoint but Checkpoint no longer declares " +
+                "them. Declared, in order: ${declared}. A reader indexing an undeclared " +
+                "column gets an empty field, i.e. a path that does not resolve, several " +
+                "steps later.")
+    }
+
     /** The header line — the `seed:` value every writer passes to collectFile(). */
     static String header(String step) {
         return columns(step).join(',')

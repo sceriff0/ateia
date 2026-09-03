@@ -226,8 +226,8 @@ nextflow_process {
                 { assert process.out.pyramid.get(0).get(0).is_reference == true },
                 { assert process.out.pyramid.get(0).get(0).channels == ['DAPI', 'PANCK', 'SMA'] },
                 // Output file is non-trivial and has correct name
-                { assert process.out.pyramid.get(0).get(1).size() > 1000 },
-                { assert process.out.pyramid.get(0).get(1).name.endsWith('pyramid.ome.tiff') }
+                { assert file(process.out.pyramid.get(0).get(1)).size() > 1000 },
+                { assert file(process.out.pyramid.get(0).get(1)).name.endsWith('pyramid.ome.tiff') }
             )
         }
     }
@@ -332,7 +332,7 @@ nextflow_process {
                 // Pyramid should contain multiple resolution levels (multi-resolution OME-TIFF)
                 // File should be substantial — at least 10KB for 128x128 with 3 channels + 3 pyramid levels
                 {
-                    def pyramidSize = process.out.pyramid.get(0).get(1).size()
+                    def pyramidSize = file(process.out.pyramid.get(0).get(1)).size()
                     assert pyramidSize > 10_000, "Pyramid OME-TIFF should be > 10KB, got ${pyramidSize} bytes"
                 },
                 // Size log should have been generated with non-zero input size

@@ -21,7 +21,7 @@
  *               checks, not boilerplate, and each is meaningless for the other two
  *               backends -- see the per-backend comments below.
  *   versionTools the backend's own tools, as BARE PYTHON MODULE NAMES -- not rendered
- *               YAML. StarDist reports deepcell/tensorflow, InstanSeg instanseg/torch,
+ *               YAML. StarDist reports tensorflow, InstanSeg instanseg/torch,
  *               CellSAM cellSAM/torch. lib/ProcessEnvelope.groovy turns each name into
  *               its probe row and prepends the shared `python:` row, and
  *               modules/local/segment.nf feeds THIS ONE LIST to both
@@ -115,7 +115,15 @@ class SegBackends {
                     'echo "Validated: channel 0 is a configured nuclear marker"',
                 ]
             },
-            versionTools: ['deepcell', 'tensorflow'],
+            // `deepcell` used to be here and was a PHANTOM: no image installs it, and
+            // StarDist has nothing to do with DeepCell (the entry looks inherited from a
+            // Mesmer-era table). ProcessEnvelope's probe swallows the ImportError and
+            // writes `deepcell: unknown` into versions.yml, which the QC report renders
+            // verbatim -- a provenance record naming a tool the run never loaded.
+            // tensorflow is real: this backend's image is FROM tensorflow/tensorflow:2.15.0
+            // and stardist 0.9.1 imports it. Guarded by
+            // tests/test_version_tools_are_importable_in_their_image.py.
+            versionTools: ['tensorflow'],
         ],
 
         // InstanSeg. Channel-invariant -- it consumes the multichannel image directly,

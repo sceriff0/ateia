@@ -8,13 +8,24 @@ Fast reference for common testing tasks.
 
 ```bash
 # Install dependencies
-pip install pytest numpy tifffile pandas scikit-image
+# The reviewed environment CI runs the suite in. Never install the packages by
+# hand: every version lives in requirements/, and a hand-installed set is how a
+# local pass stops meaning anything about CI.
+pip install -r requirements/ci.txt
 curl -s https://get.nextflow.io | bash && sudo mv nextflow /usr/local/bin/
 curl -fsSL https://code.askimed.com/install/nf-test | bash && sudo mv nf-test /usr/local/bin/
 
 # Generate test data
 python tests/testdata/generate_complete_testdata.py
 ```
+
+> The format suite needs a **different** environment — the convert image's
+> reader stack, which cannot coexist with the harmonised one. See
+> `requirements/format-tests.txt`, and run it with
+> `python3.10 -m venv /tmp/_fmtenv && /tmp/_fmtenv/bin/pip install -r requirements/format-tests.txt`
+> then `/tmp/_fmtenv/bin/python -m pytest tests/integration/formats`.
+
+> The long-form companion to this file is `tests/README.md`.
 
 ---
 
