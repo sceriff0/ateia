@@ -326,7 +326,7 @@ the same masks, polygons, measurements and QC. Full store layout:
   the sample manifest are **here**, not in the HTML — a 200-row version table and a
   per-patient count table were two renderings of files that already existed.
 
-### Reference-free segmentation quality (CSE) — opt-in
+### Reference-free segmentation quality (CSE) — opt-in { #cse-opt-in }
 
 `SEG_QUALITY_EVAL` scores the shipped cell+nucleus masks against the reference
 image with the [CellSegmentationEvaluator][cse] (vendored 1.5.19 subset), giving a
