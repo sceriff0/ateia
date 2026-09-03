@@ -101,10 +101,11 @@ _CONTAINER_DIRECTIVE_RE = re.compile(r"container\s*:?\s*[\"']([^\"']+)[\"']")
 # First-party images are one Docker Hub repository per component --
 # bolt3x/mirage-<component>:<version> -- since the containers/ rename
 # (see tests/test_container_image_naming.py's header). Only the component name
-# is captured; the version segment is deliberately ignored here, because it is
-# sometimes a literal (1.0.0) and sometimes a params interpolation
-# (${params.segeval_tag}, modules/local/merge_seg_eval.nf), and either way the
-# component is the only part that must agree with containers/images.json.
+# is captured; the version segment is deliberately ignored here, because it
+# is a literal x.y.z in every reference (a `${params.segeval_tag}` interpolation used to
+# be the one exception; the param was deleted 2026-09-02 and segeval joined
+# manifest.version with the other ten images), and the component is the only part that
+# must agree with containers/images.json anyway.
 _MIRAGE_COMPONENT_RE = re.compile(r"^bolt3x/mirage-([a-z0-9]+(?:-[a-z0-9]+)*):")
 
 

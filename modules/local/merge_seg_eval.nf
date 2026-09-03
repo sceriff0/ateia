@@ -4,7 +4,7 @@
 process MERGE_SEG_EVAL {
     tag "seg_eval_merge"
 
-    container "bolt3x/mirage-segeval:${params.segeval_tag}"
+    container 'bolt3x/mirage-segeval:1.0.0'
 
     input:
     path(seg_eval_jsons)

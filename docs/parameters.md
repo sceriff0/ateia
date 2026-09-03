@@ -298,7 +298,6 @@ the same masks, polygons, measurements and QC. Full store layout:
 | `skip_seg_quality_eval` | `true` | Skip reference-free cell-segmentation quality scoring (CSE). **Opt-in:** set `false` to enable. |
 | `cse_pixel_size_um` | `null` | Pixel size (µm) passed to CSE. `null` = infer from image metadata. |
 | `cse_max_pixels` | `50000000` | Bin image+masks so CSE scores at most this many pixels. `null` = full resolution. |
-| `segeval_tag` | `1.0.1` | Container tag for the CSE image, `bolt3x/mirage-segeval`. `1.0.1` harmonised the pins and dropped `aicsimageio`; `1.0.0` could not be built. |
 | `skip_final_qc_report` | `false` | Skip the aggregated HTML QC report. |
 | `seg_qc_pairing` | `lsa` | Cell correspondence backend for `reg_qc=2`'s fixed anchor pairing: `lsa` = optimal one-to-one assignment (exact, per connected component), `mutual_nn` = the older mutual-nearest-centroid rule. See [Staged registration QC](registration_qc.md). |
 | `seg_qc_match_radius_factor` | `1.5` | Match radius for `reg_qc=2` pairing, in median nuclear radii. |

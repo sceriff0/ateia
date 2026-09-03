@@ -56,9 +56,29 @@ EXTERNAL_ALLOWED = {
 # The retired single-repository name. Nothing may reference it again.
 LEGACY_REPO = "attend_image_analysis"
 
+# THE TAG MAY BE INTERPOLATED, AND THE REFERENCE MAY CARRY A DIGEST. Both forms were
+# invisible to the previous pattern, which required an alphanumeric right after the ":".
+#
+#   * `bolt3x/mirage-segeval:${params.segeval_tag}` matched NOTHING, so both segeval
+#     modules were silently exempt from every assertion in this file -- including the
+#     manifest-version pin. Measured 2026-09-02: 29 references found before widening the
+#     pattern, 31 after, and the two new ones are exactly that pair.
+#   * `cdgatenbee/valis-wsi@sha256:<64 hex>` is the digest-pinned form ruling R6 requires
+#     for an external image (see tests/test_base_images_are_digest_pinned.py).
+#
+# A tag or a digest is REQUIRED -- the alternation has no "neither" branch. Without that
+# the pattern would match any quoted path on a line containing the word "container",
+# e.g. a publishDir `"${params.outdir}/${meta.patient_id}/qc"`.
 _IMAGE_REF = re.compile(
-    r"""['"]([A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9][A-Za-z0-9._-]*)['"]"""
+    r"""['"]("""
+    r"""[A-Za-z0-9][A-Za-z0-9._/-]*"""
+    r"""(?::[A-Za-z0-9$][A-Za-z0-9._${}-]*(?:@sha256:[0-9a-f]{64})?"""
+    r"""|@sha256:[0-9a-f]{64})"""
+    r""")['"]"""
 )
+# A first-party image is pinned by TAG, never by digest: the digest does not exist until
+# the image has been built and pushed, and the tag is what release.yml publishes. The
+# published digests are recorded in containers/README.md's mapping table instead.
 _FIRST_PARTY = re.compile(
     rf"^{NAMESPACE}/{PREFIX}([a-z0-9]+(?:-[a-z0-9]+)*):(\d+\.\d+\.\d+)$"
 )

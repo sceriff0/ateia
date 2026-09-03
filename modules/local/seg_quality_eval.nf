@@ -6,7 +6,7 @@
 process SEG_QUALITY_EVAL {
     tag "${meta.patient_id}"
 
-    container "bolt3x/mirage-segeval:${params.segeval_tag}"
+    container 'bolt3x/mirage-segeval:1.0.0'
 
     input:
     tuple val(meta), path(cell_mask), path(nuclei_mask), path(image)
