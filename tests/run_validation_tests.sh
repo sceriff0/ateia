@@ -288,18 +288,23 @@ TESTS_TOTAL=$((TESTS_TOTAL + 1))
 echo -e "${YELLOW}[TEST $TESTS_TOTAL]${NC} Unknown extra columns are NAMED in a warning"
 warn_log="$OUTPUT_DIR/test_${TESTS_TOTAL}.log"
 cd "$PROJECT_ROOT"
+# Exit status is genuinely not the assertion here -- dry_run succeeding or
+# failing tells us nothing about whether the warning was logged, which is the
+# only thing checked below -- so it is captured into an explicitly-unused
+# variable (the `n=$(...) || n=0` idiom tests/test_no_swallowed_failures.py
+# asks for), never discarded with a bare `|| true`.
 nextflow run main.nf \
     -params-file "$PARAMS_FILE" \
     --input "$TESTDATA_DIR/extra_column_input.csv" \
     --outdir "$OUTPUT_DIR/test_${TESTS_TOTAL}" \
     --start preprocessing \
-    > "$warn_log" 2>&1 || true
+    > "$warn_log" 2>&1 || warn_run_exit=$?
 if grep -q "operator, scan_date" "$warn_log"; then
     echo -e "${GREEN}✓ PASS${NC} - Unknown columns named in the log"
     TESTS_PASSED=$((TESTS_PASSED + 1))
 else
     echo -e "${RED}✗ FAIL${NC} - The run did not name the ignored columns"
-    echo "  Log: $warn_log"
+    echo "  Log: $warn_log (nextflow exit ${warn_run_exit:-0})"
     TESTS_FAILED=$((TESTS_FAILED + 1))
 fi
 
