@@ -102,10 +102,6 @@ ALLOW = {
         "ten ORB mentions in panel d step 1. Cleared by plan 11 Task 4, which "
         "rewrites that panel to DISK + LightGlue."
     ),
-    "pipeline-schematic.html": (
-        "one ANHIR/ACROBAT line in panel h's registration-accuracy signal. "
-        "Cleared by plan 11 Task 3."
-    ),
 }
 
 _COMPILED = {re.compile(p, re.I): v for p, v in RETIRED.items()}

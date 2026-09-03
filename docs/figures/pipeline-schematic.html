@@ -743,8 +743,8 @@
     <div class="sigs">
       <div class="sig"><h4>Resource scaling</h4><div class="src">← trace.txt + size_logs</div>
         <ul><li>Linear fit per stage: <code>peak_rss ~ input_gb</code>, <code>realtime ~ input_gb</code></li><li>Slope = marginal cost per input GiB</li><li>Intercept = fixed overhead</li></ul></div>
-      <div class="sig"><h4>Registration accuracy</h4><div class="src">← reg_qc=2 seg_qc.json · VALIS summary · public landmarks</div>
-        <ul><li>Seg-based Dice + centroid displacement per stage</li><li>Δ-vs-rigid isolates registration from segmentation noise</li><li>VALIS feature rTRE as an independent second signal</li><li>ANHIR / ACROBAT landmark TRE as an external check</li></ul></div>
+      <div class="sig"><h4>Registration accuracy</h4><div class="src">← reg_qc=2 seg_qc.json · VALIS summary · STARE intrinsic TRE</div>
+        <ul><li>Seg-based Dice + centroid displacement per stage</li><li>Δ-vs-rigid isolates registration from segmentation noise</li><li>VALIS feature rTRE and STARE intrinsic TRE as method-native second signals</li><li><b>No ground truth of any kind.</b> Every number here is a reference-free agreement measure on tissue: it ranks configurations against each other, and cannot say any of them is correct.</li></ul></div>
       <div class="sig"><h4>Segmentation stability</h4><div class="src">← cross-method agreement</div>
         <ul><li>Instance-F1 between backends on a shared cell population</li><li>Foreground IoU</li><li>instantseg / stardist / cellsam</li></ul></div>
     </div>
