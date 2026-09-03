@@ -20,6 +20,10 @@ process, default and path below is read from the pipeline source —
       the tagged artifact stream, the kind vocabulary, and the retry-then-fail contract
     - **S4 · lazy reads** — [figure](figures/zarr-schematic.html){ target=_blank } ·
       where lazy zarr reads cut peak memory, and every place they cannot help
+    - **S5 · coarse alignment** — [figure](figures/coarse-schematic.html){ target=_blank } ·
+      why the STARE global pose is a learned matcher, and what that costs in memory
+    - **S6 · accuracy measures** — [figure](figures/accuracy-schematic.html){ target=_blank } ·
+      the four registration-accuracy numbers, which three are circular, and why none is ground truth
 
 ---
 

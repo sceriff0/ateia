@@ -18,6 +18,10 @@ segmenter** (`--seg_method`, default `instantseg`) rather than with a second, fi
     [quality control](figures/qc-schematic.html){ target=_blank }, which places it in the
     pipeline-wide QC architecture.
 
+    **Supplementary Figure S6** — [accuracy measures](figures/accuracy-schematic.html){ target=_blank } —
+    places this chain against the pipeline's three other accuracy numbers and says which of
+    them can be read as independent evidence.
+
 ## The `reg_qc = 1` overlay is a before/after pair
 
 Below the staged metrics sits the cheaper answer, on at every level from
