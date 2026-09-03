@@ -592,4 +592,8 @@
 # through. `pytest --collect-only -q` reports "1619 tests collected", and a
 # full run with MIRAGE_STRICT_SKIPS=1 gives 1606 passed, 13 skipped, 0 failed
 # -- 1606 + 13 = 1619. 1618 + 1 = 1619.
-1797
+#
+# 2026-09-03, plan 07 Tasks 0-6: the real-suite string-vs-path guard, ome_io's dispatch
+# table test, the synthesised-format read_info/read_plane suite, the end-to-end
+# convert_image format tests and the converter's refusal tests. No deletions, no skips.
+1853
