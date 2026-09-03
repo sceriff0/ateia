@@ -537,4 +537,27 @@
 # 2026-09-03, plan 06 Tasks 5-8: the bioformats jar-bake and jvm-cache route guards, and
 # the reverse-rule guard (86 per-container/per-package cases: an image may not install
 # what nothing reaches). No deletions, no skips.
-1764
+
+#
+#
+# RE-MEASURED 2026-09-03, plan 06 Task 13 (build containers/convert and containers/regqc
+# for real, re-ratchet the floor). `git diff --diff-filter=A --name-only 12f3d5b HEAD --
+# tests/` names exactly two new pytest files since the 1736 measurement:
+# tests/test_container_readme_matches_the_dockerfiles.py (14 cases) and
+# tests/test_version_tools_are_importable_in_their_image.py (12 cases, most of it the
+# `test_every_reported_tool_is_installed_in_that_image` parametrisation over every
+# container that claims a tool in its README). 14 + 12 = 26, and 1736 + 26 = 1762 exactly
+# -- no other test count moved. The two other files touched in that range
+# (test_container_harmonisation.py's BASE_IMAGE_PROVIDES gaining a "stardist" entry,
+# test_seg_backends.py's EXPECTED losing the phantom "deepcell" tool) are both data edits
+# read by ALREADY-parametrised tests (parametrised over `_container_dirs()`, not over the
+# dicts' own keys), so neither adds a collected case. Measured after generating the
+# fixtures, with the suite's standard exclusions: `pytest --collect-only -q` reports
+# "1762 tests collected", and a full run gives 1749 passed, 13 skipped, 0 failed --
+# 1749 + 13 = 1762. This is also the first measurement to follow a REAL local build of
+# both containers/convert and containers/regqc (Task 13's whole point) rather than a
+# static read of their Dockerfiles; the build itself added no test, but did catch and
+# fix two false-positive traps in containers/convert/smoke.sh's negative leg (see
+# :bug: Fix two false-positive traps in convert's smoke.sh negative leg) that no static
+# guard here could have found.
+1790
