@@ -1325,6 +1325,113 @@ print(
 )
 
 
+# =============================================================================
+# 11. FORMAT-COVERAGE FIXTURES
+# =============================================================================
+# RULING R3: no committable vendor fixtures. Everything the generator CAN write
+# is written here and tested on real bytes by tests/integration/formats/; the
+# four vendor formats (.czi/.nd2/.lif/.svs) are validated on the cluster and the
+# report is committed as docs/validation/format_validation.md.
+#
+# Numbered 11, not 10 -- section 10 above (SEGMENTATION fixture) already claimed
+# that slot when family 7 of plan 07's own Task 0 landed on this branch, after
+# this section's brief was written. A pure renumbering; nothing here depends on
+# section 10's fixtures or RNG state.
+#
+# Every fixture below is deliberately SMALL (<=256 px a side): these exercise a
+# reader's dispatch and metadata handling, not its throughput, and the format
+# suite runs on every push.
+print("\n11. Creating format-coverage fixtures...")
+
+_fmt_rng = np.random.default_rng(101)
+
+# 11a. PYRAMIDAL OME-TIFF (2 levels, via subIFDs). A whole-slide export from
+#      QuPath or bioformats2raw is pyramidal, and nothing in this repo had ever
+#      read one: a reader that returns the LOWEST level instead of level 0
+#      silently halves every coordinate downstream. Level 0 is 256x256, level 1
+#      is 128x128, so a reader picking the wrong one is visible in the shape.
+_fmt_pyramid = _fmt_rng.integers(0, 3000, (2, 256, 256)).astype(np.uint16)
+with tifffile.TiffWriter(OUT_DIR / "fmt_pyramid.ome.tiff", ome=True) as _tw:
+    _tw.write(
+        _fmt_pyramid,
+        subifds=1,
+        photometric="minisblack",
+        metadata={
+            "axes": "CYX",
+            "Channel": {"Name": ["DAPI", "CD3"]},
+            "PhysicalSizeX": 0.5,
+            "PhysicalSizeXUnit": "µm",
+            "PhysicalSizeY": 0.5,
+            "PhysicalSizeYUnit": "µm",
+        },
+    )
+    _tw.write(_fmt_pyramid[:, ::2, ::2], subfiletype=1, photometric="minisblack")
+print("  Created fmt_pyramid.ome.tiff (2 levels: 256x256 -> 128x128)")
+
+# 11b. BIGTIFF INPUT. The pipeline WRITES BigTIFF unconditionally
+#      (bin/convert_image.py's write_ome_tiff passes bigtiff=True), and that
+#      write side is covered -- but nothing had ever READ one, so the 8-byte
+#      offset path was untested on the input side. bigtiff=True is forced here
+#      rather than earned by size: a fixture big enough to earn it would be 2 GB.
+_fmt_small = _fmt_rng.integers(0, 3000, (2, 64, 64)).astype(np.uint16)
+tifffile.imwrite(
+    OUT_DIR / "fmt_bigtiff.ome.tiff",
+    _fmt_small,
+    bigtiff=True,
+    photometric="minisblack",
+    metadata={
+        "axes": "CYX",
+        "Channel": {"Name": ["DAPI", "CD3"]},
+        "PhysicalSizeX": 0.5,
+        "PhysicalSizeXUnit": "µm",
+        "PhysicalSizeY": 0.5,
+        "PhysicalSizeYUnit": "µm",
+    },
+)
+print("  Created fmt_bigtiff.ome.tiff (BigTIFF, 2 channels)")
+
+# 11c. INTERLEAVED RGB, 8-bit. This is the ONLY fixture that exercises the
+#      S-as-C remap in bin/convert_image.py (the 'S' dimension branch), which
+#      until now was reachable only through a fake reader in
+#      tests/test_convert_lazy_read.py. bioio reports this file as TCZYXS with
+#      C=1 and S=3, and its channel names as ['Channel:0:0'] -- so anything
+#      converting it must be given --channels.
+tifffile.imwrite(
+    OUT_DIR / "fmt_rgb.tiff",
+    _fmt_rng.integers(0, 255, (64, 64, 3)).astype(np.uint8),
+    photometric="rgb",
+)
+print("  Created fmt_rgb.tiff (interleaved RGB, uint8)")
+
+# 11d. 8-BIT SINGLE CHANNEL and 11e. FLOAT32 SINGLE CHANNEL. Every other image
+#      fixture in this file is uint16, so dtype preservation through the reader
+#      and the writer was asserted against exactly one dtype. A float32 slide is
+#      what a deconvolved or ratiometric channel arrives as.
+tifffile.imwrite(
+    OUT_DIR / "fmt_gray8.tiff",
+    _fmt_rng.integers(0, 255, (64, 64)).astype(np.uint8),
+    photometric="minisblack",
+)
+print("  Created fmt_gray8.tiff (uint8, single channel)")
+
+tifffile.imwrite(
+    OUT_DIR / "fmt_float32.tiff",
+    _fmt_rng.random((64, 64)).astype(np.float32),
+    photometric="minisblack",
+)
+print("  Created fmt_float32.tiff (float32, single channel)")
+
+# 11f. A TRUNCATED OME-TIFF. The corrupt-input path was covered only for the
+#      pixel-size probe (tests/test_pixel_size.py); nothing asserted that the
+#      CONVERTER refuses a damaged slide with a message rather than a traceback
+#      or, worse, a partial output. 100 bytes is past the TIFF header and short
+#      of the first IFD.
+(OUT_DIR / "fmt_truncated.ome.tiff").write_bytes(
+    (OUT_DIR / "fmt_bigtiff.ome.tiff").read_bytes()[:100]
+)
+print("  Created fmt_truncated.ome.tiff (first 100 bytes of fmt_bigtiff)")
+
+
 print("\n" + "=" * 70)
 print("All test data generation complete!")
 print("=" * 70)

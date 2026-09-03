@@ -663,24 +663,64 @@ def _channel_names_from_ome(xml: Optional[str]) -> Optional[List[str]]:
 
 
 def _info_via_tifffile(path: Path, reader: str) -> ImageInfo:
+    """``ImageInfo`` for anything opened directly with ``tifffile``, INCLUDING the S->C
+    remap this pipeline's contract needs for an interleaved file (RGB and similar).
+
+    ``_is_tifffile_readable`` diverts every plain ``.tif``/``.tiff``/``.ndpi`` here rather
+    than through ``_info_via_bioio`` -- ``tifffile`` is installed in every image and in
+    CI, ``bioio`` in exactly one -- so this function needs its OWN copy of the remap
+    ``_info_via_bioio`` performs, not a shared one: the two readers report axes under
+    different names (``img.dims.order``/``.S``/``.C`` for bioio, ``series.axes`` here) and
+    there is no common object to factor the logic onto.
+
+    ``series.axes`` names a samples axis ``'S'`` (e.g. ``'YXS'`` for an interleaved RGB
+    TIFF written with ``photometric="rgb"``). Left unhandled, the samples axis stays
+    wherever tifffile put it -- trailing, for ``YXS`` -- and ``shape_cyx`` comes out
+    ``(Y, X, S)`` instead of ``(S, Y, X)``: a channel count that is actually the image
+    height. Mirrors ``_info_via_bioio``'s R/G/B default for a 3-sample file, ``S0``..
+    otherwise, only when the file names no channels itself.
+    """
     with tifffile.TiffFile(str(path)) as tf:
         series = tf.series[0] if tf.series else tf.pages[0]
         shape = tuple(int(n) for n in series.shape)
+        axes = getattr(series, "axes", None) or ""
         dtype = np.dtype(series.dtype)
         channels = _channel_names_from_ome(getattr(tf, "ome_metadata", None))
 
-    if len(shape) == 2:
-        shape = (1,) + shape
-    elif len(shape) > 3:
-        # Squeeze leading singletons (a TCZYX file whose T and Z are 1); anything left
-        # over is genuinely more than this pipeline's (C, Y, X) contract covers.
-        lead = [n for n in shape[:-2] if n != 1] or [1]
-        if len(lead) != 1:
-            raise ValueError(
-                f"{path.name}: shape {shape} has more than one non-singleton non-spatial "
-                "axis; this pipeline's contract is (C, Y, X)."
-            )
-        shape = (lead[0], shape[-2], shape[-1])
+    channels_are_samples = False
+    if "S" in axes and len(axes) == len(shape):
+        s_idx = axes.index("S")
+        n_samples = shape[s_idx]
+        if n_samples > 1:
+            rest = [shape[i] for i in range(len(shape)) if i != s_idx]
+            if len(rest) != 2:
+                raise ValueError(
+                    f"{path.name}: axes {axes!r} shape {shape} has a samples axis plus "
+                    "more than two remaining (Y, X) axes; this pipeline's contract is "
+                    "(C, Y, X)."
+                )
+            shape = (n_samples,) + tuple(rest)
+            channels_are_samples = True
+            if not (channels and len(channels) == n_samples):
+                channels = (
+                    ["R", "G", "B"]
+                    if n_samples == 3
+                    else [f"S{i}" for i in range(n_samples)]
+                )
+
+    if not channels_are_samples:
+        if len(shape) == 2:
+            shape = (1,) + shape
+        elif len(shape) > 3:
+            # Squeeze leading singletons (a TCZYX file whose T and Z are 1); anything
+            # left over is genuinely more than this pipeline's (C, Y, X) contract covers.
+            lead = [n for n in shape[:-2] if n != 1] or [1]
+            if len(lead) != 1:
+                raise ValueError(
+                    f"{path.name}: shape {shape} has more than one non-singleton "
+                    "non-spatial axis; this pipeline's contract is (C, Y, X)."
+                )
+            shape = (lead[0], shape[-2], shape[-1])
 
     px_x, px_y = read_ome_pixel_size(path)
     pixel_size = px_x if px_x is not None else px_y
@@ -692,6 +732,7 @@ def _info_via_tifffile(path: Path, reader: str) -> ImageInfo:
         channels=channels,
         pixel_size_um=pixel_size,
         reader=reader,
+        channels_are_samples=channels_are_samples,
     )
 
 

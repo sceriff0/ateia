@@ -187,6 +187,15 @@ tests/testdata/P001_seg_nuclei.ome.tiff
 tests/testdata/P900_ref_scaled.ome.tiff
 tests/testdata/P900_mov_scaled.ome.tiff
 tests/testdata/shipped_defaults_input.csv
+
+# Format-coverage fixtures (generate_complete_testdata.py section 11) -- the
+# formats the pipeline claims and could not previously test on real bytes.
+tests/testdata/fmt_pyramid.ome.tiff
+tests/testdata/fmt_bigtiff.ome.tiff
+tests/testdata/fmt_rgb.tiff
+tests/testdata/fmt_gray8.tiff
+tests/testdata/fmt_float32.tiff
+tests/testdata/fmt_truncated.ome.tiff
 .superpowers/
 
 # Internal architecture/audit reviews published as Claude Artifacts, not repo docs.
