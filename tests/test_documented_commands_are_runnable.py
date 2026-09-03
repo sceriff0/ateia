@@ -154,7 +154,9 @@ def test_every_documented_command_would_launch():
             total += 1
             reasons = _verdict(command)
             if reasons:
-                offenders.append(f"{rel}:{line_no}: {'; '.join(reasons)}\n      {command}")
+                offenders.append(
+                    f"{rel}:{line_no}: {'; '.join(reasons)}\n      {command}"
+                )
     assert total >= 25, (
         f"only {total} `nextflow run` commands were extracted from {len(SCAN)} files -- "
         "the extractor has stopped matching and this scan read almost nothing"
@@ -169,8 +171,12 @@ def test_the_profiles_this_guard_trusts_really_pin_what_it_claims():
     """A profile silently dropping its `max_*` would make this guard accept a
     command that no longer launches."""
     for name in sorted(SIZING_PROFILES):
-        assert _profile_pins(name, "max_cpus"), f"profile `{name}` no longer pins max_cpus"
-        assert _profile_pins(name, "max_memory"), f"profile `{name}` no longer pins max_memory"
+        assert _profile_pins(name, "max_cpus"), (
+            f"profile `{name}` no longer pins max_cpus"
+        )
+        assert _profile_pins(name, "max_memory"), (
+            f"profile `{name}` no longer pins max_memory"
+        )
     for name in sorted(OUTDIR_PROFILES):
         assert _profile_pins(name, "outdir"), f"profile `{name}` no longer pins outdir"
 
@@ -194,9 +200,9 @@ def test_the_extractor_joins_continuations_and_skips_prose():
 
 
 def test_the_detector_recognises_the_command_that_actually_fails():
-    assert _verdict("nextflow run . --input s.csv --outdir results -profile docker") == [
-        "no max_cpus/max_memory (required, no default)"
-    ]
+    assert _verdict(
+        "nextflow run . --input s.csv --outdir results -profile docker"
+    ) == ["no max_cpus/max_memory (required, no default)"]
     assert _verdict("nextflow run . --input s.csv -profile docker") == [
         "no --outdir (required, no default)",
         "no max_cpus/max_memory (required, no default)",
@@ -205,5 +211,15 @@ def test_the_detector_recognises_the_command_that_actually_fails():
 
 def test_the_detector_leaves_the_working_forms_alone():
     assert _verdict("nextflow run . -profile test,docker --outdir results") == []
-    assert _verdict("nextflow run . --input s.csv --outdir r -profile docker -c site.config") == []
-    assert _verdict("nextflow run . --input s.csv --outdir r --max_cpus 8 --max_memory 32.GB") == []
+    assert (
+        _verdict(
+            "nextflow run . --input s.csv --outdir r -profile docker -c site.config"
+        )
+        == []
+    )
+    assert (
+        _verdict(
+            "nextflow run . --input s.csv --outdir r --max_cpus 8 --max_memory 32.GB"
+        )
+        == []
+    )
