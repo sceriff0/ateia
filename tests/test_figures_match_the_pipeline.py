@@ -69,17 +69,7 @@ FIGURES_DIR = REPO_ROOT / "docs" / "figures"
 # Do NOT add a figure here to make it pass. A failing figure is a real drift
 # and the figure is what gets fixed.
 # --------------------------------------------------------------------------
-STALE_FIGURES = {
-    "registration-schematic.html": (
-        "deliberately stale: its rewrite is owned by a different spec's Phase 6. "
-        "It still describes the deleted COARSE front-end and carries two values "
-        "for coarse_max_dim. The dangerous numbers in it were fixed. "
-        "(The front-end is not named here: tests/test_no_legacy_frontends.py "
-        "forbids that token across the tracked tree and this file is not on its "
-        "allowlist -- which is itself a second, independent record of why this "
-        "figure is exempt.)"
-    ),
-}
+STALE_FIGURES = {}
 
 # `--<token>` forms that are NOT pipeline parameters. Each is another tool's
 # flag, quoted in a figure because the pipeline renders it. Kept honest by
@@ -120,6 +110,11 @@ NON_PIPELINE_NAMES = {
 NOT_A_PARAM_ROW = {
     "max_dim": "a Python keyword argument of the lazy readers, not a parameter",
     "factor": "a decimation factor computed at runtime, not a parameter",
+    "is_reference": (
+        "a samplesheet COLUMN, not a parameter -- registration-schematic.html's "
+        "dispatch table lists it beside the params that govern the same decision, "
+        "and says so in its own description cell"
+    ),
 }
 
 # --------------------------------------------------------------------------

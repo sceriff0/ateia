@@ -455,7 +455,7 @@
           <td class="v">SuperPoint keypoints + SuperGlue matching over <i>all</i> the patient's slides → a match graph → a rigid/affine matrix <code>slide.M</code> per slide<br><span style="color:#767c83">(+ <code>MicroRigidRegistrar</code> re-fit at higher resolution)</span></td>
           <td class="v"><code>OpticalFlowWarper</code> — a dense displacement field per slide, estimated at up to 4096&nbsp;px<br><span style="color:#767c83">(+ <code>register_micro()</code> re-estimate on a 12.5% crop, composed in)</span></td></tr>
         <tr><td class="k"><span class="em">STARE tiled</span></td>
-          <td class="v">ORB keypoints + RANSAC euclidean fit on a shared <b>thumbnail</b> of both DAPI planes → one matrix <code>M0</code> per moving slide</td>
+          <td class="v">DISK keypoints + LightGlue matching + RANSAC euclidean fit on a shared <b>thumbnail</b> of both DAPI planes → one matrix <code>M0</code> per moving slide</td>
           <td class="v">Phase cross-correlation per <b>tile</b> → one (dx, dy) at each tile centre → a TRE-gated, bilinearly interpolated <b>mesh field</b> <code>F</code></td></tr>
         <tr><td class="k">capture radius of step 2</td>
           <td class="v">the optical-flow pyramid, at <code>max_non_rigid_registration_dim_px</code></td>
@@ -637,7 +637,7 @@
 
     <div class="bkhead">
       <span class="name">TILED_ADAPTER → TILED_COARSE → TILED_REG_TILE (×N) → TILED_SOLVE → TILED_STITCH</span>
-      <span class="sub">star topology · ORB + RANSAC · phase-correlation mesh · bounded memory · bolt3x/mirage-tiled:1.0.0</span>
+      <span class="sub">star topology · DISK + LightGlue + RANSAC · phase-correlation mesh · bounded memory · bolt3x/mirage-tiled:1.0.0</span>
       <span class="flag flag-alt">method = tiled</span>
     </div>
 
@@ -668,42 +668,37 @@
       <i>magnitude</i> is an order out from the other three. This badge said <code>8 GB × 2^(n−1)</code> with a
       ~2&nbsp;GB peak until 2026-09-01 — wrong in the base, and wrong in the ramp shape, which is linear in
       <code>task.attempt</code> like every other request in this pipeline.
-      <span class="src" style="display:block">conf/modules.config, <code>withName: 'TILED_COARSE'</code> ·
-      NOTE: the step&nbsp;1 panel below still quotes the legacy <code>4096&nbsp;px</code> for this parameter — that
-      staleness is allow-listed in <code>tests/test_no_legacy_frontends.py</code> and belongs to the pending rewrite
-      of this figure, not to this correction.</span></div>
+      <span class="src" style="display:block">conf/modules.config, <code>withName: 'TILED_COARSE'</code></span></div>
 
     <div style="border:1px solid var(--rule);background:var(--sub);padding:12px;margin-top:14px;">
 
       <div class="step" style="margin-top:0">
-        <div class="sh"><span class="k">step 1</span><span class="ttl">Global pose — ORB + RANSAC on a shared thumbnail</span>
+        <div class="sh"><span class="k">step 1</span><span class="ttl">Global pose — DISK + LightGlue on a shared thumbnail</span>
           <span class="who">TILED_COARSE · bin/tiled_coarse.py</span></div>
         <div class="sb">
           <table class="qa">
             <tr><td class="q">estimates</td><td>One 3×3 matrix <b><code>M0</code></b> per moving slide, mapping moving pixels → reference pixels. Default model <b><code>euclidean</code></b>: rotation + translation only, 3 DOF. (<code>similarity</code> and <code>affine</code> are available; euclidean is right when both sections come off the same microscope at the same magnification, and refusing the extra DOF is what stops RANSAC fitting a bogus scale to a weak match.)</td></tr>
-            <tr><td class="q">sees</td><td>Both slides' nuclear/fiducial plane (<code>reg_tiled_nuclear_index</code>; <code>null</code> = resolved from channel metadata against <code>nuclear_markers</code>), read <b>lazily in row bands</b> and decimated by <b>one shared integer factor</b> chosen so the longer side is ≤ <code>reg_tiled_coarse_max_dim</code> (4096&nbsp;px). Peak memory is a band plus the thumbnail — not the plane.</td></tr>
-            <tr><td class="q">how</td><td>Each thumbnail is <b>percentile-normalised to [0,1]</b> over p1–p99.9, then <b>ORB</b> detects up to 800 keypoints and extracts binary descriptors. Descriptors are <b>cross-check matched</b> (a pair survives only if each is the other's best match), and <b>RANSAC</b> fits the model — 1000 trials, 3&nbsp;px inlier threshold — discarding correspondences that disagree with the consensus. The fit and its residual are then lifted from thumbnail pixels to full resolution.</td></tr>
+            <tr><td class="q">sees</td><td>Both slides' nuclear/fiducial plane (<code>reg_tiled_nuclear_index</code>; <code>null</code> = resolved from channel metadata against <code>nuclear_markers</code>), read <b>lazily in row bands</b> and decimated by <b>one shared integer factor</b> chosen so the longer side is ≤ <code>reg_tiled_coarse_max_dim</code> (2048&nbsp;px, the shipped <code>high</code> tier). Peak memory is a band plus the thumbnail — not the plane.</td></tr>
+            <tr><td class="q">how</td><td>Each thumbnail is normalised to <b>[0,1]</b>, because <b>DISK was trained on images in that range</b>, then padded to a multiple of 16 (its U-Net downsamples by that factor and raises on a thumbnail that is not), and passed through DISK's <code>from_pretrained("depth")</code> weights for up to <b>2048 keypoints</b>. <b>LightGlue("disk")</b> matches the two keypoint sets, and the surviving correspondences are fitted by <b>RANSAC</b> — 1000 trials, 3&nbsp;px inlier threshold — discarding correspondences that disagree with the consensus. The fit and its residual are then lifted from thumbnail pixels to full resolution.</td></tr>
             <tr><td class="q">then</td><td>It writes the <b>tile plan</b>: <b>cores</b> that partition the reference frame exactly — every pixel belongs to one core, no gaps, no overlaps — each paired with a <b>read box</b> = core expanded by <code>halo</code> and clamped to the image. Each core's centre is one control point of the future mesh. The row count of this CSV <i>is</i> the fan-out width.</td></tr>
           </table>
 
           <div class="math">M<sub>full</sub> = diag(f,f,1) · M<sub>ds</sub> · diag(1/f,1/f,1) &nbsp;&nbsp;⇒&nbsp;&nbsp; rotation unchanged, translation × f &nbsp;&nbsp;<span class="cm">— returning M_ds unchanged under-translates by exactly f</span></div>
 
           <ul class="tight">
-            <li><b>Why ORB and not phase correlation for this step.</b> Phase correlation recovers translation only.
-              Inter-cycle rotation is real and would survive it; feature matching handles both.</li>
-            <li><b>Why one decimation factor for both slides.</b> ORB matches descriptors <i>across</i> the two
+            <li><b>Why feature matching and not phase correlation for this step.</b> Phase correlation recovers
+              translation only. Inter-cycle rotation is real and would survive it; feature matching handles both.</li>
+            <li><b>Why one decimation factor for both slides.</b> LightGlue matches descriptors <i>across</i> the two
               thumbnails. Per-slide factors would inject a scale difference that a euclidean <code>M0</code> cannot
               honestly represent.</li>
-            <li><b>Why normalise before ORB.</b> ORB's <code>fast_threshold</code> is an <i>absolute</i> intensity
-              difference, and raw uint16 counts sit ~6 orders of magnitude above it: FAST then fires on ~38% of pixels
-              instead of ~3%, and <code>corner_peaks</code> — quadratic in candidate count — turns a ~1&nbsp;min step
-              into a ~5&nbsp;h one (measured: 1.1&nbsp;s vs 319&nbsp;s on a 2048² thumbnail). It is also a
-              <b>correctness</b> fix: two cycles with different exposures under one absolute threshold yield hundreds
-              of keypoints on one slide and almost none on the other. The window is p99.9, not p99, because DAPI
-              nuclei <i>are</i> the bright minority — clipping at p99 saturates the very structure being matched.</li>
-            <li><b>Why <code>max_dim</code> is not free to raise.</b> Cost grows roughly with the <i>square</i> of the
-              pixel count: measured 2048&nbsp;→&nbsp;~13&nbsp;s, 4096&nbsp;→&nbsp;~154&nbsp;s per slide, two slides per
-              task. 8192 would be tens of minutes each.</li>
+            <li><b>Why <code>max_dim</code> is not free to raise, and why it is a harder cliff now.</b> DISK is a
+              U-Net, so its activation memory scales with thumbnail <i>area</i>, not time the way the classical corner
+              detector this replaced did: measured on the pinned stack, 3.03&nbsp;GB at 512&nbsp;px, 8.78&nbsp;GB at
+              1024&nbsp;px — <code>GB ≈ 1.1 + 7.3 × Mpx</code>. <code>reg_tiled_coarse_max_dim</code> is therefore the
+              memory knob for this stage, not just the runtime knob it used to be; a naive 4096&nbsp;px thumbnail
+              would ask ~123&nbsp;GB. <b>There is no CPU fallback front-end</b> — a torch/kornia import failure raises
+              directly, with no classical detector to fall back to on a deployment node where the pinned stack is
+              unavailable.</li>
           </ul>
 
           <div class="warnbox"><span class="wl">the load-bearing invariant</span>
@@ -802,7 +797,7 @@
     <div class="stalebox">
       <h4>◆ what changed — the single-task shape is gone</h4>
       <ul>
-        <li>A single-process <code>TILED_REGISTER</code> alternative used to sit behind a <code>reg_tiled_fanout</code>
+        <li>The old single-process tiled-register alternative used to sit behind a <code>reg_tiled_fanout</code>
           flag. It produced <b>identical pixels</b>, but held both whole slides, an all-channel float32 copy and the
           full warped output live at once — so its memory scaled with the <i>input</i> and had to be budgeted from
           file size.</li>
@@ -811,8 +806,8 @@
         <li>The single-process reference implementation still exists as
           <code>bin/utils/tiled_pipeline.register_slide</code>, but only as a test and benchmark oracle — the
           production path is the four processes above. <code>bin/tiled_register.py</code> no longer exists.</li>
-        <li>Unrelated and often confused: the old <b>distributed-VALIS</b> low-memory path (<code>REG_TILE</code>,
-          <code>REG_WARP_TILE</code>, …) was archived on 2026-07-24 under
+        <li>Unrelated and often confused: the old <b>distributed-VALIS</b> low-memory path (the old per-tile
+          register and per-tile warp processes, …) was archived on 2026-07-24 under
           <code>archive/tiled-valis-2026-07-24</code>. <code>registration_method = 'tiled'</code> is a separate, live
           backend and has nothing to do with it.</li>
       </ul>
@@ -830,9 +825,9 @@
       <thead><tr><th>property</th><th class="v">VALIS <span class="tag-def">default</span></th><th class="v">STARE tiled <span class="tag-alt">method=tiled</span></th></tr></thead>
       <tbody>
         <tr><td class="k">topology</td><td class="v"><span class="em">batch graph</span> over all a patient's slides at once</td><td class="v"><span class="em">star</span> — each moving slide → reference, independently</td></tr>
-        <tr><td class="k">step 1 · features</td><td class="v">SuperPoint + SuperGlue (learned, cross-modal)</td><td class="v">ORB + cross-check + RANSAC (classical)</td></tr>
+        <tr><td class="k">step 1 · features</td><td class="v">SuperPoint + SuperGlue (learned, cross-modal)</td><td class="v">DISK + LightGlue + RANSAC (learned)</td></tr>
         <tr><td class="k">step 1 · model</td><td class="v">rigid / affine, graph-consistent</td><td class="v">euclidean — rotation + translation (3 DOF)</td></tr>
-        <tr><td class="k">step 1 · resolution</td><td class="v">2048 px working image (<code>high</code>)</td><td class="v">4096 px shared thumbnail</td></tr>
+        <tr><td class="k">step 1 · resolution</td><td class="v">2048 px working image (<code>high</code>)</td><td class="v">2048 px shared thumbnail (<code>high</code>)</td></tr>
         <tr><td class="k">step 2 · model</td><td class="v">dense per-pixel optical-flow field + up to 2 micro passes</td><td class="v">TRE-gated control grid, bilinearly interpolated</td></tr>
         <tr><td class="k">step 2 · capture radius</td><td class="v">implicit (optical-flow pyramid)</td><td class="v"><span class="em">explicit</span> — <code>reg_tiled_halo</code>, 256 px</td></tr>
         <tr><td class="k">estimation channel</td><td class="v">channel 0 — the resolved nuclear marker</td><td class="v">resolved nuclear marker — <code>reg_tiled_nuclear_index</code></td></tr>
@@ -850,6 +845,10 @@
         <tr><td class="k">add_cycle mode</td><td class="v"><span class="em">supported</span> — new cycle → frozen prior reference</td><td class="v">rejected up front in <code>workflows/mirage.nf</code></td></tr>
       </tbody>
     </table></div>
+    <div class="callout" style="margin-top:12px"><b>Step 1 no longer differs in kind between backends</b> — both are now
+      learned matchers (SuperPoint+SuperGlue vs. DISK+LightGlue). They differ in <b>scope</b>: VALIS registers a
+      patient's whole slide series as one graph, while STARE fits each moving slide to the reference independently
+      (the star topology in the row above).</div>
     <div class="callout" style="margin-top:12px"><b>Which to pick.</b> Default to <b>VALIS</b> when accuracy across a
       whole series matters and a 300&nbsp;GB, multi-hour task is affordable — the joint graph and the learned
       cross-modal matcher are its real advantages. Pick <b>STARE</b> when the cluster cannot give one task that much
@@ -931,7 +930,7 @@
           composed in and unrecoverable, so <code>non_rigid</code> is not emitted. Each case ships an explicit
           <code>note</code>.</div>
         <div class="callout" style="margin-top:11px"><b>One process, two backends.</b>
-          <code>WARP_SEG_QC_TILED</code> was merged into <code>WARP_SEG_QC</code>; <code>container</code>,
+          The old tiled-only warp process was merged into <code>WARP_SEG_QC</code>; <code>container</code>,
           <code>stages</code>, <code>versionTools</code> and <code>flags</code> now come from
           <code>lib/WarpBackends.groovy</code>, keyed on the <code>method</code>
           <i>argument</i> — not on <code>params.registration_method</code>. That is deliberate: resolving VALIS-only
@@ -976,18 +975,22 @@
       </div>
       <div class="pcol">
         <h4>STARE tiled backend</h4>
+        <p style="margin:0 0 8px;font-size:.72rem;color:var(--ink-3)">Five knobs are <b>tier-owned</b>:
+          <code>nextflow.config</code> declares them <code>null</code>, and the value comes from
+          <code>reg_tiled_mode</code>'s row in <code>lib/RegPresets.groovy</code>. Setting one explicitly pins
+          <code>reg_tiled_mode</code> to <code>custom</code>.</p>
         <table class="pr">
-          <tr><td class="k">reg_tiled_nuclear_index</td><td class="val">null</td><td class="d">channel the transform is estimated on; null = resolve from channel metadata</td></tr>
-          <tr><td class="k">reg_tiled_coarse_max_dim</td><td class="val">4096</td><td class="d">M₀ thumbnail longest side; 0 = no decimation</td></tr>
-          <tr><td class="k">reg_tiled_tile</td><td class="val">2048</td><td class="d">tile core = mesh grid resolution (px)</td></tr>
-          <tr><td class="k">reg_tiled_halo</td><td class="val">256</td><td class="d">read halo = step-2 capture radius (px)</td></tr>
-          <tr><td class="k">reg_tiled_upsample</td><td class="val">10</td><td class="d">phase-correlation sub-pixel factor</td></tr>
-          <tr><td class="k">reg_tiled_gate_tre</td><td class="val">1.0</td><td class="d">a tile refines only above this TRE (px)</td></tr>
-          <tr><td class="k">reg_tiled_out_tile</td><td class="val">1024</td><td class="d">streaming stitch write-tile (px)</td></tr>
+          <tr><td class="k">reg_tiled_nuclear_index</td><td class="val nul">null</td><td class="d">channel the transform is estimated on; null = resolve from channel metadata</td></tr>
+          <tr><td class="k">reg_tiled_coarse_max_dim</td><td class="val nul">null</td><td class="d">M₀ thumbnail longest side (px). null → the <code>reg_tiled_mode</code> row in <code>RegPresets</code>'s STARE table (high: 2048)</td></tr>
+          <tr><td class="k">reg_tiled_tile</td><td class="val nul">null</td><td class="d">tile core = mesh grid resolution (px). null → the <code>reg_tiled_mode</code> row in <code>RegPresets</code>'s STARE table (high: 2048)</td></tr>
+          <tr><td class="k">reg_tiled_halo</td><td class="val nul">null</td><td class="d">read halo = step-2 capture radius (px). null → the <code>reg_tiled_mode</code> row in <code>RegPresets</code>'s STARE table (high: 256)</td></tr>
+          <tr><td class="k">reg_tiled_upsample</td><td class="val nul">null</td><td class="d">phase-correlation sub-pixel factor. null → the <code>reg_tiled_mode</code> row in <code>RegPresets</code>'s STARE table (high: 10)</td></tr>
+          <tr><td class="k">reg_tiled_gate_tre</td><td class="val">1.0</td><td class="d">a tile refines only above this TRE (px) — NOT tier-owned, a correctness knob</td></tr>
+          <tr><td class="k">reg_tiled_out_tile</td><td class="val nul">null</td><td class="d">streaming stitch write-tile (px). null → the <code>reg_tiled_mode</code> row in <code>RegPresets</code>'s STARE table (high: 1024)</td></tr>
         </table>
         <h4>Tuning notes</h4>
         <table class="pr">
-          <tr><td class="k">coarse slow?</td><td class="d" colspan="2"><b>Lower</b> <code>coarse_max_dim</code> — ORB cost is ~quadratic in pixel count.</td></tr>
+          <tr><td class="k">coarse slow / OOMing?</td><td class="d" colspan="2"><b>Lower</b> <code>coarse_max_dim</code> — DISK activation memory scales with thumbnail <b>area</b>, so this is the memory knob, not just the time knob.</td></tr>
           <tr><td class="k">residual ≥ halo?</td><td class="d" colspan="2"><b>Raise</b> <code>halo</code> (costs memory per tile) <i>or</i> <b>raise</b> <code>coarse_max_dim</code> (costs COARSE time).</td></tr>
           <tr><td class="k">mesh too coarse?</td><td class="d" colspan="2"><b>Lower</b> <code>tile</code> — more control points, more tasks, same memory each.</td></tr>
           <tr><td class="k">mesh is null?</td><td class="d" colspan="2">Every tile scored under <code>gate_tre</code>: the slide genuinely needed no deformation. Lower the gate only if you trust sub-pixel measurements on your tissue.</td></tr>
@@ -1010,7 +1013,7 @@
     micro passes for step 2; it runs on a Bio-Formats JVM whose heap climbs with the retry ramp, and emits a replayable
     registrar pickle. Because the micro pass composes destructively, a pre-micro checkpoint is the only way to score
     the <code>non_rigid</code> stage separately. <b>(d)</b> The <b>STARE tiled</b> backend registers each moving slide
-    independently to the reference with an ORB + RANSAC euclidean fit on a shared thumbnail (step 1), then one
+    independently to the reference with a DISK + LightGlue + RANSAC euclidean fit on a shared thumbnail (step 1), then one
     phase-correlation per tile assembled into a TRE-gated bilinear mesh (step 2), all in pure NumPy/scikit-image across
     four Nextflow processes whose peak memory is a function of parameters rather than slide size. <b>(e)</b> The two
     backends trade accuracy and cross-slide consistency against memory footprint, parallelism and transform

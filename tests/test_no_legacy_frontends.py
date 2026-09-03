@@ -90,10 +90,6 @@ ALLOW_FILES = {
     # the algorithms it surveys, and renaming them would be a lie.
     "docs/parallel_registration_design.md",
     "docs/parallel_registration_research.md",
-    # A published supplementary figure. It is now factually wrong about the method, but
-    # spec Phase 6 owns rewriting it -- half-rewriting it here would be worse than
-    # leaving it to its owner.
-    "docs/figures/registration-schematic.html",
 }
 
 

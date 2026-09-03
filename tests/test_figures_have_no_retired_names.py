@@ -97,12 +97,7 @@ RETIRED = {
 # tests/test_figures_match_the_pipeline.py's STALE_FIGURES: an entry is a debt,
 # not a permission, and `test_the_allowlist_only_shrinks` fails once an entry
 # stops matching. Do NOT add a figure here to make it pass.
-ALLOW = {
-    "registration-schematic.html": (
-        "ten ORB mentions in panel d step 1. Cleared by plan 11 Task 4, which "
-        "rewrites that panel to DISK + LightGlue."
-    ),
-}
+ALLOW = {}
 
 _COMPILED = {re.compile(p, re.I): v for p, v in RETIRED.items()}
 
