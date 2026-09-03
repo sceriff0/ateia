@@ -1,7 +1,7 @@
 # Parameters
 
-<p class="standfirst">The complete parameter surface — all 90 operator-settable parameters of the
-92 that <code>nextflow.config</code> declares (the two omitted are the nf-core
+<p class="standfirst">The complete parameter surface — all 89 operator-settable parameters of the
+91 that <code>nextflow.config</code> declares (the two omitted are the nf-core
 <code>config_profile_name</code> / <code>config_profile_description</code> identity strings, which
 a site profile sets, not a run), grouped by pipeline
 stage, each with the default that ships in <code>nextflow.config</code>. That file is the single
@@ -9,9 +9,13 @@ source of truth: <code>tests/test_no_duplicate_param_defaults.py</code> forbids 
 declaration of any default in the pipeline code it scans (<code>main.nf</code>,
 <code>modules/local/</code>, <code>conf/</code>, <code>workflows/</code>,
 <code>subworkflows/</code>, <code>lib/</code>), and <code>tests/check_param_consistency.py</code>
-holds <code>nextflow_schema.json</code> to the same defaults. This page is <em>not</em>
-machine-checked against either — update it by hand when a default changes, and read
-<code>nextflow config -flat</code> for the values a specific run actually resolved.</p>
+holds <code>nextflow_schema.json</code> to the same defaults.
+<code>tests/test_parameters_doc_matches_schema.py</code> holds this page's
+<em>parameter list</em> to <code>nextflow_schema.json</code> in both directions, so a
+parameter cannot be added or removed without this page moving; the defaults and
+descriptions below are still hand-maintained and <em>not</em> machine-checked, so
+update them by hand when a default changes, and read <code>nextflow config -flat</code>
+for the values a specific run actually resolved.</p>
 
 !!! abstract "Canonical sources"
     - **Defaults** — `nextflow.config` (`params { … }`)
