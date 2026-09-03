@@ -7,7 +7,9 @@
 FROM pytorch/pytorch:2.6.0-cuda11.8-cudnn9-runtime@sha256:2428b92ebbaeceba5572b98c18c8a94e43162bead6e88588ad54471147c58a20
 
 LABEL maintainer="MIRAGE Pipeline"
-LABEL description="InstanSeg segmentation container (PyTorch 2.5.1 + CUDA 12.4)"
+# The version in this label is the FROM's, and it has been wrong before: it said
+# "PyTorch 2.5.1 + CUDA 12.4" against a 2.6.0-cuda11.8 base -- three numbers, two wrong.
+LABEL description="InstanSeg segmentation container (PyTorch 2.6.0 + CUDA 11.8)"
 LABEL version="1.0.0"
 
 ENV PYTHONUNBUFFERED=1
