@@ -9,6 +9,7 @@ include { TILE_FOR_BASIC          } from '../../modules/local/tile_for_basic'
 include { BASICPY                 } from '../../modules/nf-core/basicpy/main'
 include { APPLY_PROFILES          } from '../../modules/local/apply_profiles'
 include { GENERATE_PREPROCESS_QC  } from '../../modules/local/generate_preprocess_qc'
+include { CHECKPOINT_WRITER       } from './checkpoint_writer'
 
 /*
 ========================================================================================
@@ -121,21 +122,11 @@ workflow PREPROCESSING {
         GENERATE_PREPROCESS_QC ( ch_preprocessed_with_meta )
     }
 
-    // Generate checkpoint CSV for restart from preprocessing step
-    // Use collectFile() for non-blocking aggregation (enables patient-level parallelism)
-    ch_checkpoint_csv = ch_preprocessed_with_meta
-        // A manifest for a step whose artifacts were not published would record
-        // paths that do not exist, and tests/checkpoint_manifest.nf.test asserts
-        // that every recorded path resolves. See Checkpoint.writesAtLevel.
-        //
-        // Filtering the SOURCE rather than wrapping the chain in an `if`: an empty
-        // channel into collectFile(seed:, storeDir:) writes no file and emits
-        // nothing at all -- verified on NXF_VER=26.04.6 rather than assumed, since
-        // a seeded collectFile writing a header-only manifest would have been
-        // exactly the dangling-manifest outcome this gate exists to prevent.
-        .filter { Checkpoint.writesAtLevel(Layout.PREPROCESSED, params.cleanup_level) }
+    // Generate checkpoint CSV for restart from preprocessing step.
+    // The row is built HERE; whether/where/how it is written is CHECKPOINT_WRITER's.
+    ch_checkpoint_rows = ch_preprocessed_with_meta
         .map { meta, image_file ->
-            Checkpoint.row(Layout.PREPROCESSED, [
+            [
                 patient_id        : meta.patient_id,
                 // RULING R17: carried forward from meta, never re-derived from
                 // preprocessed_image's basename below -- see lib/Checkpoint.groovy.
@@ -152,22 +143,11 @@ workflow PREPROCESSING {
                 is_reference      : meta.is_reference,
                 channels          : meta.channels.join('|'),
                 pixel_size        : meta.pixel_size,
-            ])
+            ]
         }
-        .collectFile(
-            name: Layout.checkpointCsvName(Layout.PREPROCESSED),
-            newLine: true,
-            sort: true,
-            // sort: true makes the manifest REPRODUCIBLE. Without it collectFile
-            // writes rows in completion order, so two runs of the same commit
-            // produced different files (found while capturing this branch's golden
-            // baseline; a rerun of the UNMODIFIED branch differed from itself). The
-            // rows begin with patient_id followed by the published path, so natural
-            // string order IS "patient id, then file" — and the `seed:` header is
-            // written first regardless of sorting.
-            storeDir: Layout.checkpointDir(params.outdir),
-            seed: Checkpoint.header(Layout.PREPROCESSED)
-        )
+
+    CHECKPOINT_WRITER(Layout.PREPROCESSED, ch_checkpoint_rows)
+    ch_checkpoint_csv = CHECKPOINT_WRITER.out.csv
 
     // Collect size logs from all processes
     ch_size_logs = Channel.empty()
