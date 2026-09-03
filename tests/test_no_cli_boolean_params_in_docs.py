@@ -40,10 +40,6 @@ SCAN = [
 # Files that quote the broken form ON PURPOSE, with the reason. Each is verified below to still
 # contain it -- a stale exemption would silently cover a real regression.
 ALLOWED = {
-    "docs/nextflow-26-bump.md": (
-        "the bump write-up; its table enumerates every site that still shows the broken form, "
-        "so it must be able to name it"
-    ),
     "tests/run_validation_tests.sh": (
         "the header comment explains why the script uses -params-file, quoting the form it "
         "replaced; the executed command uses -params-file"

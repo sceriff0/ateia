@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Seven changes alter what a run produces or what its outputs MEAN, and every one of
 them is silent from the consumer's side. The first six are collected, each with what
 changed and what to do about it, in
-[`docs/migration-2026-08-24.md`](docs/migration-2026-08-24.md); the seventh landed
+[`docs/_archive/migration-2026-08-24.md`](docs/_archive/migration-2026-08-24.md); the seventh landed
 after that doc and is detailed inline below:
 
 1. **Darkfield correction is gone** — nf-core `BASICPY` runs at

@@ -116,7 +116,7 @@ real slide. Changing either number changes an unguarded figure, so change it her
 
 `REGISTER` also carries `maxForks = Math.min(10, params.max_forks)` and its own error
 strategy — see [Retry policy](#retry-policy) and
-[Execution & concurrency](#execution--concurrency).
+[Execution & concurrency](#execution-concurrency).
 
 ### Registration — tiled / STARE
 

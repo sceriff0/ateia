@@ -66,7 +66,7 @@ owned outright by `conf/modules.config`. See `docs/basic_illumination.md`.
 
 Two backends, selected by `--registration_method`: **VALIS** (default, graph-based
 whole-slide alignment) and **STARE tiled** (JVM-free, fully parallel). STARE is **not**
-laptop-sized at its shipped tier — see the memory note under [Tiled / STARE](#tiled--stare-registration_methodtiled).
+laptop-sized at its shipped tier — see the memory note under [Tiled / STARE](#tiled-stare-registration_methodtiled).
 
 ### Common
 
@@ -286,7 +286,7 @@ the same masks, polygons, measurements and QC. Full store layout:
 | `spatialdata_include_image` | `false` | Also embed the pyramid image in the store. Off by default because `spatialdata.write()` materializes every element, so including it duplicates the largest artifact the run produces. Turn on for a self-contained, depositable object. |
 | `spatialdata_residual_join_max_px` | `15.0` | Max centroid distance (px) when joining `WARP_SEG_QC`'s per-cell registration residuals onto `cell_mask`. The QC segmentation is a separate native-image run and shares no label space with `cell_mask`, so the join is **spatial**, not by label. |
 
-## Quality control & reports { #quality-control--reports }
+## Quality control & reports
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -382,7 +382,7 @@ meaningful together. `--concurrency` moves both at once; `--max_forks` / `--queu
 override it individually for the asymmetric case. At the shipped defaults `max_forks` (5)
 is far lower, so raising `queue_size` alone has no effect — raise `max_forks` (or
 `concurrency`), or raise both. See
-[Resources → Execution & concurrency](resources.md#execution--concurrency).
+[Resources → Execution & concurrency](resources.md#execution-concurrency).
 
 !!! info "How resources scale"
     Per-process memory and time scale with `task.attempt`, bounded by the

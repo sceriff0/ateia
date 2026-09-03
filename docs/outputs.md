@@ -339,7 +339,7 @@ kept for backward compatibility with FlowPath's bare-key fast path.
     `Solidity`, `Convex Area µm²`, `Major/Minor Axis Length µm`, `Area µm²`).
 
     This changed with the 2026-08-24 merge; see the
-    [migration note](migration-2026-08-24.md#2-nan-measurements-are-omitted-not-written-as-00).
+    [CHANGELOG's Migration section](https://github.com/sceriff0/mirage/blob/main/CHANGELOG.md#migration--read-before-comparing-any-output-across-this-release).
 
 Cytoplasm is computed as `Cell − Nucleus` by subtraction, per cell. A cell with
 no nuclear overlap yields an empty Nucleus/Cytoplasm compartment, which is

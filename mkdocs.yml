@@ -15,6 +15,7 @@ copyright: >-
 exclude_docs: |
   superpowers/
   _archive/
+  perf/
   parallel_registration_design.md
   parallel_registration_research.md
 
@@ -133,8 +134,16 @@ nav:
   - Incremental cycles: add_cycle.md
   - Registration QC: registration_qc.md
   - SpatialData & FlowPath: spatialdata.md
-  - Migration (2026-08-24): migration-2026-08-24.md
   - Citation: citation.md
+  # NOTE (plan 12, 2026-09-02): the brief for this phase also specifies
+  # `- Supported formats: validation/format_validation.md` and
+  # `- Developing: developing.md` here. Neither target exists on this branch --
+  # plan 03 (docs/developing.md) and plan 07 (docs/validation/format_validation.md,
+  # itself gated on a user cluster run) have not merged. Adding either entry now
+  # would fail `mkdocs build --strict` on `nav.not_found` for a page that does not
+  # exist, which is worse than the orphan-page warning this phase exists to fix.
+  # Add both lines above `- Citation:` in the same commit that lands whichever of
+  # 03/07 lands second.
 
 # ---------------------------------------------------------------------------
 # Appearance extras
