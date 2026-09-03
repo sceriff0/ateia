@@ -680,6 +680,60 @@ jobs:
         uses: ./.github/actions/actionlint
 
   # ============================================================================
+  # Documentation build (mkdocs --strict)
+  # ============================================================================
+  # BLOCKING, IN THIS FILE, DELIBERATELY. It lived in nightly.yml from 2026-09-02
+  # until plan 12 (docs phase): a called reusable workflow's own conclusion is
+  # the worst conclusion of ANY job inside it, gate membership included or not
+  # (measured on CI run 33641966166), so a red `docs` job in a workflow with no
+  # gate aggregator could still fail nothing a caller reads. `--strict` plus the
+  # `validation:` block in `mkdocs.yml` turns three categories that default to
+  # `info` -- orphan pages, dangling anchors, dead relative links -- into a
+  # failed build; mkdocs 1.6 has no `error` level, so `warn` + `--strict` IS the
+  # mechanism (see `mkdocs.yml`'s own note). Plan 12 fixed the four warnings this
+  # job carried at landing (2 orphan pages, 3 dangling anchors, measured
+  # 2026-09-02), so it now sits in `suite-gate`'s `needs:` like every other leg.
+  docs:
+    name: Docs build (mkdocs --strict)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          # FULL HISTORY. mkdocs.yml loads mkdocs-git-revision-date-localized,
+          # which reads each page's last-commit date out of git. On the default
+          # shallow clone it falls back to the build date and logs a WARNING to
+          # do so -- and under `--strict` a warning is an abort, so a shallow
+          # checkout would fail this job for a reason that has nothing to do
+          # with the documentation.
+          fetch-depth: 0
+
+      - name: Set up Python and install the docs stack
+        # docs/requirements.txt, not a requirements/ file: this stack is
+        # documentation tooling, shares no package with any container image, and
+        # Read the Docs installs the same file. tests/test_ci_stack_pinned.py's
+        # rules are satisfied -- the install goes through `-r`, and no version
+        # string appears in this YAML.
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: '3.10'
+          requirements: 'docs/requirements.txt'
+
+      - name: Build the documentation
+        run: |
+          mkdocs build --strict --site-dir _site
+
+      - name: Upload the built site
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-site
+          path: _site/
+
+  # ============================================================================
   # Suite gate — the single result the callers depend on
   # ============================================================================
   # WITHOUT THIS JOB THE GATE WOULD BE WEAKER THAN THE ONE IT REPLACES, and the
@@ -687,7 +741,7 @@ jobs:
   #
   # A caller's `needs.test-suite.result` is the called WORKFLOW's conclusion, and
   # a GitHub Actions workflow whose jobs were all skipped concludes `success`. So
-  # if one of the five jobs above ever gained a `paths:` or an `if:` filter and
+  # if one of the six jobs above ever gained a `paths:` or an `if:` filter and
   # stopped running, the caller would read `success` and wave it through -- which
   # is precisely the "a needed job that stops running must block the merge"
   # failure both callers' aggregators were rewritten to close.
@@ -696,14 +750,14 @@ jobs:
   # explicitly and treats anything that is not a success as a failure. It is the
   # same shape ci.yml's `all-tests` and release.yml's `test` have, which is not a
   # third copy -- those two now read ONE result each (this workflow's), and this
-  # is where the five are enumerated.
+  # is where the six are enumerated.
   #
   # `needs:` must list EVERY other job in this file. A leg missing from it is
   # invisible to this gate and fully visible in the run status: the worst of both.
   # tests/test_release_workflow_graph.py asserts the list is complete.
   suite-gate:
     name: Suite gate
-    needs: [python-tests, nextflow-stub, nf-test-stub, security-tests, format-tests, ruff]
+    needs: [python-tests, nextflow-stub, nf-test-stub, security-tests, format-tests, ruff, docs]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -738,6 +792,10 @@ jobs:
           fi
           if [ "${{ needs.ruff.result }}" != "success" ]; then
             echo "::error::Ruff lint did not pass (result: ${{ needs.ruff.result }})"
+            exit 1
+          fi
+          if [ "${{ needs.docs.result }}" != "success" ]; then
+            echo "::error::The docs build did not pass (result: ${{ needs.docs.result }})"
             exit 1
           fi
           echo "Every job in the shared test suite passed."

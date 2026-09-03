@@ -730,6 +730,12 @@ BLOCKING_CHECKS = [
         "format suite (convert image's reader stack)",
         "pytest -v tests/integration/formats",
     ),
+    # Added 2026-09-02 (plan 12). The RTD site is a release artefact: a broken
+    # internal link or a page that fell out of the nav ships as a 404 on
+    # mirage-pipeline.readthedocs.io, and nothing else in this suite reads
+    # mkdocs.yml. `--strict` is the whole point of the needle -- `mkdocs build`
+    # without it exits 0 on every warning this check exists to catch.
+    ("mkdocs strict site build", "mkdocs build --strict"),
 ]
 
 
@@ -1262,14 +1268,13 @@ GATE_DISCONNECTED_JOBS: dict[tuple[str, str], str] = {}
 ADVISORY_SUITES = {
     "nf-test real suite": "--tag real",
     "nf-test integration suite": "--tag integration",
-    # Relocated from _test-suite.yml to nightly.yml on 2026-09-02 (see
-    # nightly.yml's `docs` job comment): a called reusable workflow's own
-    # conclusion is the worst conclusion of ANY job inside it regardless of gate
-    # membership, so the job had to leave _test-suite.yml entirely, not just its
-    # gate's `needs:`. Plan 12 moves it back into BLOCKING_CHECKS (and into
-    # GATE_MEMBERSHIP["_test-suite.yml"]) atomically, once the docs build is
-    # green.
-    "docs strict site build": "mkdocs build --strict",
+    # "docs strict site build" lived here from 2026-09-02 until plan 12: the
+    # `docs` job was relocated to nightly.yml because a called reusable
+    # workflow's own conclusion is the worst conclusion of ANY job inside it
+    # regardless of gate membership (CI run 33641966166). Plan 12 (2026-09-02)
+    # moved it back into `_test-suite.yml` as a blocking, gate-enumerated job now
+    # that the build is green -- see BLOCKING_CHECKS and
+    # GATE_MEMBERSHIP["_test-suite.yml"].
 }
 
 
@@ -1495,6 +1500,7 @@ GATE_MEMBERSHIP = {
         "security-tests",
         "format-tests",
         "ruff",
+        "docs",
     },
 }
 
