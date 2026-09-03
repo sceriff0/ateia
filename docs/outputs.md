@@ -193,7 +193,8 @@ results/                              # = --outdir
 │       ├── registration/             # *_seg_qc.json — WARP_SEG_QC
 │       │   │                         # *_tre.json    — TILED_SOLVE (tiled backend)
 │       │   ├── qc/                   # *_QC_RGB.{png,tif}, *_QC_RGB_fullres.tif
-│       │   │                         #   — GENERATE_REGISTRATION_QC
+│       │   │                         #   (one 2-panel before/after figure per
+│       │   │                         #   moving slide) — GENERATE_REGISTRATION_QC
 │       │   └── geojson/              # *.geojson — SEG_QC_GEOJSON (reg_qc=2)
 │       └── postprocessing/
 │           └── qc/                   # *.png — GENERATE_POSTPROCESSING_QC

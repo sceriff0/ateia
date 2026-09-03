@@ -451,6 +451,27 @@ after that doc and is detailed inline below:
 - **`expand_labels_tiled` has one owner, `bin/utils/segment_io.py`** — both
   `segment.py` and `segment_cellsam.py` import it rather than carrying their own
   copy.
+- **Registration QC is a before/after pair.** `GENERATE_REGISTRATION_QC` now
+  receives the moving slide's native, pre-registration image alongside the
+  registered one and renders two composites side by side on the reference
+  canvas: *Before* (reference + native) and *After* (reference + registered),
+  separated by a blue band. Differing dimensions are reconciled by pad-or-crop
+  at the origin, never by rescaling, so the "before" panel cannot understate the
+  error it exists to show. Published names are unchanged
+  (`*_QC_RGB.{png,tif}`, `*_QC_RGB_fullres.tif`) — the figure is twice as wide,
+  not differently named. Applies at every `reg_qc >= 1`, on both the linear path
+  and `--mode add_cycle`. `GENERATE_REGISTRATION_QC`'s input tuple grows from
+  three elements to four — `[meta, registered, native, reference]`, with `native`
+  staged under its own `native/` subdirectory — so any caller invoking the
+  process directly must now supply the native image; the two existing call sites
+  (`subworkflows/local/registration.nf`, `subworkflows/local/add_cycle.nf`) join
+  it in on `meta.id`. `bin/generate_registration_qc.py` gains `--native`;
+  omitting it renders the previous single panel, so the script stays usable by
+  hand. `GENERATE_REGISTRATION_QC`'s memory tier is now keyed on all three
+  inputs' combined size, not two. Both the fullres composite and the preview
+  TIFF now carry a stamped pixel size (ImageJ `unit=um` metadata on the former,
+  OME `PhysicalSizeX/Y` in µm on the latter via `bin/generate_registration_qc.py
+  --pixel-size-um`), so a viewer's scale bar on either output is real.
 
 ### Fixed
 - **The resource report is found where Nextflow wrote it.** `main.nf` resolved

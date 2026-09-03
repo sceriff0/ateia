@@ -18,6 +18,55 @@ segmenter** (`--seg_method`, default `instantseg`) rather than with a second, fi
     [quality control](figures/qc-schematic.html){ target=_blank }, which places it in the
     pipeline-wide QC architecture.
 
+## The `reg_qc = 1` overlay is a before/after pair
+
+Below the staged metrics sits the cheaper answer, on at every level from
+`reg_qc = 1` up: one image per moving slide showing what registration
+corrected.
+
+`GENERATE_REGISTRATION_QC` receives three images — the registered moving slide,
+its **native** (pre-registration) counterpart, and the patient's reference — and
+renders **two composites side by side**, separated by a blue band:
+
+| Panel | Green | Red |
+|---|---|---|
+| **Before** (left) | reference | the native moving slide, un-registered |
+| **After** (right) | reference | the registered moving slide |
+
+Perfect alignment is yellow (red + green); misalignment shows red/green
+fringing. **Fringing that shrinks from the left panel to the right one is the
+correction registration applied.** The single "after" composite this used to
+render showed what registration *produced* and gave a reader nothing to compare
+it against — an unregistered pair and a perfectly registered one both look
+plausible on their own.
+
+**Both panels are drawn on the reference canvas, origin-aligned, reconciling
+differing dimensions by pad-or-crop — never by rescaling.** Rescaling the native
+image onto the reference's shape would absorb the scale component of the
+misalignment into the resampling, so the "before" panel would understate the
+pre-registration error and make registration look better than it was. Padding
+and cropping preserve every pixel's original position in the reference frame,
+which is what a reader of the figure is entitled to assume they are seeing.
+(`bin/utils/qc.py:compose_on_reference_canvas`.)
+
+The published names are unchanged —
+`<outdir>/<patient>/qc/registration/<slide>_QC_RGB.png`, `_QC_RGB.tif` and
+`_QC_RGB_fullres.tif` — so `GENERATE_QC_REPORT` and anything reading the output
+tree sees one artifact per moving slide exactly as before. It is simply twice as
+wide.
+
+The native image costs nothing extra to obtain: it is the stream that entered
+registration (`REGISTER_PATIENT.out.images_multi` on the linear path,
+`PREPROCESSING.out.preprocessed` under `--mode add_cycle`), joined back in on
+`meta.id`. It does cost memory — the process now holds three full-resolution
+planes instead of two — which is why its request is tiered on the combined size
+of all three inputs (see [Resources](resources.md#registration-qc)).
+
+Under `--mode add_cycle` the pair reads the same way, with one asymmetry worth
+knowing: the reference is the **frozen prior** reference read out of
+`--prior_outdir`, so the "before" panel measures the new cycle against a frame
+established in an earlier run. That is the drift the mode exists to detect.
+
 ## Why the correspondence is fixed, and fixed *there*
 
 VALIS applies four transform states in this order:

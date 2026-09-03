@@ -72,7 +72,7 @@ default `DAPI`/`CELLTOX`) is protected and never overwritten.
 
 ## Caveat
 New-marker intensities are read through the cycle-1 mask, valid only if the new
-cycle registers accurately. Check `--reg_qc 1` (DAPI overlay) QC per patient;
+cycle registers accurately. Check the `reg_qc = 1` before/after overlay per patient;
 poor registration means the new markers for that patient are unreliable. At
 `--reg_qc 2`, the per-cell registration-residual CSVs (`SEG_QC`'s staged
 seg-overlap QC) are included in the QC report the same way they are on the
