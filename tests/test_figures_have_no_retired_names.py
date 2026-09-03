@@ -73,14 +73,23 @@ RETIRED = {
         "the reader stack is bioio/tifffile/bioio-bioformats",
         "bin/utils/ome_io.py READERS",
     ),
-    r"(?<![A-Za-z0-9])anhir(?![A-Za-z0-9])": (
-        "the ANHIR/ACROBAT landmark harness is deleted",
+    # anhir/acrobat: claiming-context only, same reasoning and same day as the
+    # landmark pattern below. The bare word forbade a figure from saying, in
+    # its own honest-limits panel, "no ANHIR or ACROBAT landmark TRE was
+    # measured" as hard as it forbade a false "evaluated on ANHIR" -- a
+    # negation and a claim are not the same risk. Narrowed to an affirmative
+    # verb/preposition ahead of the dataset name on the same line, mirroring
+    # the trigger-then-target order the landmark pattern already uses.
+    r"(?:measured\s+on|evaluated\s+on|validated\s+against|scored\s+on|"
+    r"benchmarked?\s+on|results\s+on)[^<\n]{0,25}(?:anhir|acrobat)": (
+        "the ANHIR/ACROBAT landmark harness is deleted -- no figure may claim "
+        "its public correspondences back a measured, evaluated, validated, "
+        "scored or benchmarked accuracy result",
         "benchmarks/registration_eval/ exists on no branch; benchmarks/README.md "
-        "section B is its removal record",
-    ),
-    r"(?<![A-Za-z0-9])acrobat(?![A-Za-z0-9])": (
-        "as anhir -- except as DISK+LightGlue provenance, which no figure writes",
-        "same",
+        "section B (on the benchmarking branch) is its removal record. Acrobat's "
+        "one theoretically legitimate bare mention -- DISK+LightGlue provenance "
+        "-- is still not written by any figure, so nothing is lost by narrowing "
+        "this the same way as anhir.",
     ),
     r"(?:public|external|ANHIR|ACROBAT)[^<\n]{0,25}landmark": (
         "the ANHIR/ACROBAT landmark harness is deleted -- no figure may claim an "
