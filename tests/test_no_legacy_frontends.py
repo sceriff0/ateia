@@ -43,6 +43,13 @@ ALLOW_FILES = {
     # once. This guard covers stray TEXT, that one covers live ATTRIBUTES; the exemption
     # is what keeps them from cancelling each other out.
     "tests/test_coarse_frontend.py",
+    # Same class of reason again: this is the negative-rule guard that forbids ORB,
+    # SIFT, Fourier-Mellin and reg_tiled_frontend from appearing in docs/figures/*.html
+    # (plan 11 Task 2). Its RETIRED dict and module docstring name all four terms
+    # verbatim as the very things it forbids, and its drill in the same task's brief
+    # temporarily writes "ORB" into a figure to prove the guard fires -- so this file
+    # legitimately contains the tokens this guard exists to keep out of prose.
+    "tests/test_figures_have_no_retired_names.py",
     # THREE ENTRIES WERE DELETED FROM HERE ON 2026-09-01 (CI redesign, Phase 7):
     # `.github/workflows/ci.yml`, `.github/workflows/release.yml` and
     # `tests/test_ci_stack_pinned.py`. Their stated reason was that they quote the
