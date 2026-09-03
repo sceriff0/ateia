@@ -695,7 +695,11 @@ NOT_SWEPT = {
         "a MEASUREMENT setting, and not a comparable one: the composite QualityScore "
         "shifts with the binning factor, so sweeping it would produce scores that "
         "cannot be read against each other. Held fixed across a cohort by design."),
-    "segeval_tag": "container tag — an asset selector, not a cost knob",
+    # segeval_tag was excused here as "container tag -- an asset selector, not a cost
+    # knob". The param is GONE: v1.0.0's container work (release plan 06) tags the
+    # segeval image with manifest.version instead of a standalone param, so there is
+    # nothing left to excuse. The other direction of this guard would have demanded
+    # its return if the param had survived.
 
     # --- developer / trace plumbing. ---
     "debug_channels": "debug output only",

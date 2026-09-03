@@ -103,8 +103,9 @@ def _resize(src_2d: np.ndarray, target_hw: tuple[int, int]) -> np.ndarray:
 
 
 # Formats tifffile cannot open, which the PIPELINE reads through bioio
-# (bin/convert_image.py's BIOIO_NATIVE_FORMATS). Kept in step with that list: a
-# source the pipeline accepts should not be one the benchmark's matrix generator
+# (bin/utils/ome_io.py's _SUFFIX_TO_READER, the pipeline's one dispatch table;
+# tests/test_generate_matrix.py holds this set to a subset of its bioio routes).
+# A source the pipeline accepts should not be one the benchmark's matrix generator
 # rejects, and .nd2 is the common case here -- tifffile.imread on an ND2 fails
 # with a bare "cannot determine format", which reads like a corrupt file.
 _BIOIO_ONLY_SUFFIXES = {".nd2", ".czi", ".lif"}

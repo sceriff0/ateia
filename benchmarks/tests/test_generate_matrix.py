@@ -273,26 +273,41 @@ def test_run_matrix_default_unpaired_manifest_columns_unchanged(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_bioio_only_suffixes_are_a_subset_of_the_pipeline_format_table():
-    """bin/convert_image.py is the authority on what the pipeline can read.
+    """bin/utils/ome_io.py is the authority on what the pipeline can read.
 
-    If it grows a vendor format, the benchmark's matrix generator must not be the
-    thing that rejects it — a source you can run the pipeline on should not be one
-    you cannot benchmark against.
+    bin/convert_image.py's old BIOIO_NATIVE_FORMATS set is gone: v1.0.0's plan 05
+    moved format dispatch to ome_io.py's `_SUFFIX_TO_READER` (suffix -> reader name;
+    readers are "bioio", "bioio-bioformats", "tifffile", "hdf5" -- see `READERS`).
+    If the pipeline grows a vendor format there, the benchmark's matrix generator
+    must not be the thing that rejects it — a source you can run the pipeline on
+    should not be one you cannot benchmark against.
+
+    Imports the table rather than regexing the file: a regex on file text is
+    exactly what went stale here when the dispatch table moved modules.
     """
-    import re
+    import sys
     from pathlib import Path
 
     from benchmarks.generate_matrix import _BIOIO_ONLY_SUFFIXES
 
     repo = Path(__file__).resolve().parents[2]
-    txt = (repo / "bin" / "convert_image.py").read_text()
-    m = re.search(r"BIOIO_NATIVE_FORMATS\s*=\s*\{([^}]*)\}", txt)
-    assert m, "BIOIO_NATIVE_FORMATS not found in bin/convert_image.py"
-    pipeline = set(re.findall(r'"([^"]+)"', m.group(1)))
-    missing = sorted(_BIOIO_ONLY_SUFFIXES - pipeline)
+    # benchmarks/tests/ has no conftest putting bin/ on sys.path the way the
+    # pipeline's own tests/conftest.py:68-70 does -- ome_io.py's flat sibling
+    # imports (`from pixel_size import ...`) need bin/utils itself on sys.path.
+    bin_utils = str(repo / "bin" / "utils")
+    if bin_utils not in sys.path:
+        sys.path.insert(0, bin_utils)
+    import ome_io
+
+    pipeline_bioio_suffixes = {
+        suffix for suffix, reader in ome_io._SUFFIX_TO_READER.items()
+        if reader in ("bioio", "bioio-bioformats")
+    }
+    missing = sorted(_BIOIO_ONLY_SUFFIXES - pipeline_bioio_suffixes)
     assert not missing, (
-        f"generate_matrix routes {missing} to bioio but the pipeline does not list "
-        f"them in BIOIO_NATIVE_FORMATS: {sorted(pipeline)}")
+        f"generate_matrix routes {missing} to bioio but ome_io._SUFFIX_TO_READER "
+        f"does not route them through bioio/bioio-bioformats: "
+        f"{sorted(pipeline_bioio_suffixes)}")
 
 
 def test_nd2_without_bioio_fails_with_an_actionable_message(tmp_path, monkeypatch):
