@@ -7,7 +7,7 @@
 # "0.5-dev-spatialdata" — and it is exactly why these are a DATED, RE-RESOLVABLE lock
 # rather than a guess. Bumping is one command plus a rebuild:
 #
-#     docker build -f containers/spatialdata/Dockerfile -t mirage-spatialdata:lock .
+#     docker build --platform linux/amd64 -f containers/spatialdata/Dockerfile -t mirage-spatialdata:lock .
 #     docker run --rm mirage-spatialdata:lock python -m pip freeze | grep -iE \
 #       '^(spatialdata|zarr|ome-zarr|anndata|geopandas|shapely|pyarrow|dask|tifffile|imagecodecs|scipy|pandas|numpy)=='
 #
