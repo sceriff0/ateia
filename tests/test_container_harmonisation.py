@@ -608,6 +608,15 @@ def test_ome_io_reader_dispatch_is_unreachable_from_the_writer_only_scripts():
         "tile_for_basic.py",
         "utils/qc.py",
         "utils/image_utils.py",
+        # The four ENTRY scripts the quantify/regqc exemption comments above actually name
+        # as the reason (they reach ome_io only transitively, through utils/image_utils.py
+        # or utils/qc.py) -- checked directly rather than assumed, so a dispatch call added
+        # straight to one of these would be caught here too, not just in the module it
+        # currently reaches ome_io through.
+        "quantify.py",
+        "export_geojson.py",
+        "extract_cell_properties.py",
+        "generate_registration_qc.py",
     )
     callers = []
     for rel in writer_only_scripts:

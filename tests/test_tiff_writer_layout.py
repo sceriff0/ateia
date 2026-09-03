@@ -141,6 +141,7 @@ def _count_imwrite_tile_kwarg_call_sites(path: Path, tile_name: str) -> int:
             if (
                 kw.arg == "tile"
                 and isinstance(kw.value, ast.Tuple)
+                and len(kw.value.elts) == 2
                 and all(
                     isinstance(elt, ast.Name) and elt.id == tile_name
                     for elt in kw.value.elts

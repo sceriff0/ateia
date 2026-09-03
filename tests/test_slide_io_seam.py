@@ -36,12 +36,29 @@ The one rule asserted as a rule, rather than merely recorded, is the multi-chann
 ``photometric="minisblack"`` precondition -- see below.
 """
 
+import ast
+import importlib
 import re
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
+
+# CLAUDE.md's "Verification reality" item 7: a POSITIVE text-matching guard ("does this
+# file still write pixels?") is satisfied by a `write_tiff(`/`tifffile.imwrite(` sitting
+# in a comment, keeping a dead PIXEL_WRITERS entry alive. `ci_actions.strip_line_comment`
+# is the one quote-aware `#`-stripper this repo shares for exactly that, rather than a
+# private `split("#")` that would truncate a quoted `#` (e.g. inside a path or f-string).
+# `tests/test_layout.py`'s own stripper (the nfmodel helper `strip_comments_and_strings`)
+# is Groovy/Nextflow-shaped (`//` and `/* */`) and wrong for this file's Python `#` comments.
+ci_actions = importlib.import_module("ci_actions")
+
+
+def _strip_comments(text: str) -> str:
+    """`text` with every `#` line/trailing comment removed, quote-aware."""
+    return "\n".join(ci_actions.strip_line_comment(line) for line in text.splitlines())
+
 
 # file -> (number of pixel-writing call sites, what it writes)
 #
@@ -111,19 +128,51 @@ DELEGATED_MULTI_CHANNEL_WRITERS = {
 #: exactly one file, and the other twelve writers call one of ome_io's three entry
 #: points. Both halves are matched here so that the INVENTORY -- which file writes what,
 #: and how many times -- survives the seam rather than collapsing to a single row.
-_WRITE_CALL = re.compile(
-    r"tifffile\.imwrite\(|TiffWriter\(|write_tiff\(|write_ome_tiff\(|ome_tiff_writer\("
-)
+#:
+#: `TiffWriter(` and the ome_io entry points are receiver-agnostic substrings on purpose
+#: -- they never required a `tifffile.` prefix. `imwrite(` alone would be too loose (it
+#: would sweep up cv2.imwrite and any other `.imwrite` method), so the ALIAS a file's own
+#: `import tifffile [as X]` binds is resolved per file with `_tifffile_module_aliases`
+#: below and substituted in -- not a hardcoded `tifffile.` or `tf.` -- so
+#: `import tifffile as tf; tf.imwrite(...)` is counted the same as
+#: `tifffile.imwrite(...)`. Missed until a reviewer's probe file proved the untampered
+#: `tifffile\.imwrite\(` alternative let an aliased call through uncounted.
+_WRITE_CALL_STATIC = r"TiffWriter\(|write_tiff\(|write_ome_tiff\(|ome_tiff_writer\("
+
+
+def _tifffile_module_aliases(path):
+    """Names bound to the tifffile module in `path`: always "tifffile" itself, plus
+    whatever `import tifffile as X` adds. AST, not a hardcoded alias, because the point
+    is to catch whichever name a file actually chose."""
+    try:
+        tree = ast.parse(path.read_text())
+    except SyntaxError:
+        return {"tifffile"}
+    aliases = {"tifffile"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "tifffile":
+                    aliases.add(alias.asname or alias.name)
+    return aliases
+
+
+def _write_call_pattern(path):
+    """The _WRITE_CALL alternation, widened with this file's OWN tifffile module
+    alias(es) so an aliased `X.imwrite(...)` counts the same as `tifffile.imwrite(...)`."""
+    alias_alt = "|".join(re.escape(a) for a in sorted(_tifffile_module_aliases(path)))
+    return re.compile(rf"(?:{alias_alt})\.imwrite\(|{_WRITE_CALL_STATIC}")
 
 
 def _writer_sites(rel):
-    return len(_WRITE_CALL.findall((REPO / rel).read_text()))
+    path = REPO / rel
+    return len(_write_call_pattern(path).findall(_strip_comments(path.read_text())))
 
 
 def _all_writer_files():
     found = {}
     for path in sorted((REPO / "bin").rglob("*.py")):
-        n = len(_WRITE_CALL.findall(path.read_text()))
+        n = len(_write_call_pattern(path).findall(_strip_comments(path.read_text())))
         if n:
             found[path.relative_to(REPO).as_posix()] = n
     return found
@@ -300,8 +349,6 @@ TILE_FED_GENERATORS = {
 
 def _tiled_writes_with_a_generator():
     """(file, lineno, callee) for every write that sets tile= and is fed a call."""
-    import ast
-
     out = []
     for rel in sorted(set(PIXEL_WRITERS)):
         path = REPO / rel
