@@ -113,6 +113,18 @@ nextflow_process {
         tag "real"
         tag "slow"
 
+        // Segments P001_seg_nuclei.ome.tiff, NOT the P001_ref.ome.tiff the rest of
+        // this file uses. P001_ref's DAPI channel is 40 gaussian blobs of radius
+        // 6-13 packed into 128x128 and merged with np.maximum: measured on the
+        // generated file, 37.7% of the frame is foreground and it forms exactly ONE
+        // connected component. There are no separate nuclei in it to find, so
+        // StarDist's 2D_versatile_fluo returned nothing and this case got a 145-byte
+        // (all-zero) mask on nightly 33633986188. That density is deliberate -- it is
+        // what gives VALIS the shared texture the REGISTER cases need -- so
+        // segmentation got its own image instead (generate_complete_testdata.py
+        // section 10: 45 nuclei, 10-18 px across, none touching, asserted at
+        // generation time).
+
         when {
             params {
                 segmentation_model     = "2D_versatile_fluo"
@@ -126,7 +138,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_seg_nuclei.ome.tiff', checkIfExists: true),
                     SegBackends.ctxParams(params)
                 ]
                 """
@@ -406,9 +418,25 @@ nextflow_process {
         tag "slow"
         tag "regression"
 
+        // Segments P001_seg_nuclei.ome.tiff, NOT the P001_ref.ome.tiff the rest of
+        // this file uses. P001_ref's DAPI channel is 40 gaussian blobs of radius
+        // 6-13 packed into 128x128 and merged with np.maximum: measured on the
+        // generated file, 37.7% of the frame is foreground and it forms exactly ONE
+        // connected component. There are no separate nuclei in it to find, so
+        // StarDist's 2D_versatile_fluo returned nothing and this case got a 145-byte
+        // (all-zero) mask on nightly 33633986188. That density is deliberate -- it is
+        // what gives VALIS the shared texture the REGISTER cases need -- so
+        // segmentation got its own image instead (generate_complete_testdata.py
+        // section 10: 45 nuclei, 10-18 px across, none touching, asserted at
+        // generation time).
+        //
+        // `seg_model` was set here and is not a parameter this pipeline has -- the
+        // model name comes from `segmentation_model`, which conf/test.config already
+        // pins to the same built-in. The line selected nothing; it is spelled
+        // correctly now so the case says what it runs on.
         when {
             params {
-                seg_model = "2D_versatile_fluo"
+                segmentation_model = "2D_versatile_fluo"
                 seg_gpu = false
                 seg_n_tiles_y = 1
                 seg_n_tiles_x = 1
@@ -420,7 +448,7 @@ nextflow_process {
                         patient_id: 'P001',
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
-                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_seg_nuclei.ome.tiff', checkIfExists: true),
                     SegBackends.ctxParams(params)
                 ]
                 """

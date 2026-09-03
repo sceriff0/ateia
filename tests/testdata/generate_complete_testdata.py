@@ -1190,6 +1190,141 @@ with open(OUT_DIR / "shipped_defaults_input.csv", "w") as f:
     f.write(f"P900,{TESTDATA_ABS}/P900_mov_scaled.ome.tiff,false,DAPI|CD3|CD8\n")
 print("  Created shipped_defaults_input.csv (pixel_size='auto' happy path)")
 
+
+def _label_connected(mask):
+    """Number the 4-connected True regions of a 2-D boolean mask.
+
+    A tiny flood fill rather than `scipy.ndimage.label`: this generator's
+    dependency set is numpy + tifffile (requirements/testdata.txt), and it has to
+    run in CI's generate-testdata action without pulling scipy in for one call.
+    Returns (labels, count).
+    """
+    labels = np.zeros(mask.shape, dtype=np.int32)
+    count = 0
+    for start in zip(*np.nonzero(mask)):
+        if labels[start]:
+            continue
+        count += 1
+        stack = [start]
+        labels[start] = count
+        while stack:
+            y, x = stack.pop()
+            for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+                if (
+                    0 <= ny < mask.shape[0]
+                    and 0 <= nx < mask.shape[1]
+                    and mask[ny, nx]
+                    and not labels[ny, nx]
+                ):
+                    labels[ny, nx] = count
+                    stack.append((ny, nx))
+    return labels, count
+
+
+# ======================================================================
+# 10. SEGMENTATION fixture -- separated, StarDist-shaped nuclei
+# ======================================================================
+# Why a SECOND image instead of segmenting P001_ref.ome.tiff like everything
+# else: P001_ref's anatomy is 40 blobs of radius 6-13 packed into 128x128, and
+# `_render_channel` merges them with np.maximum. Measured on the generated file:
+#
+#     foreground (DAPI > 1000)              37.7 % of the frame
+#     connected components in that mask     1
+#     largest component / total foreground  1.00
+#
+# There are no separate nuclei in it to find. StarDist's `2D_versatile_fluo`
+# fits a star-convex polygon per object and then runs NMS; handed one amorphous
+# 6169-pixel region it returns nothing, which is exactly what nightly run
+# 33633986188 recorded -- a 145-byte (all-zero) cell mask and a 147-byte nuclei
+# mask, family 7 (tests 503bcf40 and 7d267e97).
+#
+# That density is not a defect in P001_ref: it is what makes it a good
+# REGISTRATION fixture. VALIS needs dense shared texture across the reference
+# and the shifted moving slides to recover a transform, and the file's own
+# docstring says so ("Without a shared structure ... VALIS legitimately fails").
+# Thinning it to satisfy StarDist would trade a green SEGMENT case for a
+# possibly-red REGISTER one. So segmentation gets its own image, and nothing
+# else in the suite changes.
+#
+# The contract this fixture has to meet is the one P001_ref fails: N nuclei must
+# come out as N connected components, none touching. Enforced below by rejection
+# sampling on centre distance, and ASSERTED after writing rather than assumed --
+# a fixture that silently regained a merged blob would put family 7 straight
+# back without any test noticing.
+print("\n10. Creating the segmentation fixture (separated nuclei)...")
+
+# Its own stream, like _keepset_rng / _prior_rng / _quant_rng above: drawing from
+# _img_rng here would shift every later draw and rewrite fixtures this section
+# has nothing to do with.
+_seg_rng = np.random.default_rng(47)
+
+SEG_FIXTURE_SIZE = (256, 256)
+SEG_FIXTURE_NUCLEI = 45
+# 5-9 px radius => 10-18 px diameter, inside the ~10-40 px range 2D_versatile_fluo
+# was trained on (DSB2018). SEG_FIXTURE_MIN_GAP is the clearance between the two
+# circles' EDGES, so neighbouring nuclei cannot merge under np.maximum.
+SEG_FIXTURE_RADIUS = (5, 10)
+SEG_FIXTURE_MIN_GAP = 6
+
+
+def make_separated_nuclei(size, n_nuclei, rng, margin=14):
+    """Place `n_nuclei` non-touching round nuclei by rejection sampling.
+
+    Returns the same (cy, cx, radius, intensity) tuples `_render_channel` takes,
+    so the rendering path is shared with every other image this script writes --
+    only the PLACEMENT differs. Raises rather than silently returning fewer
+    nuclei: a short fixture would weaken the tests that read it without saying so.
+    """
+    placed = []
+    attempts = 0
+    while len(placed) < n_nuclei:
+        attempts += 1
+        if attempts > 20000:
+            raise RuntimeError(
+                f"could not place {n_nuclei} separated nuclei in {size} after "
+                f"{attempts} attempts -- lower SEG_FIXTURE_NUCLEI or the radius"
+            )
+        radius = int(rng.integers(*SEG_FIXTURE_RADIUS))
+        cy = int(rng.integers(margin, size[0] - margin))
+        cx = int(rng.integers(margin, size[1] - margin))
+        if any(
+            (cy - py) ** 2 + (cx - px) ** 2 < (radius + pr + SEG_FIXTURE_MIN_GAP) ** 2
+            for py, px, pr, _ in placed
+        ):
+            continue
+        placed.append((cy, cx, radius, int(rng.integers(8000, 15000))))
+    return placed
+
+
+seg_anatomy = make_separated_nuclei(SEG_FIXTURE_SIZE, SEG_FIXTURE_NUCLEI, _seg_rng)
+create_multichannel_image(
+    OUT_DIR / "P001_seg_nuclei.ome.tiff",
+    seg_anatomy,
+    size=SEG_FIXTURE_SIZE,
+    channel_names=["DAPI", "PANCK", "SMA"],
+    shift=(0, 0),
+    rng=_seg_rng,
+)
+
+# The assertion the whole section exists for. Re-read from disk (not from the
+# array in memory) so it covers the write path too, and use the same
+# `DAPI > 1000` threshold the measurement above quotes for P001_ref, so the two
+# numbers are comparable.
+_seg_written = tifffile.imread(OUT_DIR / "P001_seg_nuclei.ome.tiff")[0]
+_seg_fg = _seg_written > 1000
+_seg_labels, _seg_n = _label_connected(_seg_fg)
+if _seg_n != SEG_FIXTURE_NUCLEI:
+    raise AssertionError(
+        f"P001_seg_nuclei.ome.tiff has {_seg_n} connected foreground components "
+        f"but {SEG_FIXTURE_NUCLEI} nuclei were placed -- some merged, which is the "
+        f"exact property that made P001_ref.ome.tiff unsegmentable"
+    )
+print(
+    f"  Created P001_seg_nuclei.ome.tiff - {_seg_n} separate nuclei, "
+    f"foreground {_seg_fg.mean():.1%} of the frame"
+)
+
+
 print("\n" + "=" * 70)
 print("All test data generation complete!")
 print("=" * 70)

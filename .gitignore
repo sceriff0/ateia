@@ -180,6 +180,10 @@ tests/testdata/prior_run/
 tests/testdata/new_cycle.csv
 # Shipped-defaults smoke fixture -- the one image pair with a real OME
 # PhysicalSizeX/Y, and the samplesheet naming it (see generate_complete_testdata.py).
+# The SEGMENTATION fixture: separated, StarDist-shaped nuclei. Separate from
+# P001_ref.ome.tiff, whose 40 merged blobs form one connected component and are
+# unsegmentable by design -- see generate_complete_testdata.py section 10.
+tests/testdata/P001_seg_nuclei.ome.tiff
 tests/testdata/P900_ref_scaled.ome.tiff
 tests/testdata/P900_mov_scaled.ome.tiff
 tests/testdata/shipped_defaults_input.csv
