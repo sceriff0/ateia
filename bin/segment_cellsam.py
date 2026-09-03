@@ -21,12 +21,10 @@ Drop-in I/O contract with ``segment.py`` and ``segment_instantseg.py``:
 - emits ``{prefix}.SEGMENT.size.csv`` (input-size trace row) -- written by
   the module
 
-DAPI extraction is shared with the StarDist backend via ``bin/utils/segment_io.py``,
-a module with no ML dependencies of its own -- importing it here does NOT pull in
-``segment.py``'s ``stardist``/``tensorflow``, which stay absent from the CellSAM
-container. Tiled label expansion (``expand_labels_tiled``) is still *replicated*
-below rather than imported from ``segment.py``, for the same isolation reason:
-``segment.py`` itself imports ``stardist``/``tensorflow`` at top level.
+DAPI extraction AND tiled label expansion are both shared with the StarDist backend
+via ``bin/utils/segment_io.py``, a module with no ML dependencies of its own --
+importing it here does NOT pull in ``segment.py``'s ``stardist``/``tensorflow``,
+which stay absent from the CellSAM container.
 """
 
 from __future__ import annotations
@@ -41,14 +39,12 @@ from typing import Tuple
 # Add parent directory to path to import lib modules
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
-import dask.array as da
 import numpy as np
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
 from numpy.typing import NDArray
 from ome_io import write_tiff
-from segment_io import extract_dapi_channel
-from skimage import segmentation
+from segment_io import expand_labels_tiled, extract_dapi_channel
 
 logger = get_logger(__name__)
 
@@ -59,52 +55,6 @@ logger = get_logger(__name__)
 #: own read pattern (many small windowed per-cell/per-region reads, not whole-plane decodes)
 #: -- see docs/perf/2026-08-26-rss.md's tiled-vs-striped table.
 MASK_TIFF_TILE = 1024
-
-
-def expand_labels_tiled(
-    label_image: NDArray,
-    distance: int = 1,
-    tile_size: int = 1024,
-) -> NDArray:
-    """Parallel tiled label expansion using Dask.
-
-    Identical to ``segment.py:expand_labels_tiled``: uses ``dask.array.map_overlap``
-    so peak memory scales with the tile rather than the whole image, while
-    producing the same result as a full-image ``expand_labels``.
-
-    Parameters
-    ----------
-    label_image : NDArray, shape (Y, X)
-        Label image with background=0 and labels>=1.
-    distance
-        Distance (pixels) to expand labels.
-    tile_size
-        Tile side length for chunked processing.
-
-    Returns
-    -------
-    NDArray
-        Expanded label image, same shape as input.
-    """
-    overlap = distance + 1
-
-    if tile_size <= 2 * overlap:
-        return segmentation.expand_labels(label_image, distance=distance)
-
-    dask_labels = da.from_array(label_image, chunks=tile_size)
-
-    def _expand_tile(tile: NDArray) -> NDArray:
-        return segmentation.expand_labels(tile, distance=distance).astype(np.uint32)
-
-    expanded = da.map_overlap(
-        _expand_tile,
-        dask_labels,
-        depth=overlap,
-        boundary="none",
-        dtype=np.uint32,
-    )
-
-    return expanded.compute()
 
 
 def _build_cellsam_input(dapi_image: NDArray) -> NDArray:

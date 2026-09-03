@@ -41,7 +41,7 @@ process CONVERT_IMAGE {
         --nuclear-markers ${nuclear_markers} \\
         ${args}
 
-    ${ProcessEnvelope.versions(task.process, ['tifffile', 'aicsimageio', 'h5py'], task.container)}
+    ${ProcessEnvelope.versions(task.process, ['tifffile', 'bioio', 'h5py'], task.container)}
     """
 
     stub:
@@ -52,6 +52,6 @@ process CONVERT_IMAGE {
     echo "${channels}" > ${prefix}_channels.txt
     ${ProcessEnvelope.sizeLogStub(task.process, meta.patient_id, "${meta.patient_id}_${image_file.simpleName}.CONVERT_IMAGE.size.csv")}
 
-    ${ProcessEnvelope.versionsStub(task.process, ['tifffile', 'aicsimageio', 'h5py'], task.container)}
+    ${ProcessEnvelope.versionsStub(task.process, ['tifffile', 'bioio', 'h5py'], task.container)}
     """
 }

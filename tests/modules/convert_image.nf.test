@@ -111,7 +111,7 @@ nextflow_process {
         }
     }
 
-    test("Should emit versions.yml with tifffile/aicsimageio - stub") {
+    test("Should emit versions.yml with tifffile/bioio - stub") {
 
         tag "stub"
         options "-stub"

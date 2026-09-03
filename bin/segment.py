@@ -22,15 +22,13 @@ sys.path.insert(0, str(Path(__file__).parent / "utils"))
 
 from typing import Optional, Tuple
 
-import dask.array as da
 import numpy as np
 from csbdeep.utils import normalize
 from image_utils import ensure_dir
 from logger import configure_logging, get_logger
 from numpy.typing import NDArray
 from ome_io import write_tiff
-from segment_io import extract_dapi_channel
-from skimage import segmentation
+from segment_io import expand_labels_tiled, extract_dapi_channel
 from stardist.models import StarDist2D
 
 logger = get_logger(__name__)
@@ -155,52 +153,6 @@ def load_stardist_model(
     logger.info("  ✓ Model loaded successfully")
 
     return model
-
-
-def expand_labels_tiled(
-    label_image: NDArray, distance: int = 1, tile_size: int = 1024
-) -> NDArray:
-    """
-    Parallel tiled expansion using Dask.
-
-    Uses dask.array.map_overlap to process tiles in parallel while
-    handling boundary overlaps correctly. Produces identical results
-    to calling expand_labels on the full image.
-
-    Parameters
-    ----------
-    label_image : ndarray, shape (Y, X)
-        Label image with background=0 and labels>=1.
-    distance : int, optional
-        Distance in pixels to expand labels. Default is 1.
-    tile_size : int, optional
-        Size of tiles for processing. Default is 1024.
-
-    Returns
-    -------
-    ndarray
-        Expanded label image with same shape as input.
-    """
-    # Overlap must be >= distance to ensure correct boundary handling
-    overlap = distance + 1
-
-    if tile_size <= 2 * overlap:
-        # Tile too small for this distance, fall back to full image
-        return segmentation.expand_labels(label_image, distance=distance)
-
-    # Convert to dask array with tile_size chunks
-    dask_labels = da.from_array(label_image, chunks=tile_size)
-
-    # Define the expansion function for each tile
-    def _expand_tile(tile: NDArray) -> NDArray:
-        return segmentation.expand_labels(tile, distance=distance).astype(np.uint32)
-
-    # Process tiles in parallel with overlap handling
-    expanded = da.map_overlap(
-        _expand_tile, dask_labels, depth=overlap, boundary="none", dtype=np.uint32
-    )
-
-    return expanded.compute()
 
 
 def segment_nuclei(

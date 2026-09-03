@@ -1,5 +1,5 @@
 {
-    "Should emit versions.yml with tifffile/aicsimageio - stub": {
+    "Should emit versions.yml with tifffile/bioio - stub": {
         "content": [
             [
                 "versions.yml:md5,6cb3955b628812701e088df552c90c8f"

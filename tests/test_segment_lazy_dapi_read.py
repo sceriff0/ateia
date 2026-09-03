@@ -43,6 +43,7 @@ the import happens to succeed
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -454,9 +455,13 @@ def test_segment_py_delegates_to_segment_io_and_drops_memmap():
     assert "image_memmap = tif.asarray(out=" not in src, (
         "bin/segment.py still calls asarray(out='memmap') directly"
     )
-    assert "from segment_io import extract_dapi_channel" in src, (
-        "bin/segment.py no longer delegates to segment_io.extract_dapi_channel"
-    )
+    # A single `from segment_io import extract_dapi_channel` line, OR that name
+    # sharing an import statement with a sibling (e.g. `expand_labels_tiled`) once
+    # ruff's isort rule merges same-module imports onto one line -- either way,
+    # the import must come from segment_io, not a re-implementation.
+    assert re.search(
+        r"^from segment_io import .*\bextract_dapi_channel\b", src, re.MULTILINE
+    ), "bin/segment.py no longer delegates to segment_io.extract_dapi_channel"
 
 
 @pytest.mark.skipif(
