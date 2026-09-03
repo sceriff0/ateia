@@ -71,4 +71,11 @@ opencv-python-headless
 # below 0.12, the last line that works against the constrained zarr 2.18.3. The right fix
 # is a separate job running those two test files inside bolt3x/mirage-spatialdata; until
 # then this line is the honest record of the gap.
+#
+# The SAME gap has a second face: requirements/spatialdata.txt was locked to exact pins on
+# 2026-09-02 (ruling R6) and resolved on CPython 3.12, which no CI leg runs. Adding 3.12
+# to _test-suite.yml's python-tests matrix would NOT close it — that job installs this
+# file, i.e. zarr 2.18.3 and the anndata cap below, so it would exercise a combination no
+# image ships while still never importing spatialdata. One job, running these two test
+# files inside bolt3x/mirage-spatialdata, closes both.
 anndata<0.12
