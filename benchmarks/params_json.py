@@ -30,6 +30,7 @@ Usage::
 
     python3 -m benchmarks.params_json --out run_params.json reg_qc=1 memory_mode=high
 """
+
 from __future__ import annotations
 
 import argparse

@@ -4,6 +4,7 @@ Lifted and consolidated from notebooks/resource_regression.ipynb +
 notebooks/resources.ipynb (parse_to_gb, parse_duration), with millisecond
 handling harmonised from notebooks/sweep_analysis.ipynb.
 """
+
 from __future__ import annotations
 
 import re
@@ -42,7 +43,7 @@ def parse_duration(val) -> float:
     ms = re.search(r"([\d.]+)\s*ms", s)
     if ms:
         total += float(ms.group(1)) / 1000.0
-        s = s[: ms.start()] + s[ms.end():]
+        s = s[: ms.start()] + s[ms.end() :]
         matched = True
     for value, unit in re.findall(r"([\d.]+)\s*([hms])", s):
         matched = True

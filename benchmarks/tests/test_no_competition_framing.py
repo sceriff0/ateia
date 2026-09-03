@@ -71,9 +71,12 @@ def _tracked():
     out = subprocess.run(
         ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
     ).stdout.split()
-    assert len(out) > 100, f"git ls-files returned only {len(out)} paths -- scope is wrong"
+    assert len(out) > 100, (
+        f"git ls-files returned only {len(out)} paths -- scope is wrong"
+    )
     keep = [
-        r for r in out
+        r
+        for r in out
         if r not in ALLOW_FILES
         and not r.startswith(EXCLUDE_PREFIXES)
         and Path(r).suffix not in {".pyc", ".png", ".tif", ".tiff"}

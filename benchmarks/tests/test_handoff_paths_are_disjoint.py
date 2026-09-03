@@ -24,6 +24,7 @@ could hold either experiment's tables, so that fallback is the collision's last
 surviving arm. Failing loudly and naming the target that builds the tables is
 strictly better than copying an ambiguous directory into the consumer.
 """
+
 import re
 import subprocess
 from pathlib import Path
@@ -40,8 +41,7 @@ def _outdirs(rel):
     near-miss that reads like a real divergence.
     """
     return {
-        v.strip("\"'").rstrip("/")
-        for v in OUTDIR.findall((ROOT / rel).read_text())
+        v.strip("\"'").rstrip("/") for v in OUTDIR.findall((ROOT / rel).read_text())
     }
 
 
@@ -60,7 +60,10 @@ def test_arm_and_sweep_handoffs_are_disjoint():
 def _tracked_shell_files():
     listed = subprocess.run(
         ["git", "ls-files", "benchmarks/*.sh", "Makefile", "benchmarks/Makefile"],
-        cwd=ROOT, capture_output=True, text=True, check=True,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.split()
     return [r for r in listed if (ROOT / r).exists()]
 
@@ -114,15 +117,17 @@ def test_the_makefile_and_the_submit_scripts_name_the_same_roots():
     assert f"{handoff}/sweep" in makefile.replace("$(HANDOFF)", handoff), (
         "the Makefile no longer stages sweep tables under $(HANDOFF)/sweep"
     )
-    assert any(o.rstrip("/").endswith(f"{handoff}/arms")
-               for o in _outdirs("benchmarks/submit_arms.sh")), (
+    assert any(
+        o.rstrip("/").endswith(f"{handoff}/arms")
+        for o in _outdirs("benchmarks/submit_arms.sh")
+    ), (
         f"submit_arms.sh does not name {handoff}/arms; it and the Makefile would "
         f"stage the same experiment in two different places"
     )
-    assert any(o.rstrip("/").endswith(f"{handoff}/sweep")
-               for o in _outdirs("benchmarks/submit_sweep.sh")), (
-        f"submit_sweep.sh does not name {handoff}/sweep"
-    )
+    assert any(
+        o.rstrip("/").endswith(f"{handoff}/sweep")
+        for o in _outdirs("benchmarks/submit_sweep.sh")
+    ), f"submit_sweep.sh does not name {handoff}/sweep"
 
 
 def test_no_synthetic_run_sits_where_real_results_land():
@@ -141,10 +146,14 @@ def test_no_synthetic_run_sits_where_real_results_land():
 
     tracked = subprocess.run(
         ["git", "ls-files", "benchmarks"],
-        cwd=ROOT, capture_output=True, text=True, check=True,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.split()
     misplaced = [
-        p for p in tracked
+        p
+        for p in tracked
         if p.startswith("benchmarks/runs/")
         or p.startswith("benchmarks/paper_data/")
         or p.startswith("benchmarks/_handoff/")

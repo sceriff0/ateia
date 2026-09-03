@@ -66,9 +66,7 @@ import numpy as np
 # bin/utils/ for the SHARED manifest/pixel-size code -- reused rather than copied, so
 # the manifest ashlar emits cannot drift from the one STARE emits and the single
 # predict_from_manifest reads both.
-sys.path.insert(
-    0, str(pathlib.Path(__file__).resolve().parents[2] / "bin" / "utils")
-)
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "bin" / "utils"))
 
 from tiled_manifest import build_manifest, slide_entry  # noqa: E402
 
@@ -87,8 +85,13 @@ def _yx_to_xy(a):
     return np.asarray(a, dtype=float)[..., ::-1]
 
 
-def tile_displacements(layer_positions, moving_meta_positions,
-                       ref_aligner_positions, ref_meta_positions, reference_idx):
+def tile_displacements(
+    layer_positions,
+    moving_meta_positions,
+    ref_aligner_positions,
+    ref_meta_positions,
+    reference_idx,
+):
     """Per-tile ``D(t)`` in ``(y, x)``, moving-native -> reference-native.
 
     Pure array maths, so the derivation above is unit-testable without ashlar, a container
@@ -114,9 +117,15 @@ def decompose(displacements_yx, discard=None):
     anchor.
     """
     d_xy = _yx_to_xy(displacements_yx)
-    keep = np.ones(len(d_xy), dtype=bool) if discard is None else ~np.asarray(discard, dtype=bool)
+    keep = (
+        np.ones(len(d_xy), dtype=bool)
+        if discard is None
+        else ~np.asarray(discard, dtype=bool)
+    )
     if not keep.any():
-        keep = np.ones(len(d_xy), dtype=bool)  # every tile discarded: no better estimate exists
+        keep = np.ones(
+            len(d_xy), dtype=bool
+        )  # every tile discarded: no better estimate exists
     translation = np.median(d_xy[keep], axis=0)
     return translation, d_xy - translation
 
@@ -153,10 +162,15 @@ def ashlar_entry(displacements_yx, discard, grid, out_shape):
             "mis-place every control point."
         )
     translation, residual_xy = decompose(displacements_yx, discard)
-    grid_x, grid_y = control_grid(n_rows, n_cols, float(grid["tile_size"]),
-                                  float(grid["stride"]), translation)
-    entry = slide_entry(translation_affine(translation), grid_x, grid_y,
-                        residual_xy.reshape(n_rows, n_cols, 2))
+    grid_x, grid_y = control_grid(
+        n_rows, n_cols, float(grid["tile_size"]), float(grid["stride"]), translation
+    )
+    entry = slide_entry(
+        translation_affine(translation),
+        grid_x,
+        grid_y,
+        residual_xy.reshape(n_rows, n_cols, 2),
+    )
     entry["out_shape"] = [int(out_shape[0]), int(out_shape[1])]
     return entry, translation
 
@@ -172,11 +186,17 @@ def _reader(tile_dir, grid, pixel_size):
     """
     from ashlar.filepattern import FilePatternReader
 
-    return FilePatternReader(str(tile_dir), grid["pattern"],
-                             float(grid["overlap"]), pixel_size=float(pixel_size))
+    return FilePatternReader(
+        str(tile_dir),
+        grid["pattern"],
+        float(grid["overlap"]),
+        pixel_size=float(pixel_size),
+    )
 
 
-def _run_aligners(ref_dir, ref_grid, mov_dir, mov_grid, channel, max_shift_um, pixel_size):
+def _run_aligners(
+    ref_dir, ref_grid, mov_dir, mov_grid, channel, max_shift_um, pixel_size
+):
     """Run EdgeAligner on the reference then LayerAligner on the moving cycle.
 
     ``DataWarning`` is captured rather than printed: ``EdgeAligner.fit_model`` warns
@@ -189,13 +209,24 @@ def _run_aligners(ref_dir, ref_grid, mov_dir, mov_grid, channel, max_shift_um, p
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        edge = reg.EdgeAligner(_reader(ref_dir, ref_grid, pixel_size), channel=channel,
-                               max_shift=max_shift_um, verbose=False)
+        edge = reg.EdgeAligner(
+            _reader(ref_dir, ref_grid, pixel_size),
+            channel=channel,
+            max_shift=max_shift_um,
+            verbose=False,
+        )
         edge.run()
-        layer = reg.LayerAligner(_reader(mov_dir, mov_grid, pixel_size), edge,
-                                 channel=channel, max_shift=max_shift_um, verbose=False)
+        layer = reg.LayerAligner(
+            _reader(mov_dir, mov_grid, pixel_size),
+            edge,
+            channel=channel,
+            max_shift=max_shift_um,
+            verbose=False,
+        )
         layer.run()
-    messages = [str(w.message) for w in caught if issubclass(w.category, reg.DataWarning)]
+    messages = [
+        str(w.message) for w in caught if issubclass(w.category, reg.DataWarning)
+    ]
     return edge, layer, messages
 
 
@@ -221,7 +252,10 @@ def _check(edge, layer, max_discard_fraction, warnings_seen):
         logger.warning(
             "%d/%d moving tiles matched a non-corresponding reference tile. The two grids "
             "should be congruent; a large count means the cycles were not padded to a "
-            "common canvas.", off_diagonal, n)
+            "common canvas.",
+            off_diagonal,
+            n,
+        )
 
     if fraction > max_discard_fraction:
         raise SystemExit(
@@ -231,8 +265,13 @@ def _check(edge, layer, max_discard_fraction, warnings_seen):
             "The usual cause is --maximum-shift set below the true cross-cycle drift."
         )
     if discarded:
-        logger.warning("ASHLAR discarded %d/%d tiles (%.0f%%); their positions are model "
-                       "predictions, not measurements.", discarded, n, 100 * fraction)
+        logger.warning(
+            "ASHLAR discarded %d/%d tiles (%.0f%%); their positions are model "
+            "predictions, not measurements.",
+            discarded,
+            n,
+            100 * fraction,
+        )
 
     errors = np.asarray(layer.errors, dtype=float)
     finite = errors[np.isfinite(errors)]
@@ -241,7 +280,9 @@ def _check(edge, layer, max_discard_fraction, warnings_seen):
         "n_discarded": discarded,
         "discard_fraction": float(fraction),
         "n_reference_idx_off_diagonal": off_diagonal,
-        "cycle_offset_yx": [float(v) for v in np.asarray(layer.cycle_offset, dtype=float)],
+        "cycle_offset_yx": [
+            float(v) for v in np.asarray(layer.cycle_offset, dtype=float)
+        ],
         "error_p50": float(np.median(finite)) if finite.size else None,
         "error_p90": float(np.percentile(finite, 90)) if finite.size else None,
         "n_error_infinite": int((~np.isfinite(errors)).sum()),
@@ -251,16 +292,32 @@ def _check(edge, layer, max_discard_fraction, warnings_seen):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="Run ASHLAR cross-cycle alignment and emit a STARE transform manifest.")
-    ap.add_argument("--ref-tiles", required=True, help="retiled reference cycle directory")
-    ap.add_argument("--moving-tiles", required=True, help="retiled moving cycle directory")
+        description="Run ASHLAR cross-cycle alignment and emit a STARE transform manifest."
+    )
+    ap.add_argument(
+        "--ref-tiles", required=True, help="retiled reference cycle directory"
+    )
+    ap.add_argument(
+        "--moving-tiles", required=True, help="retiled moving cycle directory"
+    )
     ap.add_argument("--reference-name", required=True)
     ap.add_argument("--moving-name", required=True)
-    ap.add_argument("--nuclear-index", type=int, default=0,
-                    help="nuclear/fiducial channel index ashlar aligns on")
-    ap.add_argument("--maximum-shift", type=float, required=True, dest="max_shift_um",
-                    help="microns; must exceed the true cross-cycle drift (see module docstring)")
-    ap.add_argument("--max-discard-fraction", type=float, default=DEFAULT_MAX_DISCARD_FRACTION)
+    ap.add_argument(
+        "--nuclear-index",
+        type=int,
+        default=0,
+        help="nuclear/fiducial channel index ashlar aligns on",
+    )
+    ap.add_argument(
+        "--maximum-shift",
+        type=float,
+        required=True,
+        dest="max_shift_um",
+        help="microns; must exceed the true cross-cycle drift (see module docstring)",
+    )
+    ap.add_argument(
+        "--max-discard-fraction", type=float, default=DEFAULT_MAX_DISCARD_FRACTION
+    )
     ap.add_argument("--out-manifest", required=True)
     ap.add_argument("--out-tre", required=True)
     a = ap.parse_args(argv)
@@ -281,42 +338,64 @@ def main(argv=None):
             )
 
     pixel_size = float(ref_grid["pixel_size_um"])
-    edge, layer, warned = _run_aligners(ref_dir, ref_grid, mov_dir, mov_grid,
-                                        a.nuclear_index, a.max_shift_um, pixel_size)
+    edge, layer, warned = _run_aligners(
+        ref_dir,
+        ref_grid,
+        mov_dir,
+        mov_grid,
+        a.nuclear_index,
+        a.max_shift_um,
+        pixel_size,
+    )
     diagnostics, discard = _check(edge, layer, a.max_discard_fraction, warned)
 
-    d_yx = tile_displacements(layer.positions, layer.metadata.positions,
-                              edge.positions, edge.metadata.positions, layer.reference_idx)
+    d_yx = tile_displacements(
+        layer.positions,
+        layer.metadata.positions,
+        edge.positions,
+        edge.metadata.positions,
+        layer.reference_idx,
+    )
     entry, translation = ashlar_entry(d_yx, discard, mov_grid, ref_grid["orig_shape"])
 
-    manifest = build_manifest(a.reference_name, {
-        a.reference_name: slide_entry(np.eye(3)),
-        a.moving_name: entry,
-    })
+    manifest = build_manifest(
+        a.reference_name,
+        {
+            a.reference_name: slide_entry(np.eye(3)),
+            a.moving_name: entry,
+        },
+    )
     Path(a.out_manifest).write_text(json.dumps(manifest, indent=2))
 
     residual = np.linalg.norm(_yx_to_xy(d_yx) - translation, axis=1)
-    diagnostics.update({
-        "method": "ashlar",
-        "reference": a.reference_name,
-        "moving": a.moving_name,
-        "pixel_size_um": pixel_size,
-        "maximum_shift_um": a.max_shift_um,
-        "rigid_translation_xy": [float(v) for v in translation],
-        # Spread of the per-tile field about the rigid anchor -- ASHLAR's analogue of
-        # STARE's rigid-stage TRE. Not a registration accuracy: reg_qc=2 measures that.
-        "mesh_residual_px": {
-            "p50": float(np.median(residual)),
-            "p90": float(np.percentile(residual, 90)),
-            "max": float(residual.max()),
-        },
-    })
+    diagnostics.update(
+        {
+            "method": "ashlar",
+            "reference": a.reference_name,
+            "moving": a.moving_name,
+            "pixel_size_um": pixel_size,
+            "maximum_shift_um": a.max_shift_um,
+            "rigid_translation_xy": [float(v) for v in translation],
+            # Spread of the per-tile field about the rigid anchor -- ASHLAR's analogue of
+            # STARE's rigid-stage TRE. Not a registration accuracy: reg_qc=2 measures that.
+            "mesh_residual_px": {
+                "p50": float(np.median(residual)),
+                "p90": float(np.percentile(residual, 90)),
+                "max": float(residual.max()),
+            },
+        }
+    )
     Path(a.out_tre).write_text(json.dumps(diagnostics, indent=2))
 
-    logger.info("ashlar: %d tiles, %d discarded, rigid translation (x,y)=(%.2f, %.2f) px, "
-                "mesh residual p50=%.2f px", diagnostics["n_tiles"],
-                diagnostics["n_discarded"], translation[0], translation[1],
-                diagnostics["mesh_residual_px"]["p50"])
+    logger.info(
+        "ashlar: %d tiles, %d discarded, rigid translation (x,y)=(%.2f, %.2f) px, "
+        "mesh residual p50=%.2f px",
+        diagnostics["n_tiles"],
+        diagnostics["n_discarded"],
+        translation[0],
+        translation[1],
+        diagnostics["mesh_residual_px"]["p50"],
+    )
     return 0
 
 

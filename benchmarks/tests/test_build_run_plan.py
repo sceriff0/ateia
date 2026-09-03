@@ -37,6 +37,7 @@ def pipeline_param_defaults() -> dict:
     """param name -> shipped default, straight from nextflow.config."""
     return _CHECKER.extract_config_defaults((REPO_ROOT / "nextflow.config").read_text())
 
+
 SWEEP = {
     "strategy": "ofat",
     "baseline": {"target_px": 4096, "n_channels": 2, "memory_mode": "medium"},
@@ -57,10 +58,17 @@ GRID_SWEEP = {
 GRID_SWEEP2 = {
     "strategy": "ofat",
     "scaling_grid": {"target_px": [2048, 4096], "n_channels": [2, 4]},
-    "registration_grid": {"target_px": [2048, 4096],
-                          "n_register_images": [2, 4, 8], "n_channels": 2},
-    "baseline": {"target_px": 4096, "n_channels": 2, "n_register_images": 2,
-                 "memory_mode": "medium"},
+    "registration_grid": {
+        "target_px": [2048, 4096],
+        "n_register_images": [2, 4, 8],
+        "n_channels": 2,
+    },
+    "baseline": {
+        "target_px": 4096,
+        "n_channels": 2,
+        "n_register_images": 2,
+        "memory_mode": "medium",
+    },
     "axes": {"memory_mode": ["medium", "high"]},
 }
 
@@ -79,7 +87,11 @@ def test_ofat_varies_one_axis_at_a_time_off_baseline():
     assert len(varied) == 3
     hi = [r for r in varied if r["varied_axis"] == "memory_mode"][0]
     # only memory_mode differs from baseline; other axes stay at baseline values
-    assert hi["memory_mode"] == "high" and hi["target_px"] == 4096 and hi["n_channels"] == 2
+    assert (
+        hi["memory_mode"] == "high"
+        and hi["target_px"] == 4096
+        and hi["n_channels"] == 2
+    )
 
 
 def test_run_ids_are_unique():
@@ -99,16 +111,16 @@ def test_repeats_expands_each_config_with_unique_ids():
     plan = build_run_plan(SWEEP, repeats=3)
     # 4 configs (baseline + 3 OFAT axes) x 3 repeats = 12 runs
     assert len(plan) == 12
-    assert len({r["run_id"] for r in plan}) == 12          # unique launch dirs
+    assert len({r["run_id"] for r in plan}) == 12  # unique launch dirs
     by_cfg = {}
     for r in plan:
         by_cfg.setdefault(r["config_id"], []).append(r["rep"])
-    assert len(by_cfg) == 4                                 # 4 distinct configs
+    assert len(by_cfg) == 4  # 4 distinct configs
     assert all(sorted(reps) == [0, 1, 2] for reps in by_cfg.values())
 
 
 def test_repeats_default_one_reproduces_single_shot():
-    assert len(build_run_plan(SWEEP)) == 4                  # baseline + 3 varied, no dup
+    assert len(build_run_plan(SWEEP)) == 4  # baseline + 3 varied, no dup
 
 
 def test_repeats_below_one_rejected():
@@ -118,10 +130,19 @@ def test_repeats_below_one_rejected():
 
 def test_scaling_grid_is_full_size_channel_cross():
     plan = build_run_plan(GRID_SWEEP, repeats=1)
-    grid_cells = {(r["target_px"], r["n_channels"]) for r in plan
-                  if r["varied_axis"] in ("scaling_grid", "baseline")}
-    assert grid_cells == {(2048, 2), (2048, 4), (4096, 2),
-                          (4096, 4), (8192, 2), (8192, 4)}
+    grid_cells = {
+        (r["target_px"], r["n_channels"])
+        for r in plan
+        if r["varied_axis"] in ("scaling_grid", "baseline")
+    }
+    assert grid_cells == {
+        (2048, 2),
+        (2048, 4),
+        (4096, 2),
+        (4096, 4),
+        (8192, 2),
+        (8192, 4),
+    }
     # the baseline cell (4096, 2) is emitted exactly once, labelled baseline
     base = [r for r in plan if r["varied_axis"] == "baseline"]
     assert len(base) == 1
@@ -133,32 +154,53 @@ def test_scaling_grid_is_full_size_channel_cross():
 
 def test_registration_grid_crosses_size_and_rounds():
     plan = build_run_plan(GRID_SWEEP2, repeats=1)
-    reg = [(r["target_px"], r["n_register_images"]) for r in plan
-           if r["varied_axis"] == "registration_grid"]
+    reg = [
+        (r["target_px"], r["n_register_images"])
+        for r in plan
+        if r["varied_axis"] == "registration_grid"
+    ]
     # 2 sizes x rounds {4,8} (N=2 skipped — covered by the scaling grid) = 4 configs,
     # all at the fixed 2 channels
     assert set(reg) == {(2048, 4), (2048, 8), (4096, 4), (4096, 8)}
-    assert all(r["n_channels"] == 2 for r in plan
-               if r["varied_axis"] == "registration_grid")
+    assert all(
+        r["n_channels"] == 2 for r in plan if r["varied_axis"] == "registration_grid"
+    )
 
 
 def test_registration_grid_crosses_channels_when_list():
     sweep = {
         "strategy": "ofat",
         "scaling_grid": {"target_px": [2048, 4096], "n_channels": [2, 4]},
-        "registration_grid": {"target_px": [2048, 4096],
-                              "n_register_images": [4, 8], "n_channels": [2, 4]},
-        "baseline": {"target_px": 4096, "n_channels": 2, "n_register_images": 2,
-                     "memory_mode": "medium"},
+        "registration_grid": {
+            "target_px": [2048, 4096],
+            "n_register_images": [4, 8],
+            "n_channels": [2, 4],
+        },
+        "baseline": {
+            "target_px": 4096,
+            "n_channels": 2,
+            "n_register_images": 2,
+            "memory_mode": "medium",
+        },
         "axes": {"memory_mode": ["medium", "high"]},
     }
     plan = build_run_plan(sweep, repeats=1)
-    reg = {(r["target_px"], r["n_channels"], r["n_register_images"]) for r in plan
-           if r["varied_axis"] == "registration_grid"}
+    reg = {
+        (r["target_px"], r["n_channels"], r["n_register_images"])
+        for r in plan
+        if r["varied_axis"] == "registration_grid"
+    }
     # 2 sizes x {2,4} channels x {4,8} rounds = 8 configs (N=2 skipped, covered by scaling grid)
     assert reg == {
-        (2048, 2, 4), (2048, 2, 8), (2048, 4, 4), (2048, 4, 8),
-        (4096, 2, 4), (4096, 2, 8), (4096, 4, 4), (4096, 4, 8)}
+        (2048, 2, 4),
+        (2048, 2, 8),
+        (2048, 4, 4),
+        (2048, 4, 8),
+        (4096, 2, 4),
+        (4096, 2, 8),
+        (4096, 4, 4),
+        (4096, 4, 8),
+    }
 
 
 def test_registration_method_grid_crosses_each_method_own_knobs():
@@ -171,14 +213,23 @@ def test_registration_method_grid_crosses_each_method_own_knobs():
     """
     sweep = {
         "strategy": "ofat",
-        "baseline": {"target_px": 4096, "n_channels": 2, "n_register_images": 2,
-                     "registration_method": "valis", "memory_mode": "medium",
-                     "reg_micro_reg": 0, "reg_max_image_dim": 4000,
-                     "reg_tiled_mode": "high", "reg_tiled_tile": None},
+        "baseline": {
+            "target_px": 4096,
+            "n_channels": 2,
+            "n_register_images": 2,
+            "registration_method": "valis",
+            "memory_mode": "medium",
+            "reg_micro_reg": 0,
+            "reg_max_image_dim": 4000,
+            "reg_tiled_mode": "high",
+            "reg_tiled_tile": None,
+        },
         "registration_method_grid": {
-            "valis": {"memory_mode": ["low", "medium", "high"],
-                      "reg_micro_reg": [0, 1, 2],
-                      "reg_max_image_dim": [2000, 4000, 8000]},
+            "valis": {
+                "memory_mode": ["low", "medium", "high"],
+                "reg_micro_reg": [0, 1, 2],
+                "reg_max_image_dim": [2000, 4000, 8000],
+            },
             "tiled": {"reg_tiled_mode": ["custom"], "reg_tiled_tile": [1024, 2048]},
         },
         "axes": {},
@@ -187,18 +238,25 @@ def test_registration_method_grid_crosses_each_method_own_knobs():
     v = [r for r in plan if r["varied_axis"] == "registration_method_grid:valis"]
     t = [r for r in plan if r["varied_axis"] == "registration_method_grid:tiled"]
 
-    assert len(v) == 27, "the valis entry must be a FULL 3x3x3 cross, not a plane plus a spur"
+    assert len(v) == 27, (
+        "the valis entry must be a FULL 3x3x3 cross, not a plane plus a spur"
+    )
     assert len(t) == 2
     assert all(r["registration_method"] == "valis" for r in v)
     assert all(r["registration_method"] == "tiled" for r in t)
-    assert {(r["memory_mode"], r["reg_micro_reg"], r["reg_max_image_dim"]) for r in v} == {
+    assert {
+        (r["memory_mode"], r["reg_micro_reg"], r["reg_max_image_dim"]) for r in v
+    } == {
         (mm, rmr, d)
         for mm in ("low", "medium", "high")
         for rmr in (0, 1, 2)
-        for d in (2000, 4000, 8000)}
+        for d in (2000, 4000, 8000)
+    }
     # the distributed knobs must not appear anywhere
-    assert all("reg_distributed_tiling" not in r and "reg_dist_force_tiling" not in r
-               for r in v + t)
+    assert all(
+        "reg_distributed_tiling" not in r and "reg_dist_force_tiling" not in r
+        for r in v + t
+    )
 
 
 def test_project_sweep_exercises_the_tiled_fanout_path():
@@ -210,8 +268,10 @@ def test_project_sweep_exercises_the_tiled_fanout_path():
     TILED_REGISTER path, so the fan-out is the only shape and there is nothing left to cross.
     """
     import yaml
+
     sweep = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text()
+    )
     plan = build_run_plan(sweep, repeats=1)
     tiled = [r for r in plan if r.get("registration_method") == "tiled"]
     assert tiled, "no tiled/STARE runs in the plan"
@@ -219,8 +279,10 @@ def test_project_sweep_exercises_the_tiled_fanout_path():
 
 def test_project_sweep_covers_every_shipped_segmentation_backend():
     import yaml
+
     sweep = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text()
+    )
     # nextflow.config's seg_method enum -- all three must be benchmarked somewhere in the plan.
     plan = build_run_plan(sweep, repeats=1)
     assert {r["seg_method"] for r in plan} == {"stardist", "instantseg", "cellsam"}
@@ -244,8 +306,7 @@ def stare_preset_row(mode):
     row = re.search(rf"^\s*{mode}\s*:\s*\[([^\]]*)\]", body.group(1), re.M)
     assert row, f"could not locate the '{mode}' row in RegPresets.STARE"
     return {
-        k.strip(): int(v)
-        for k, v in re.findall(r"(\w+)\s*:\s*(\d+)", row.group(1))
+        k.strip(): int(v) for k, v in re.findall(r"(\w+)\s*:\s*(\d+)", row.group(1))
     }
 
 
@@ -290,8 +351,10 @@ def test_project_stare_resolution_axis_mirrors_the_valis_one():
     a TUNED VALIS against an UNTUNED STARE -- a bias that is invisible in the output tables.
     """
     import yaml
+
     sweep = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text()
+    )
     rmg = sweep["registration_method_grid"]
     # BOTH now live in the same grid. reg_max_image_dim used to be read out of flat `axes:`; that
     # is exactly the split this asymmetry hid behind, so read them the same way or the comparison
@@ -300,8 +363,11 @@ def test_project_stare_resolution_axis_mirrors_the_valis_one():
     stare_values = set(rmg["tiled"].get("reg_tiled_coarse_max_dim", []))
     assert "reg_max_image_dim" not in sweep.get("axes", {}), (
         "reg_max_image_dim is back in flat `axes:` — as an OFAT axis it varies at ONE "
-        "(memory_mode, reg_micro_reg) point, which is the 11-of-27 coverage this grid fixed")
-    assert len(valis_values) >= 3, f"the VALIS resolution axis lost points: {sorted(valis_values)}"
+        "(memory_mode, reg_micro_reg) point, which is the 11-of-27 coverage this grid fixed"
+    )
+    assert len(valis_values) >= 3, (
+        f"the VALIS resolution axis lost points: {sorted(valis_values)}"
+    )
     assert len(stare_values) >= 3, (
         "reg_max_image_dim is swept but reg_tiled_coarse_max_dim is not (or has <3 points): "
         f"{sorted(stare_values)}"
@@ -309,7 +375,8 @@ def test_project_stare_resolution_axis_mirrors_the_valis_one():
     valis_base = sweep["baseline"]["reg_max_image_dim"]
     assert min(valis_values) < valis_base < max(valis_values), (
         f"the VALIS resolution axis must bracket its default {valis_base} in both directions "
-        f"— the same bar the STARE one is held to below: {sorted(valis_values)}")
+        f"— the same bar the STARE one is held to below: {sorted(valis_values)}"
+    )
     # The baseline leaves this null: reg_tiled_mode='high' supplies it. Compare the axis against
     # the value a default run ACTUALLY uses -- the 'high' row -- not against the literal null.
     assert sweep["baseline"]["reg_tiled_coarse_max_dim"] is None, (
@@ -348,8 +415,10 @@ def test_project_sweep_backends_are_crossed_at_equal_dimensionality():
     import math
 
     import yaml
+
     sweep = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text()
+    )
     grid = sweep["registration_method_grid"]
     assert len(grid) >= 2, "a head-to-head needs at least two backends in the grid"
 
@@ -365,46 +434,68 @@ def test_project_sweep_backends_are_crossed_at_equal_dimensionality():
     n_axes = {m: v[0] for m, v in shape.items()}
     assert len(set(n_axes.values())) == 1, (
         "backends are crossed over different NUMBERS of knobs, so one has interaction terms the "
-        f"other cannot have: {n_axes}")
+        f"other cannot have: {n_axes}"
+    )
 
     levels = {m: tuple(v[1]) for m, v in shape.items()}
     assert len(set(levels.values())) == 1, (
-        f"backends are crossed at different numbers of LEVELS per knob: {levels}")
+        f"backends are crossed at different numbers of LEVELS per knob: {levels}"
+    )
 
     # And the plan must actually contain the full product for each -- a grid can be declared
     # symmetric and still be expanded into holes.
     plan = build_run_plan(sweep, repeats=1)
     for method, (_, _, cells) in shape.items():
-        got = len({tuple(sorted(
-            (k, v) for k, v in r.items() if k in grid[method]))
-            for r in plan if r["varied_axis"] == f"registration_method_grid:{method}"})
+        got = len(
+            {
+                tuple(sorted((k, v) for k, v in r.items() if k in grid[method]))
+                for r in plan
+                if r["varied_axis"] == f"registration_method_grid:{method}"
+            }
+        )
         assert got == cells, (
-            f"{method} declares a {cells}-cell cross but the plan expands {got} distinct cells")
+            f"{method} declares a {cells}-cell cross but the plan expands {got} distinct cells"
+        )
 
 
 def test_project_sweep_has_no_dead_axes():
     # An OFAT axis on a param that is gated behind another param is a no-op run. These belong in
     # a per-method grid (gate pinned on), never in flat `axes`.
     import yaml
+
     sweep = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text()
+    )
     gated = {
-        "reg_tiled_tile", "reg_tiled_gate_tre",                        # registration_method=tiled
-        "reg_tiled_halo", "reg_tiled_upsample", "reg_tiled_out_tile",
+        "reg_tiled_tile",
+        "reg_tiled_gate_tre",  # registration_method=tiled
+        "reg_tiled_halo",
+        "reg_tiled_upsample",
+        "reg_tiled_out_tile",
         "reg_tiled_coarse_max_dim",
-        "seg_n_tiles_x", "seg_n_tiles_y",                              # seg_method=stardist
-        "seg_instantseg_tile_size", "seg_instantseg_batch_size",       # seg_method=instantseg
-        "seg_cellsam_block_size", "seg_cellsam_bbox_threshold",        # seg_method=cellsam
+        "seg_n_tiles_x",
+        "seg_n_tiles_y",  # seg_method=stardist
+        "seg_instantseg_tile_size",
+        "seg_instantseg_batch_size",  # seg_method=instantseg
+        "seg_cellsam_block_size",
+        "seg_cellsam_bbox_threshold",  # seg_method=cellsam
     }
     dead = gated & set(sweep["axes"])
-    assert not dead, f"gated params used as flat OFAT axes (they would measure nothing): {sorted(dead)}"
+    assert not dead, (
+        f"gated params used as flat OFAT axes (they would measure nothing): {sorted(dead)}"
+    )
 
 
 def test_segmentation_grid_pins_method_and_crosses_own_params():
     sweep = {
         "strategy": "ofat",
-        "baseline": {"target_px": 4096, "n_channels": 2, "seg_method": "stardist",
-                     "seg_n_tiles_x": 16, "seg_n_tiles_y": 16},
+        "baseline": {
+            "target_px": 4096,
+            "n_channels": 2,
+            "seg_method": "stardist",
+            "seg_n_tiles_x": 16,
+            "seg_n_tiles_y": 16,
+        },
         "segmentation_grid": {
             "stardist": {"seg_n_tiles_x": [8, 16, 32], "seg_n_tiles_y": [8, 16, 32]},
             "cellsam": {"seg_cellsam_block_size": [256, 400, 512]},
@@ -416,12 +507,13 @@ def test_segmentation_grid_pins_method_and_crosses_own_params():
     sd = [r for r in plan if r["varied_axis"] == "segmentation_grid:stardist"]
     cs = [r for r in plan if r["varied_axis"] == "segmentation_grid:cellsam"]
     ins = [r for r in plan if r["varied_axis"] == "segmentation_grid:instantseg"]
-    assert len(sd) == 9 and len(cs) == 3 and len(ins) == 3       # 3x3, 3, 3
+    assert len(sd) == 9 and len(cs) == 3 and len(ins) == 3  # 3x3, 3, 3
     assert all(r["seg_method"] == "stardist" for r in sd)
     assert all(r["seg_method"] == "cellsam" for r in cs)
     assert all(r["seg_method"] == "instantseg" for r in ins)
     assert {(r["seg_n_tiles_x"], r["seg_n_tiles_y"]) for r in sd} == {
-        (x, y) for x in (8, 16, 32) for y in (8, 16, 32)}
+        (x, y) for x in (8, 16, 32) for y in (8, 16, 32)
+    }
     assert {r["seg_cellsam_block_size"] for r in cs} == {256, 400, 512}
 
 
@@ -429,14 +521,18 @@ def test_project_sweep_has_no_distributed_surface():
     # the distributed/tiled registration path was archived out of the pipeline; the sweep must not
     # reference any of its params or grids (they would pass dead --param flags to the pipeline).
     import yaml
+
     sweep = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text()
+    )
     assert "distributed_grid" not in sweep
     assert "distributed_tiling_grid" not in sweep
     plan = build_run_plan(sweep, repeats=1)
     for r in plan:
         for k in r:
-            assert not k.startswith("reg_dist"), f"distributed param {k} leaked into the run plan"
+            assert not k.startswith("reg_dist"), (
+                f"distributed param {k} leaked into the run plan"
+            )
         assert "reg_distributed_tiling" not in r
 
 
@@ -444,9 +540,13 @@ def test_project_sweep_enables_qc_signals():
     # the paper's accuracy + segmentation-quality tables are harvested from pipeline QC, so the
     # baseline must turn those QC steps on.
     import yaml
+
     sweep = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
-    assert sweep["baseline"]["reg_qc"] == 2                       # staged registration QC (dice + displacement)
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text()
+    )
+    assert (
+        sweep["baseline"]["reg_qc"] == 2
+    )  # staged registration QC (dice + displacement)
 
 
 # Baseline values that deliberately DIFFER from the shipped default, each with the
@@ -477,7 +577,8 @@ BASELINE_DEVIATIONS = {
         "once pinned in the baseline and excused as never set. It is not an excuse; "
         "it is a DEVIATION, because sweep.yaml really does set it. "
         "test_not_swept_registry_has_no_stale_entries is what caught the duplicate, "
-        "and it does not run on dev -- this merge was the first moment it could."),
+        "and it does not run on dev -- this merge was the first moment it could."
+    ),
 }
 
 
@@ -496,8 +597,10 @@ def test_project_sweep_baseline_matches_pipeline_defaults():
     moment the pipeline default agrees with it again.
     """
     import yaml
+
     base = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())["baseline"]
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text()
+    )["baseline"]
     config_defaults = pipeline_param_defaults()
 
     # Synthetic matrix dimensions: owned by generate_matrix.py, not pipeline params.
@@ -524,7 +627,9 @@ def test_project_sweep_baseline_matches_pipeline_defaults():
         )
         checked += 1
 
-    assert checked > 20, f"only {checked} baseline params checked -- parser likely broke"
+    assert checked > 20, (
+        f"only {checked} baseline params checked -- parser likely broke"
+    )
 
 
 def test_every_baseline_deviation_is_still_a_deviation():
@@ -536,8 +641,10 @@ def test_every_baseline_deviation_is_still_a_deviation():
     sweep no longer sets exempts nothing and should be deleted.
     """
     import yaml
+
     base = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())["baseline"]
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text()
+    )["baseline"]
     config_defaults = pipeline_param_defaults()
 
     problems = []
@@ -564,20 +671,28 @@ def test_project_sweep_all_configs_share_columns():
     # run_sweep.sh maps EVERY csv column to --param, so a config missing a key another config has would
     # write a blank cell -> `--param ""` for those runs. Guard: all configs carry the same key set.
     import yaml
+
     sweep = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text()
+    )
     plan = build_run_plan(sweep, repeats=1)
     keysets = {frozenset(r) for r in plan}
-    assert len(keysets) == 1, "configs have differing columns (baseline must declare every swept param)"
+    assert len(keysets) == 1, (
+        "configs have differing columns (baseline must declare every swept param)"
+    )
 
 
 def test_project_sweep_caps_and_grids():
     import yaml
+
     sweep = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text()
+    )
     sg = sweep["scaling_grid"]
-    assert max(sg["target_px"]) == 65536        # largest benchmarked size (see sweep.yaml scaling_grid)
-    assert sg["n_channels"] == [2, 4]           # 1 not benchmarked, max 4
+    assert (
+        max(sg["target_px"]) == 65536
+    )  # largest benchmarked size (see sweep.yaml scaling_grid)
+    assert sg["n_channels"] == [2, 4]  # 1 not benchmarked, max 4
     # registration is measured ACROSS sizes, not only at baseline
     rg = sweep["registration_grid"]
     assert max(rg["target_px"]) == 65536
@@ -603,7 +718,8 @@ NOT_SWEPT = {
     "config_profile_name": (
         "nf-core provenance string: a display string echoed into the run header and the QC "
         "report. Null by default and set by a site profile; it reaches no process and has "
-        "no cost curve."),
+        "no cost curve."
+    ),
     "config_profile_description": "nf-core provenance display string — see config_profile_name",
     "start": "step gate — every sweep run is a full pipeline; a partial run is not comparable",
     "stop": "step gate — see start",
@@ -613,8 +729,8 @@ NOT_SWEPT = {
         "directory is where the trace lives. Every number the analysis layer computes is "
         "parsed out of <run>/trace/trace.txt, so a swept-on arm would report nothing at "
         "all while exiting 0. It also cannot change what a task costs: it runs after the "
-        "last task has finished."),
-
+        "last task has finished."
+    ),
     # --- site / scheduler. Properties of the cluster, not of the pipeline. ---
     # max_cpus and max_memory ARE params again, and are excused rather than swept.
     # This note previously said they were "no longer params at all"; that was true of the
@@ -638,10 +754,12 @@ NOT_SWEPT = {
         "at once, so varying it changes how fast the SWEEP drains, never what a task costs. "
         "Same category as max_time: it benchmarks the machine. It is also "
         "read EAGERLY at conf/modules.config parse time (Math.min(own, params.max_forks)), so "
-        "run_sweep.sh must pass it on the CLI -- a -c file sets it too late to reach the clamps."),
+        "run_sweep.sh must pass it on the CLI -- a -c file sets it too late to reach the clamps."
+    ),
     "queue_size": (
         "cluster concurrency, not pipeline cost -- see max_forks. The two are a pair and the "
-        "lower binds, so benchmark.config raises both together on the CLI."),
+        "lower binds, so benchmark.config raises both together on the CLI."
+    ),
     "concurrency": (
         "cluster concurrency, not pipeline cost -- the COUPLED knob that sets the max_forks/"
         "queue_size pair above (nextflow.config derives maxForks from it, and queueSize from "
@@ -652,36 +770,34 @@ NOT_SWEPT = {
         "EAGERLY at parse time -- see max_forks.\n"
         "Note also WHERE the derivation lives: in the executor/process scopes, not in the "
         "params block, because the params block is evaluated BEFORE the CLI is applied and a "
-        "derived default written there would silently ignore --concurrency."),
+        "derived default written there would silently ignore --concurrency."
+    ),
     "slurm_account": "scheduler identity",
     "slurm_partition": "scheduler identity",
     "slurm_qos": "scheduler identity",
     "gpu_type": "site GPU selector — the hardware under test, not a pipeline knob",
-
     # --- asset paths. Site-local files; a path string has no cost curve. ---
     "segmentation_model": "StarDist model NAME — an asset, not a knob",
     "segmentation_model_dir": "StarDist model dir — site-local asset path",
     "instanseg_model_dir": "InstanSeg model dir — site-local asset path",
     "cellsam_model_path": "CellSAM weights — site-local asset path",
-
     # The automated-phenotyping params (panel_spec, panel_model, pheno_alpha,
     # pheno_max_enumerate, pheno_min_cal) used to be excused here. They left
     # nextflow.config when that feature was extracted from main, and this registry is
     # not allowed to carry excuses for params that no longer exist -- a dead excuse is
     # indistinguishable from a deliberate coverage gap. If phenotyping returns, the
     # other direction of this guard will demand they be re-added.
-
     # --- properties of the INPUT DATA, fixed by generate_matrix.py. ---
     "pixel_size": (
         "a property of the synthetic images, not a cost knob. It no longer has a pipeline "
         "default (it was 0.325, one scanner's value standing in for everyone's), so it is "
         "REQUIRED and benchmarks/configs/benchmark.config pins it to the scale "
-        "generate_matrix.py actually draws at."),
+        "generate_matrix.py actually draws at."
+    ),
     "nuclear_markers": "channel naming contract — the matrix generator fixes the panel",
     # allow_auto_reference was excused here as "samplesheet semantics — the generated sheet
     # always names a reference". The param is gone, and so is the promotion it enabled: a
     # patient with no declared reference is now an error everywhere but add_cycle.
-
     # --- the CSE segmentation-quality scorer (restored on this branch, opt-in). ---
     # Not a cost knob of the PIPELINE: SEG_QUALITY_EVAL is a scorer bolted onto the
     # end, and the synthetic sweep cannot exercise it meaningfully anyway — CSE's
@@ -694,19 +810,18 @@ NOT_SWEPT = {
     "cse_max_pixels": (
         "a MEASUREMENT setting, and not a comparable one: the composite QualityScore "
         "shifts with the binning factor, so sweeping it would produce scores that "
-        "cannot be read against each other. Held fixed across a cohort by design."),
+        "cannot be read against each other. Held fixed across a cohort by design."
+    ),
     # segeval_tag was excused here as "container tag -- an asset selector, not a cost
     # knob". The param is GONE: v1.0.0's container work (release plan 06) tags the
     # segeval image with manifest.version instead of a standalone param, so there is
     # nothing left to excuse. The other direction of this guard would have demanded
     # its return if the param had survived.
-
     # --- developer / trace plumbing. ---
     "debug_channels": "debug output only",
     "dry_run": "dry_run does not execute the pipeline",
     "enable_trace": "held ON — the sweep's own measurement plumbing (size_logs feed the regression)",
     "trace_dir": "trace output path",
-
     # --- gated behind a backend/method choice: a flat OFAT run would be a no-op. ---
     # Same rule test_project_sweep_has_no_dead_axes enforces: pin the gate, cross the knob.
     "seg_pmin": "seg_method=stardist only (starDistCommonFlags) — belongs in segmentation_grid.stardist",
@@ -715,7 +830,8 @@ NOT_SWEPT = {
     "seg_expand_distance": (
         "reaches SEGMENT only via starDistCommonFlags; at the instantseg baseline it would move "
         "only SEG_QC_GEOJSON's contours — i.e. change the accuracy MEASUREMENT rather than the "
-        "pipeline's own segmentation. Belongs in segmentation_grid.stardist."),
+        "pipeline's own segmentation. Belongs in segmentation_grid.stardist."
+    ),
     "seg_instantseg_model": "seg_method=instantseg only — an asset name, not a cost knob",
     "seg_instantseg_target": "seg_method=instantseg only — selects which outputs are produced",
     "seg_cellsam_overlap": "seg_method=cellsam only — add to segmentation_grid.cellsam if needed",
@@ -729,13 +845,11 @@ NOT_SWEPT = {
         "slide's channel metadata) rather than 0; sweeping it would only re-test "
         "MarkerUtils' resolution, which tests/ already covers."
     ),
-
     # --- secondary knobs deliberately held at defaults (add an axis if a curve is ever needed). ---
     "reg_micro_reg_fraction": "secondary micro-registration knob; reg_micro_reg (the DEPTH) is crossed instead",
     "preprocess_qc_scale_factor": "preprocess-QC render scale; qc_scale_factor already prices QC rendering",
     "spatialdata_residual_join_max_px": "join tolerance — changes the export's matching, not its cost",
     "embed_masks": "embeds masks in the OME-TIFF; a niche output-format toggle",
-
     # --- QC gates held ON: the paper's quality tables are harvested from these artifacts. ---
     # Flipping them off yields runs absent from every quality table (same caveat as reg_qc<2).
     "skip_preprocess_qc": "held ON — turning QC off drops the run from the quality tables",
@@ -765,14 +879,17 @@ def test_every_pipeline_param_is_swept_or_excused():
     to nextflow.config now forces a decision here: sweep it, or say why not.
     """
     import yaml
+
     sweep = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text()
+    )
     params = set(pipeline_param_defaults())
 
     unaccounted = params - _sweep_covered_params(sweep) - set(NOT_SWEPT)
     assert not unaccounted, (
-        "pipeline params neither swept nor excused: " + ", ".join(sorted(unaccounted)) +
-        "\nEither add an axis/baseline entry in benchmarks/configs/sweep.yaml, or add the "
+        "pipeline params neither swept nor excused: "
+        + ", ".join(sorted(unaccounted))
+        + "\nEither add an axis/baseline entry in benchmarks/configs/sweep.yaml, or add the "
         "param to NOT_SWEPT with the reason it is not benchmarkable."
     )
 
@@ -784,12 +901,16 @@ def test_not_swept_registry_has_no_stale_entries():
     a real axis keeps a stale 'not benchmarked' note contradicting the sweep).
     """
     import yaml
+
     sweep = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text()
+    )
     params = set(pipeline_param_defaults())
 
     ghosts = set(NOT_SWEPT) - params
-    assert not ghosts, f"NOT_SWEPT excuses params that no longer exist in nextflow.config: {sorted(ghosts)}"
+    assert not ghosts, (
+        f"NOT_SWEPT excuses params that no longer exist in nextflow.config: {sorted(ghosts)}"
+    )
 
     contradictory = set(NOT_SWEPT) & _sweep_covered_params(sweep)
     assert not contradictory, (
@@ -800,7 +921,8 @@ def test_not_swept_registry_has_no_stale_entries():
 def test_every_not_swept_entry_states_a_reason():
     for name, reason in NOT_SWEPT.items():
         assert isinstance(reason, str) and len(reason) > 15, (
-            f"NOT_SWEPT['{name}'] must state a real reason, got {reason!r}")
+            f"NOT_SWEPT['{name}'] must state a real reason, got {reason!r}"
+        )
 
 
 def _schema_enum(name):
@@ -853,11 +975,14 @@ def test_every_shipped_registration_method_is_actually_swept():
     shipped = set(_schema_enum("registration_method") or [])
     assert shipped, "registration_method has no enum in nextflow_schema.json"
     sweep = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text()
+    )
     grid = sweep.get("registration_method_grid") or {}
-    swept = set(grid) if isinstance(grid, dict) else {
-        e.get("registration_method") for e in grid
-    }
+    swept = (
+        set(grid)
+        if isinstance(grid, dict)
+        else {e.get("registration_method") for e in grid}
+    )
     # The baseline method is the anchor every OFAT run uses, so it IS measured
     # even though it has no grid block of its own.
     swept.add(sweep["baseline"].get("registration_method"))
@@ -883,7 +1008,8 @@ def test_baseline_membership_does_not_count_as_coverage():
     from benchmarks.analysis.lib import contract
 
     sweep = yaml.safe_load(
-        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text())
+        (Path(__file__).parents[1] / "configs" / "sweep.yaml").read_text()
+    )
     axes = contract.axes(sweep)
     baseline_only = set(sweep.get("baseline") or {}) - axes
     assert baseline_only, (
@@ -891,6 +1017,5 @@ def test_baseline_membership_does_not_count_as_coverage():
         "set -- cleanup_level and the tier-owned nulls should be in here"
     )
     assert not (baseline_only & axes), (
-        f"declared-only params leaked into the axis set: "
-        f"{sorted(baseline_only & axes)}"
+        f"declared-only params leaked into the axis set: {sorted(baseline_only & axes)}"
     )

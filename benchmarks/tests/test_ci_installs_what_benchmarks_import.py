@@ -21,6 +21,7 @@ _installed_distributions for why re-pointing it at benchmarks/run_ashlar_arm.sh 
 and for the zarr failure that makes the every-level scan worth restoring if a benchmarks/
 test ever executes a bin/ script in CI again.
 """
+
 from __future__ import annotations
 
 import ast
@@ -98,7 +99,7 @@ def _expand(req: Path, seen: set[Path] | None = None) -> set[str]:
         if line.startswith(("-r ", "--requirement ")):
             names |= _expand(req.parent / line.split(None, 1)[1].strip(), seen)
             continue
-        if line.startswith("-"):              # -c, --index-url, --extra-index-url, ...
+        if line.startswith("-"):  # -c, --index-url, --extra-index-url, ...
             continue
         names.add(re.split(r"[=<>!~\[;\s]", line)[0].strip().lower())
     return {n for n in names if n}
@@ -130,13 +131,13 @@ def _top_level_imports() -> dict[str, set[Path]]:
             continue
         try:
             tree = ast.parse(py.read_text())
-        except SyntaxError:                   # not this guard's job to police
+        except SyntaxError:  # not this guard's job to police
             continue
-        for node in tree.body:                # tree.body == top level only
+        for node in tree.body:  # tree.body == top level only
             if isinstance(node, ast.Import):
                 mods = [a.name.split(".")[0] for a in node.names]
             elif isinstance(node, ast.ImportFrom):
-                if node.level:                # relative import -> first-party
+                if node.level:  # relative import -> first-party
                     continue
                 mods = [(node.module or "").split(".")[0]]
             else:
@@ -186,8 +187,8 @@ def test_benchmarks_yml_installs_every_module_benchmarks_imports():
         "benchmarks.yml does not install module(s) benchmarks/ imports at top level:\n  "
         + "\n  ".join(missing)
         + "\nWithout them pytest dies during COLLECTION (exit 2, zero tests run), which "
-          "reads as an ordinary red build. Add them to the job's pip install line, pinned "
-          "to the version ci.yml uses, or move the import inside the function that needs it."
+        "reads as an ordinary red build. Add them to the job's pip install line, pinned "
+        "to the version ci.yml uses, or move the import inside the function that needs it."
     )
 
 

@@ -55,9 +55,7 @@ from pathlib import Path
 # bin/utils/ for the SHARED manifest/pixel-size code -- reused rather than copied, so
 # the manifest ashlar emits cannot drift from the one STARE emits and the single
 # predict_from_manifest reads both.
-sys.path.insert(
-    0, str(pathlib.Path(__file__).resolve().parents[2] / "bin" / "utils")
-)
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "bin" / "utils"))
 
 logger = logging.getLogger(__name__)
 
@@ -100,9 +98,16 @@ def tile_grid(width, height, tile_size, overlap_fraction):
         for c in range(n_cols):
             x = c * stride
             y = r * stride
-            tiles.append(TilePos(r, c, x, y,
-                                 max(0, min(tile_size, width - x)),
-                                 max(0, min(tile_size, height - y))))
+            tiles.append(
+                TilePos(
+                    r,
+                    c,
+                    x,
+                    y,
+                    max(0, min(tile_size, width - x)),
+                    max(0, min(tile_size, height - y)),
+                )
+            )
     return tiles
 
 
@@ -141,8 +146,12 @@ def _pixel_size_um(image_path: Path) -> float:
     try:
         root = ET.fromstring(ome_metadata)
     except ET.ParseError as e:
-        logger.warning("%s: malformed OME-XML (%s); falling back to %s um/px",
-                       image_path, e, DEFAULT_PIXEL_SIZE_UM)
+        logger.warning(
+            "%s: malformed OME-XML (%s); falling back to %s um/px",
+            image_path,
+            e,
+            DEFAULT_PIXEL_SIZE_UM,
+        )
         return DEFAULT_PIXEL_SIZE_UM
 
     ns = {"ome": "http://www.openmicroscopy.org/Schemas/OME/2016-06"}
@@ -155,8 +164,12 @@ def _pixel_size_um(image_path: Path) -> float:
     try:
         value = float(val)
     except ValueError:
-        logger.warning("%s: PhysicalSizeX=%r is not a number; falling back to %s um/px",
-                       image_path, val, DEFAULT_PIXEL_SIZE_UM)
+        logger.warning(
+            "%s: PhysicalSizeX=%r is not a number; falling back to %s um/px",
+            image_path,
+            val,
+            DEFAULT_PIXEL_SIZE_UM,
+        )
         return DEFAULT_PIXEL_SIZE_UM
 
     raw_unit = pixels.get("PhysicalSizeXUnit")
@@ -183,7 +196,9 @@ def _region(arr, n_channels, t, tile_size, dtype):
         return out
     win = arr[:, t.y : t.y + t.h, t.x : t.x + t.w]
     win = np.asarray(win)
-    if win.ndim == 2:  # open_lazy presents a 2-D source as C=1 but returns it un-promoted
+    if (
+        win.ndim == 2
+    ):  # open_lazy presents a 2-D source as C=1 but returns it un-promoted
         win = win[np.newaxis, ...]
     out[:, : t.h, : t.w] = win
     return out
@@ -239,20 +254,30 @@ def write_tiles(image_path, outdir, tile_size, overlap_fraction, cycle=0):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="Cut a stitched cycle OME-TIFF into an ASHLAR-readable uniform tile grid.")
+        description="Cut a stitched cycle OME-TIFF into an ASHLAR-readable uniform tile grid."
+    )
     ap.add_argument("--image", required=True, help="stitched cycle OME-TIFF")
     ap.add_argument("--outdir", required=True, help="output dir for tiles + grid.json")
-    ap.add_argument("--cycle", type=int, default=0, help="cycle index recorded in grid.json")
+    ap.add_argument(
+        "--cycle", type=int, default=0, help="cycle index recorded in grid.json"
+    )
     ap.add_argument("--tile-size", type=int, required=True)
     ap.add_argument("--overlap", type=float, required=True, dest="overlap_fraction")
     a = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    grid_path = write_tiles(a.image, a.outdir, a.tile_size, a.overlap_fraction, cycle=a.cycle)
+    grid_path = write_tiles(
+        a.image, a.outdir, a.tile_size, a.overlap_fraction, cycle=a.cycle
+    )
     grid = json.loads(Path(grid_path).read_text())
-    logger.info("wrote %d x %d tiles of %d px (%s um/px) to %s",
-                grid["n_rows"], grid["n_cols"], grid["tile_size"],
-                grid["pixel_size_um"], a.outdir)
+    logger.info(
+        "wrote %d x %d tiles of %d px (%s um/px) to %s",
+        grid["n_rows"],
+        grid["n_cols"],
+        grid["tile_size"],
+        grid["pixel_size_um"],
+        a.outdir,
+    )
     return 0
 
 

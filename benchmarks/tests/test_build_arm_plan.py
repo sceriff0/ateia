@@ -6,6 +6,7 @@ param names, and the CONSUMER contract in ihc_method/code/registration_arms.R.
 A drift on either side fails silently in the same way — a page that renders
 cleanly with the wrong answer — so each is pinned here rather than reviewed.
 """
+
 from __future__ import annotations
 
 import csv
@@ -61,6 +62,7 @@ def plan(cfg) -> list[dict]:
 # The pipeline contract
 # ---------------------------------------------------------------------------
 
+
 def test_arms_baseline_params_all_exist_in_the_pipeline(cfg):
     """Every param arms.yaml pins must be a real nextflow.config param.
 
@@ -69,10 +71,12 @@ def test_arms_baseline_params_all_exist_in_the_pipeline(cfg):
     costs full price and measures the default instead of the arm.
     """
     defaults = _param_checker().extract_config_defaults(
-        (REPO_ROOT / "nextflow.config").read_text())
+        (REPO_ROOT / "nextflow.config").read_text()
+    )
     unknown = sorted(set(cfg["baseline"]) - set(defaults))
     assert not unknown, (
-        f"arms.yaml baseline pins params absent from nextflow.config: {unknown}")
+        f"arms.yaml baseline pins params absent from nextflow.config: {unknown}"
+    )
 
 
 from benchmarks.tests.test_build_run_plan import stare_preset_modes  # noqa: E402
@@ -93,7 +97,8 @@ def test_arms_baseline_values_match_the_pipeline_defaults(cfg):
     not left to look like drift.
     """
     defaults = _param_checker().extract_config_defaults(
-        (REPO_ROOT / "nextflow.config").read_text())
+        (REPO_ROOT / "nextflow.config").read_text()
+    )
     # param -> why arms.yaml deliberately pins something other than the shipped default.
     DELIBERATE = {}
     drift = []
@@ -105,7 +110,8 @@ def test_arms_baseline_values_match_the_pipeline_defaults(cfg):
     assert not drift, (
         "arms.yaml baseline has drifted from the shipped config:\n  "
         + "\n  ".join(drift)
-        + "\nEither track the pipeline, or add the param to DELIBERATE with its reason.")
+        + "\nEither track the pipeline, or add the param to DELIBERATE with its reason."
+    )
 
 
 def test_every_flag_run_arms_passes_is_a_real_pipeline_param():
@@ -118,13 +124,15 @@ def test_every_flag_run_arms_passes_is_a_real_pipeline_param():
     launcher keeps the assertion pinned to what is really sent to Nextflow.
     """
     defaults = _param_checker().extract_config_defaults(
-        (REPO_ROOT / "nextflow.config").read_text())
+        (REPO_ROOT / "nextflow.config").read_text()
+    )
     script = (BENCH / "run_arms.sh").read_text()
     flags = set(re.findall(r"^\s*add_param\s+(\w+)", script, re.M))
     assert flags, "no add_param calls found — did run_arms.sh change shape?"
     unknown = sorted(flags - set(defaults))
     assert not unknown, (
-        f"run_arms.sh passes --flags absent from nextflow.config: {unknown}")
+        f"run_arms.sh passes --flags absent from nextflow.config: {unknown}"
+    )
 
 
 def test_every_flag_run_arms_passes_is_carried_by_the_plan(plan):
@@ -135,7 +143,8 @@ def test_every_flag_run_arms_passes_is_carried_by_the_plan(plan):
     columns = {k for r in plan for k in r}
     missing = sorted(flags - columns)
     assert not missing, (
-        f"run_arms.sh reads plan columns that build_arm_plan never writes: {missing}")
+        f"run_arms.sh reads plan columns that build_arm_plan never writes: {missing}"
+    )
 
 
 def _schema_enums() -> dict:
@@ -162,7 +171,9 @@ def test_every_arm_value_satisfies_the_schema_enum(plan):
         for k, v in r.items():
             if k in enums and v not in ("", None) and v not in enums[k]:
                 bad.append(f"{r['arm']}: {k}={v!r} not in {enums[k]}")
-    assert not bad, "arm values rejected by nextflow_schema.json:\n  " + "\n  ".join(bad)
+    assert not bad, "arm values rejected by nextflow_schema.json:\n  " + "\n  ".join(
+        bad
+    )
 
 
 def test_qc_segmenter_cross_values_are_real_backends(cfg):
@@ -170,13 +181,17 @@ def test_qc_segmenter_cross_values_are_real_backends(cfg):
     generated row."""
     enums = _schema_enums()
     allowed = enums["seg_method"]
-    for key, path in (("qc_segmenter_cross", ("qc_segmenter_cross", "seg_method")),
-                      ("segmentation_arms", ("segmentation_arms", "seg_method"))):
+    for key, path in (
+        ("qc_segmenter_cross", ("qc_segmenter_cross", "seg_method")),
+        ("segmentation_arms", ("segmentation_arms", "seg_method")),
+    ):
         node = cfg
         for step in path:
             node = node.get(step, {}) if isinstance(node, dict) else {}
-        for m in (node or []):
-            assert m in allowed, f"arms.yaml {key}.seg_method has {m!r}; allowed: {allowed}"
+        for m in node or []:
+            assert m in allowed, (
+                f"arms.yaml {key}.seg_method has {m!r}; allowed: {allowed}"
+            )
     assert cfg["baseline"]["seg_method"] in allowed
 
 
@@ -200,6 +215,7 @@ def test_baseline_reg_qc_must_be_2(cfg):
 # ---------------------------------------------------------------------------
 # The backend contract — VALIS-only params must not appear on a tiled arm
 # ---------------------------------------------------------------------------
+
 
 def test_tiled_arm_carries_no_valis_only_params(plan):
     """memory_mode / reg_micro_reg do not exist on the STARE backend.
@@ -238,30 +254,45 @@ def test_no_ashlar_arms_reach_the_pipeline_plan(plan):
     on purpose: if someone adds a column to run_pass()'s add_param calls without adding it
     here, that is a gap this test SHOULD be updated for, not one it should silently absorb.
     """
-    FORWARDED = ("start", "stop", "seg_method", "reg_qc", "registration_method",
-                 "memory_mode", "reg_micro_reg", "reg_tiled_mode")
+    FORWARDED = (
+        "start",
+        "stop",
+        "seg_method",
+        "reg_qc",
+        "registration_method",
+        "memory_mode",
+        "reg_micro_reg",
+        "reg_tiled_mode",
+    )
     ashlar_rows = [r for r in plan if r.get("backend") == "ashlar"]
     assert ashlar_rows, (
         "no ashlar arm in the plan at all -- external_baseline.ashlar.enabled is the "
         "switch, and losing the only external comparator silently is exactly the "
-        "'green while proving nothing' failure this file guards")
+        "'green while proving nothing' failure this file guards"
+    )
 
     for r in ashlar_rows:
         assert r["arm_kind"] == "external", (
             f"ashlar arm {r['arm']!r} is arm_kind={r['arm_kind']!r}; only 'external' is "
             "dispatched away from Nextflow, so any other kind would be launched as a "
-            "pipeline run and rejected by validateParameters()")
+            "pipeline run and rejected by validateParameters()"
+        )
         set_params = {k: r[k] for k in FORWARDED if str(r.get(k, "")).strip()}
         assert not set_params, (
             f"ashlar arm {r['arm']!r} carries pipeline params {set_params} -- run_arms.sh "
-            "forwards these as --flags and the pipeline would reject the run")
+            "forwards these as --flags and the pipeline would reject the run"
+        )
 
     # And the inverse: no ashlar row may sit in the kinds that ARE launched.
-    launched = [r["arm"] for r in plan
-                if r["arm_kind"] != "external"
-                and ("ashlar" in r["arm"] or r.get("registration_method") == "ashlar")]
+    launched = [
+        r["arm"]
+        for r in plan
+        if r["arm_kind"] != "external"
+        and ("ashlar" in r["arm"] or r.get("registration_method") == "ashlar")
+    ]
     assert not launched, (
-        f"ashlar reached a LAUNCHED arm kind, which cannot run it: {launched}")
+        f"ashlar reached a LAUNCHED arm kind, which cannot run it: {launched}"
+    )
 
 
 def test_the_ashlar_comparator_still_has_a_driver():
@@ -276,23 +307,30 @@ def test_the_ashlar_comparator_still_has_a_driver():
     the arm runner that now scores it exists and reaches the pipeline's own scorer.
     """
     import benchmarks.ashlar.solve as solve
+
     assert hasattr(solve, "main"), "the ashlar comparator driver lost its entry point"
     src = (Path(__file__).parents[1] / "ashlar" / "solve.py").read_text()
     assert "build_manifest" in src, (
         "benchmarks/ashlar/solve.py no longer builds a STARE-shaped manifest; without it "
         "warp_seg_qc.py --method tiled cannot read ashlar and the comparison silently "
-        "changes metric family")
+        "changes metric family"
+    )
 
     runner = Path(__file__).parents[1] / "run_ashlar_arm.sh"
     assert runner.exists(), (
         "benchmarks/run_ashlar_arm.sh is gone; the external arm has no runner, so "
-        "arm_kind='external' rows would be planned and never scored")
+        "arm_kind='external' rows would be planned and never scored"
+    )
     body = runner.read_text()
     # The three legs. Asserted by NAME because each one silently degrades rather than
     # erroring if dropped: no retile -> solve reads nothing; no solve -> no manifest;
     # no warp_seg_qc -> the arm dir exists, is empty, and the consumer renders a gap.
-    for needed in ("benchmarks.ashlar.retile", "benchmarks.ashlar.solve",
-                   "warp_seg_qc.py", "--method tiled"):
+    for needed in (
+        "benchmarks.ashlar.retile",
+        "benchmarks.ashlar.solve",
+        "warp_seg_qc.py",
+        "--method tiled",
+    ):
         assert needed in body, f"run_ashlar_arm.sh no longer invokes {needed!r}"
 
 
@@ -305,9 +343,13 @@ def test_valis_arms_are_preset_x_depth_not_a_grid_of_equals(plan):
     of the sweep. Asserting the PRODUCT, not just the count, is the point: the failure this
     catches is someone reading preset x depth as a 2x2 and quietly dropping a depth.
     """
-    valis = [r for r in plan
-             if r["arm_kind"] == "registration" and r.get("backend") == "valis"
-             and "_seg" not in r["arm"]]
+    valis = [
+        r
+        for r in plan
+        if r["arm_kind"] == "registration"
+        and r.get("backend") == "valis"
+        and "_seg" not in r["arm"]
+    ]
     depths = {r["reg_micro_reg"] for r in valis}
     presets = {r["memory_mode"] for r in valis}
     assert depths == {0, 1, 2}, sorted(depths)
@@ -318,6 +360,7 @@ def test_valis_arms_are_preset_x_depth_not_a_grid_of_equals(plan):
 # ---------------------------------------------------------------------------
 # The QC-segmenter cross
 # ---------------------------------------------------------------------------
+
 
 def test_tiled_arms_are_the_three_shipped_tiers(plan):
     """STARE must fan out over reg_tiled_mode, or the ranking is tuned-vs-untuned.
@@ -332,12 +375,12 @@ def test_tiled_arms_are_the_three_shipped_tiers(plan):
     is excluded deliberately -- it is not a tier, it is "start from high and apply overrides",
     and arms.yaml sets no per-knob overrides for it to apply.
     """
-    tiled = [r for r in plan
-             if r.get("backend") == "tiled" and "_seg" not in r["arm"]]
+    tiled = [r for r in plan if r.get("backend") == "tiled" and "_seg" not in r["arm"]]
     shipped = set(stare_preset_modes())
     assert {r["reg_tiled_mode"] for r in tiled} == shipped, (
         f"tiled arms {sorted(r['reg_tiled_mode'] for r in tiled)} do not cover the shipped "
-        f"tiers {sorted(shipped)} in RegPresets.STARE")
+        f"tiers {sorted(shipped)} in RegPresets.STARE"
+    )
     assert len(tiled) == len(shipped)
 
 
@@ -354,7 +397,8 @@ def test_non_tiled_arms_carry_no_tiled_params(plan):
         if r.get("backend") == "tiled":
             continue
         assert r.get("reg_tiled_mode", "") == "", (
-            f"{r['arm']} carries reg_tiled_mode={r.get('reg_tiled_mode')!r}")
+            f"{r['arm']} carries reg_tiled_mode={r.get('reg_tiled_mode')!r}"
+        )
 
 
 def test_qc_segmenter_cross_varies_seg_method_only(cfg, plan):
@@ -383,15 +427,20 @@ def test_cross_never_duplicates_the_base_arm(cfg, plan):
 
 
 def test_reference_arm_must_name_a_real_arm(cfg):
-    bad = dict(cfg, qc_segmenter_cross=dict(cfg["qc_segmenter_cross"],
-                                            reference_arm="valis_medium_micro9"))
+    bad = dict(
+        cfg,
+        qc_segmenter_cross=dict(
+            cfg["qc_segmenter_cross"], reference_arm="valis_medium_micro9"
+        ),
+    )
     with pytest.raises(ValueError, match="is not an arm this config produces"):
         build_arm_plan(bad)
 
 
 def test_cross_all_crosses_every_arm(cfg):
-    full = build_arm_plan(dict(cfg, qc_segmenter_cross=dict(
-        cfg["qc_segmenter_cross"], cross="all")))
+    full = build_arm_plan(
+        dict(cfg, qc_segmenter_cross=dict(cfg["qc_segmenter_cross"], cross="all"))
+    )
     reg = [r for r in full if r["arm_kind"] == "registration"]
     n_methods = len(cfg["qc_segmenter_cross"]["seg_method"])
     # 12 = 9 VALIS (3 presets x 3 micro-depths) + 3 STARE (tier). History: 7 originally,
@@ -403,12 +452,14 @@ def test_cross_all_crosses_every_arm(cfg):
     # assertion vacuous.
     assert len(reg) == 12 * n_methods, (
         "cross: all should be 12 arms x every segmenter; docs/benchmarks_real.md quotes 36 "
-        "and the cost gate in arms.yaml depends on that number being right")
+        "and the cost gate in arms.yaml depends on that number being right"
+    )
 
 
 # ---------------------------------------------------------------------------
 # Arm factoring — the segmentation arms must RESUME, not re-register
 # ---------------------------------------------------------------------------
+
 
 def test_segmentation_arms_resume_from_a_registration_arm(cfg, plan):
     seg = [r for r in plan if r["arm_kind"] == "segmentation"]
@@ -417,13 +468,15 @@ def test_segmentation_arms_resume_from_a_registration_arm(cfg, plan):
     for r in seg:
         assert r["start"] == "segmentation", (
             "a segmentation arm that does not --start segmentation re-runs "
-            "registration, which is the cost this factoring exists to avoid")
+            "registration, which is the cost this factoring exists to avoid"
+        )
         assert r["from_arm"] in reg_names
 
 
 def test_from_arm_must_name_a_real_arm(cfg):
-    bad = dict(cfg, segmentation_arms=dict(cfg["segmentation_arms"],
-                                           from_arm="valis_nope"))
+    bad = dict(
+        cfg, segmentation_arms=dict(cfg["segmentation_arms"], from_arm="valis_nope")
+    )
     with pytest.raises(ValueError, match="names no registration arm"):
         build_arm_plan(bad)
 
@@ -470,10 +523,12 @@ def test_run_arms_resolves_the_checkpoint_from_the_plan(plan):
     assert "csv/${from_csv}.csv" in script
     # Comments legitimately name the concrete checkpoints while explaining the
     # dependency; only executable lines must not pin one.
-    code = "\n".join(ln for ln in script.splitlines()
-                     if not ln.lstrip().startswith("#"))
+    code = "\n".join(
+        ln for ln in script.splitlines() if not ln.lstrip().startswith("#")
+    )
     assert "csv/registered.csv" not in code, (
-        "run_arms.sh still hardcodes a checkpoint filename in executable code")
+        "run_arms.sh still hardcodes a checkpoint filename in executable code"
+    )
 
 
 def test_preprocess_arm_runs_before_the_arms_that_resume_from_it():
@@ -493,12 +548,14 @@ def test_compute_arm_runs_the_whole_pipeline(plan):
     for r in comp:
         assert r["start"] == "" and r["stop"] == "", (
             "a gated compute arm cannot price SEGMENT / quantification / export, "
-            "which is the only reason this arm exists")
+            "which is the only reason this arm exists"
+        )
 
 
 # ---------------------------------------------------------------------------
 # The CONSUMER contract (ihc_method/code/registration_arms.R)
 # ---------------------------------------------------------------------------
+
 
 def test_arms_manifest_has_exactly_the_columns_the_consumer_reads(plan):
     """registration_arms.R keeps intersect(c(arm_dir, backend, memory_mode,
@@ -536,6 +593,7 @@ def test_tiled_arm_name_survives_the_consumer_fallback(plan):
 # The BASH contract — run_arms.sh parses arm_plan.csv with a naive IFS split
 # ---------------------------------------------------------------------------
 
+
 def _plan_csv(plan) -> str:
     fields: list[str] = []
     for r in plan:
@@ -559,7 +617,9 @@ def test_no_plan_value_contains_a_comma(plan):
     """
     for r in plan:
         for k, v in r.items():
-            assert "," not in str(v), f"{k}={v!r} in arm {r['arm']} would break run_arms.sh"
+            assert "," not in str(v), (
+                f"{k}={v!r} in arm {r['arm']} would break run_arms.sh"
+            )
 
 
 def test_plan_csv_is_written_unquoted(plan):
@@ -580,13 +640,15 @@ def test_every_plan_row_has_every_column(plan):
 # Samplesheet reading
 # ---------------------------------------------------------------------------
 
+
 def test_read_input_patients_dedupes_in_first_seen_order(tmp_path):
     p = tmp_path / "in.csv"
     p.write_text(
         "patient_id,path_to_file,is_reference,channels\n"
         "B,/b1.tif,true,DAPI\n"
         "B,/b2.tif,false,DAPI\n"
-        "A,/a1.tif,true,DAPI\n")
+        "A,/a1.tif,true,DAPI\n"
+    )
     assert read_input_patients(p) == ["B", "A"]
 
 
@@ -601,13 +663,15 @@ def test_read_input_patients_rejects_a_sheet_with_no_patient_id(tmp_path):
 # The shell scripts
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("script", ["run_arms.sh", "pull_to_ihc_method.sh"])
 def test_shell_scripts_parse(script):
     """`bash -n` on both. A ${1:?...} error word containing an apostrophe once
     swallowed the rest of pull_to_ihc_method.sh and reported the failure ~30
     lines later, so this is checked rather than eyeballed."""
-    r = subprocess.run(["bash", "-n", str(BENCH / script)],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        ["bash", "-n", str(BENCH / script)], capture_output=True, text=True
+    )
     assert r.returncode == 0, r.stderr
 
 
@@ -615,14 +679,19 @@ def test_shell_scripts_parse(script):
 def test_shell_scripts_are_tracked_executable(script):
     """Not cosmetic: a non-executable script fails at launch with exit 126, and
     a local chmod does not reach the cluster's git checkout."""
-    r = subprocess.run(["git", "ls-files", "-s", f"benchmarks/{script}"],
-                       cwd=REPO_ROOT, capture_output=True, text=True)
+    r = subprocess.run(
+        ["git", "ls-files", "-s", f"benchmarks/{script}"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
     assert r.stdout.startswith("100755"), r.stdout or "file not tracked"
 
 
 # ---------------------------------------------------------------------------
 # The pull script's rsync filters
 # ---------------------------------------------------------------------------
+
 
 def _fake_arm_tree(root: Path) -> None:
     """A minimal results tree with the shape run_arms.sh really produces."""
@@ -632,7 +701,9 @@ def _fake_arm_tree(root: Path) -> None:
             (base / "qc" / "registration").mkdir(parents=True, exist_ok=True)
             (base / "qc" / "registration" / f"{pat}_seg_qc.json").write_text("{}")
             (base / "registered" / "summary").mkdir(parents=True, exist_ok=True)
-            (base / "registered" / "summary" / f"{pat}_summary.csv").write_text("slide\n")
+            (base / "registered" / "summary" / f"{pat}_summary.csv").write_text(
+                "slide\n"
+            )
             slides = base / "registered" / "registered_slides"
             slides.mkdir(parents=True, exist_ok=True)
             (slides / "big.ome.tiff").write_bytes(b"\0" * 4096)
@@ -659,8 +730,11 @@ def test_pull_script_copies_the_nested_qc_artifacts(tmp_path):
     _fake_arm_tree(src)
     (ihc).mkdir()
     (ihc / "_workflowr.yml").touch()
-    r = subprocess.run([str(BENCH / "pull_to_ihc_method.sh"), str(src), str(ihc)],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        [str(BENCH / "pull_to_ihc_method.sh"), str(src), str(ihc)],
+        capture_output=True,
+        text=True,
+    )
     assert r.returncode == 0, r.stderr
     dest = ihc / "data" / "registration_arms"
     got = sorted(p.relative_to(dest).as_posix() for p in dest.rglob("*_seg_qc.json"))
@@ -684,8 +758,12 @@ def test_pull_script_never_copies_the_images(tmp_path):
     _fake_arm_tree(src)
     ihc.mkdir()
     (ihc / "_workflowr.yml").touch()
-    subprocess.run([str(BENCH / "pull_to_ihc_method.sh"), str(src), str(ihc)],
-                   capture_output=True, text=True, check=True)
+    subprocess.run(
+        [str(BENCH / "pull_to_ihc_method.sh"), str(src), str(ihc)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     assert not list((ihc / "data").rglob("*.ome.tiff"))
 
 
@@ -701,16 +779,27 @@ def test_pull_script_copies_the_cell_tables_into_data_mirage(tmp_path):
     _fake_arm_tree(src)
     ihc.mkdir()
     (ihc / "_workflowr.yml").touch()
-    r = subprocess.run([str(BENCH / "pull_to_ihc_method.sh"), str(src), str(ihc)],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        [str(BENCH / "pull_to_ihc_method.sh"), str(src), str(ihc)],
+        capture_output=True,
+        text=True,
+    )
     assert r.returncode == 0, r.stderr
     mirage = ihc / "data" / "mirage"
-    quant = sorted(p.relative_to(mirage).as_posix() for p in mirage.rglob("merged_quant.csv"))
-    morph = sorted(p.relative_to(mirage).as_posix() for p in mirage.rglob("morphology.csv"))
-    assert quant == ["046/quantification/merged_quant.csv",
-                     "24086/quantification/merged_quant.csv"], quant
-    assert morph == ["046/cell_properties/morphology.csv",
-                     "24086/cell_properties/morphology.csv"], morph
+    quant = sorted(
+        p.relative_to(mirage).as_posix() for p in mirage.rglob("merged_quant.csv")
+    )
+    morph = sorted(
+        p.relative_to(mirage).as_posix() for p in mirage.rglob("morphology.csv")
+    )
+    assert quant == [
+        "046/quantification/merged_quant.csv",
+        "24086/quantification/merged_quant.csv",
+    ], quant
+    assert morph == [
+        "046/cell_properties/morphology.csv",
+        "24086/cell_properties/morphology.csv",
+    ], morph
     # and the qc tree the other consumer needs is still there
     assert list(mirage.rglob("*_seg_qc.json")), "run_qc.R's artifacts were dropped"
 
@@ -736,12 +825,22 @@ def test_arm_tables_never_land_in_data_benchmark(tmp_path):
     (handoff / "arms" / "measurements.csv").write_text("process\nARM\n")
     (handoff / "sweep" / "measurements.csv").write_text("process\nSWEEP\n")
 
-    r = subprocess.run([str(BENCH / "pull_to_ihc_method.sh"), str(src), str(ihc),
-                        "--handoff", str(handoff)], capture_output=True, text=True)
+    r = subprocess.run(
+        [
+            str(BENCH / "pull_to_ihc_method.sh"),
+            str(src),
+            str(ihc),
+            "--handoff",
+            str(handoff),
+        ],
+        capture_output=True,
+        text=True,
+    )
     assert r.returncode == 0, r.stderr
     bench = (ihc / "data" / "benchmark" / "measurements.csv").read_text()
     assert "SWEEP" in bench and "ARM" not in bench, (
-        "data/benchmark/measurements.csv must come from the sweep, got:\n" + bench)
+        "data/benchmark/measurements.csv must come from the sweep, got:\n" + bench
+    )
     arm_side = (ihc / "data" / "registration_arms" / "measurements.csv").read_text()
     assert "ARM" in arm_side, arm_side
 
@@ -749,8 +848,11 @@ def test_arm_tables_never_land_in_data_benchmark(tmp_path):
 def test_pull_script_rejects_an_unknown_option():
     """The script grew options; a typo must not be swallowed as a positional and
     silently become the ihc_method path."""
-    r = subprocess.run([str(BENCH / "pull_to_ihc_method.sh"), "--sweeep", "x"],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        [str(BENCH / "pull_to_ihc_method.sh"), "--sweeep", "x"],
+        capture_output=True,
+        text=True,
+    )
     assert r.returncode != 0
     assert "unknown option" in r.stderr
 
@@ -766,6 +868,7 @@ def test_validate_against_schema_is_what_the_cli_enforces(plan):
 # Tracing is owned by the pipeline, not by the launcher's CLI flags
 # ---------------------------------------------------------------------------
 
+
 def test_run_arms_does_not_pass_with_trace_or_with_report():
     """nextflow.config declares trace/report/timeline observers driven by
     params.trace_dir, and benchmark.config enables them. Passing -with-trace on
@@ -774,8 +877,9 @@ def test_run_arms_does_not_pass_with_trace_or_with_report():
     stderr log containing only the version banner. run_sweep.sh had it right:
     pass --trace_dir and let the pipeline own it."""
     script = (BENCH / "run_arms.sh").read_text()
-    code = "\n".join(ln for ln in script.splitlines()
-                     if not ln.lstrip().startswith("#"))
+    code = "\n".join(
+        ln for ln in script.splitlines() if not ln.lstrip().startswith("#")
+    )
     assert "-with-trace" not in code
     assert "-with-report" not in code
     assert "--trace_dir" in code, "run_arms.sh must set --trace_dir instead"
@@ -817,10 +921,17 @@ BASH4_ONLY = {
 }
 
 
-@pytest.mark.parametrize("script", [
-    "run_arms.sh", "run_sweep.sh", "pull_to_ihc_method.sh",
-    "submit_arms.sh", "submit_sweep.sh", "submit_matrix.sh",
-])
+@pytest.mark.parametrize(
+    "script",
+    [
+        "run_arms.sh",
+        "run_sweep.sh",
+        "pull_to_ihc_method.sh",
+        "submit_arms.sh",
+        "submit_sweep.sh",
+        "submit_matrix.sh",
+    ],
+)
 def test_scripts_avoid_bash4_only_constructs(script):
     """`bash -n` does NOT catch these -- it parses them and they fail at RUNTIME
     with "bad substitution". submit_matrix.sh shipped with ${SOURCE,,} and passed
@@ -829,21 +940,34 @@ def test_scripts_avoid_bash4_only_constructs(script):
     run_sweep.sh already documents this constraint (it uses indexed arrays and
     FIFO waits rather than declare -A and wait -n); this enforces it.
     """
-    code = "\n".join(ln for ln in (BENCH / script).read_text().splitlines()
-                     if not ln.lstrip().startswith("#"))
+    code = "\n".join(
+        ln
+        for ln in (BENCH / script).read_text().splitlines()
+        if not ln.lstrip().startswith("#")
+    )
     found = [why for pat, why in BASH4_ONLY.items() if re.search(pat, code)]
     assert not found, f"{script} uses bash 4+ only: {found}"
 
 
-@pytest.mark.parametrize("script", [
-    "submit_arms.sh", "submit_sweep.sh", "submit_matrix.sh",
-])
+@pytest.mark.parametrize(
+    "script",
+    [
+        "submit_arms.sh",
+        "submit_sweep.sh",
+        "submit_matrix.sh",
+    ],
+)
 def test_submitters_parse_and_are_tracked_executable(script):
-    r = subprocess.run(["bash", "-n", str(BENCH / script)],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        ["bash", "-n", str(BENCH / script)], capture_output=True, text=True
+    )
     assert r.returncode == 0, r.stderr
-    r = subprocess.run(["git", "ls-files", "-s", f"benchmarks/{script}"],
-                       cwd=REPO_ROOT, capture_output=True, text=True)
+    r = subprocess.run(
+        ["git", "ls-files", "-s", f"benchmarks/{script}"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
     assert r.stdout.startswith("100755"), r.stdout or "not tracked"
 
 
@@ -862,11 +986,13 @@ def test_submit_matrix_resolves_python_and_preflights_deps():
     #   2. python3 is TRIED, because `python` may not exist even with an env active;
     #   3. an unresolved interpreter is a NAMED error here, not a `command not found`
     #      hundreds of lines into a multi-hour job.
-    assert "${PYTHON:-}" in code or "${PYTHON:-$" in code, \
+    assert "${PYTHON:-}" in code or "${PYTHON:-$" in code, (
         "an operator-supplied PYTHON must still win"
+    )
     assert "command -v python3" in code, "python3 must be tried"
-    assert "no python3/python on PATH" in code, \
+    assert "no python3/python on PATH" in code, (
         "an unresolved interpreter must abort with a named error"
+    )
     assert "python deps OK" in code and "numpy" in code
     assert "from bioio import BioImage" in code, "ND2 sources need a bioio check"
 
@@ -874,6 +1000,7 @@ def test_submit_matrix_resolves_python_and_preflights_deps():
 # ---------------------------------------------------------------------------
 # Concurrency must be raised on the CLI, not in benchmark.config
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("script", ["submit_arms.sh", "submit_sweep.sh"])
 def test_submitters_raise_concurrency_on_the_command_line(script):
@@ -884,21 +1011,27 @@ def test_submitters_raise_concurrency_on_the_command_line(script):
     nextflow.config, BEFORE a -c file is merged, so benchmark.config cannot reach a
     single clamp. Only a CLI --max_forks is in scope in time.
     """
-    code = "\n".join(ln for ln in (BENCH / script).read_text().splitlines()
-                     if not ln.lstrip().startswith("#"))
+    code = "\n".join(
+        ln
+        for ln in (BENCH / script).read_text().splitlines()
+        if not ln.lstrip().startswith("#")
+    )
     assert "--max_forks" in code, f"{script} does not pass --max_forks"
     assert "--queue_size" in code, (
         f"{script} passes --max_forks without --queue_size; the LOWER of the pair "
         "binds, and queue_size defaults far below max_forks, so max_forks alone is "
-        "a no-op")
+        "a no-op"
+    )
 
 
 def test_benchmark_config_does_not_set_concurrency_directives():
     """Setting them there is worse than useless: process.maxForks cannot lift a
     per-process withName value that already resolved to min(own, 100), so the file
     reads as if it raises concurrency while doing nothing."""
-    code = "\n".join(ln for ln in
-                     (BENCH / "configs" / "benchmark.config").read_text().splitlines()
-                     if not ln.lstrip().startswith(("//", "*", "/*")))
+    code = "\n".join(
+        ln
+        for ln in (BENCH / "configs" / "benchmark.config").read_text().splitlines()
+        if not ln.lstrip().startswith(("//", "*", "/*"))
+    )
     assert "queueSize" not in code, "benchmark.config still sets executor.queueSize"
     assert "maxForks = 200" not in code, "benchmark.config still sets a global maxForks"

@@ -1,4 +1,5 @@
 """Expand a sweep.yaml into a flat run plan (one row per pipeline launch)."""
+
 from __future__ import annotations
 
 import argparse
@@ -15,8 +16,10 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
 
     if strategy == "grid":
         keys = list(axes)
-        return [(dict(zip(keys, combo)), "grid")
-                for combo in itertools.product(*(axes[k] for k in keys))]
+        return [
+            (dict(zip(keys, combo)), "grid")
+            for combo in itertools.product(*(axes[k] for k in keys))
+        ]
 
     # ofat
     baseline = sweep.get("baseline", {})
@@ -30,8 +33,9 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
         for tpx in grid["target_px"]:
             for nch in grid["n_channels"]:
                 row = dict(baseline, target_px=tpx, n_channels=nch)
-                is_base = (tpx == baseline.get("target_px")
-                           and nch == baseline.get("n_channels"))
+                is_base = tpx == baseline.get("target_px") and nch == baseline.get(
+                    "n_channels"
+                )
                 configs.append((row, "baseline" if is_base else "scaling_grid"))
     else:
         configs.append((dict(baseline), "baseline"))
@@ -51,8 +55,17 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
                 for nreg in rgrid["n_register_images"]:
                     if nreg == base_nreg:
                         continue  # already the scaling-grid cell at baseline N
-                    configs.append((dict(baseline, target_px=tpx, n_channels=nch,
-                                         n_register_images=nreg), "registration_grid"))
+                    configs.append(
+                        (
+                            dict(
+                                baseline,
+                                target_px=tpx,
+                                n_channels=nch,
+                                n_register_images=nreg,
+                            ),
+                            "registration_grid",
+                        )
+                    )
 
     # 2b. (removed) DISTRIBUTED GRID — the distributed/tiled registration path was archived out of the
     #     pipeline (git tag archive/tiled-valis-2026-07-24); registration is classic REGISTER only, so
@@ -76,8 +89,12 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
         for method, mparams in sgrid.items():
             keys = list(mparams)
             for combo in itertools.product(*(mparams[k] for k in keys)):
-                configs.append((dict(baseline, seg_method=method, **dict(zip(keys, combo))),
-                                f"segmentation_grid:{method}"))
+                configs.append(
+                    (
+                        dict(baseline, seg_method=method, **dict(zip(keys, combo))),
+                        f"segmentation_grid:{method}",
+                    )
+                )
 
     # 3d. REGISTRATION METHOD GRID — each registration_method benchmarked with ITS OWN parameters,
     #     mirroring segmentation_grid. sweep.yaml maps a registration_method (valis|tiled) to a dict of
@@ -91,8 +108,16 @@ def _configs(sweep: dict) -> list[tuple[dict, str]]:
         for method, mparams in rmgrid.items():
             keys = list(mparams)
             for combo in itertools.product(*(mparams[k] for k in keys)):
-                configs.append((dict(baseline, registration_method=method, **dict(zip(keys, combo))),
-                                f"registration_method_grid:{method}"))
+                configs.append(
+                    (
+                        dict(
+                            baseline,
+                            registration_method=method,
+                            **dict(zip(keys, combo)),
+                        ),
+                        f"registration_method_grid:{method}",
+                    )
+                )
 
     # NOTE: a param that is DEAD unless another param enables it must never reach the OFAT loop
     #       below — a flat run off the baseline changes a value the pipeline never reads, so it
@@ -123,9 +148,15 @@ def build_run_plan(sweep: dict, repeats: int = 1) -> list[dict]:
     run_i = 0
     for cfg_i, (params, varied_axis) in enumerate(_configs(sweep)):
         for rep in range(repeats):
-            rows.append(dict(params, run_id=f"run{run_i:04d}",
-                             varied_axis=varied_axis,
-                             config_id=f"cfg{cfg_i:03d}", rep=rep))
+            rows.append(
+                dict(
+                    params,
+                    run_id=f"run{run_i:04d}",
+                    varied_axis=varied_axis,
+                    config_id=f"cfg{cfg_i:03d}",
+                    rep=rep,
+                )
+            )
             run_i += 1
     return rows
 
@@ -136,9 +167,13 @@ def main():
     ap = argparse.ArgumentParser(description="Expand sweep.yaml into run_plan.csv")
     ap.add_argument("--sweep", required=True, type=Path)
     ap.add_argument("--out", required=True, type=Path)
-    ap.add_argument("--repeats", type=int, default=3,
-                    help="Replicate runs per config (>=3 gives a per-config variance "
-                         "estimate; timing especially is noisy at n=1). Default: 3.")
+    ap.add_argument(
+        "--repeats",
+        type=int,
+        default=3,
+        help="Replicate runs per config (>=3 gives a per-config variance "
+        "estimate; timing especially is noisy at n=1). Default: 3.",
+    )
     a = ap.parse_args()
     sweep = yaml.safe_load(a.sweep.read_text())
     plan = build_run_plan(sweep, repeats=a.repeats)

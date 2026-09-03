@@ -47,7 +47,15 @@ FRAMEWORKS = {
 
 # Frameworks the pipeline genuinely selects. Each must be reachable: named in seg_method's enum,
 # or imported by first-party code.
-CODE_DIRS = ("bin", "tests", "benchmarks", "lib", "modules", "subworkflows", "workflows")
+CODE_DIRS = (
+    "bin",
+    "tests",
+    "benchmarks",
+    "lib",
+    "modules",
+    "subworkflows",
+    "workflows",
+)
 
 
 def _dockerfiles():

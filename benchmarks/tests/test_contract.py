@@ -17,6 +17,7 @@ sweeps over [2000, 4000, 8000].
 Adding an axis to sweep.yaml must now carry it into the tables with no other
 edit. That property is what these tests pin.
 """
+
 from pathlib import Path
 
 from benchmarks.analysis.lib import contract
@@ -85,8 +86,11 @@ def test_grid_keys_count_as_axes():
         },
     }
     assert contract.axes(sweep) == {
-        "target_px", "n_channels", "seg_method",
-        "seg_n_tiles_x", "seg_cellsam_block_size",
+        "target_px",
+        "n_channels",
+        "seg_method",
+        "seg_n_tiles_x",
+        "seg_cellsam_block_size",
     }
 
 
@@ -108,6 +112,7 @@ def test_config_cols_is_gone():
     # the constant is gone, and a check that could not tell those apart would
     # have to be deleted the first time someone documented the removal.
     import re
+
     assert not re.search(r"^\s*CONFIG_COLS\s*=", src, re.M), (
         "CONFIG_COLS is defined again in make_tables.py"
     )
@@ -156,8 +161,7 @@ def _unread_params(path: Path, func: str) -> list:
 
     tree = ast.parse(path.read_text())
     fn = next(
-        n for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef) and n.name == func
+        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == func
     )
     names = {a.arg for a in fn.args.args} | {a.arg for a in fn.args.kwonlyargs}
     used = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)}
@@ -176,8 +180,10 @@ def test_no_analysis_entry_point_takes_a_parameter_it_never_reads():
     """
     root = BENCH / "analysis"
     offenders = []
-    for rel, func in (("make_figures.py", "run"),
-                      ("make_tables.py", "build_paper_data")):
+    for rel, func in (
+        ("make_figures.py", "run"),
+        ("make_tables.py", "build_paper_data"),
+    ):
         unread = _unread_params(root / rel, func)
         if unread:
             offenders.append(f"{rel}::{func} never reads {unread}")

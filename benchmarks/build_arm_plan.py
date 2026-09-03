@@ -18,6 +18,7 @@ conclusion inverted. The QC-segmenter-crossed arms below (`valis_high_micro2_seg
 stardist`) are exactly the names that fallback would read wrong, so this module
 always emits the manifest rather than leaving it to a flag.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,8 +41,14 @@ TILED_ONLY = ("reg_tiled_mode",)
 # guarantees that: run_pass() forwards a fixed list of param columns as --flags, and no
 # name in this tuple can ever collide with one. Blank on every pipeline arm so all rows
 # share a header (run_arms.sh's col_val indexes by header position).
-EXTERNAL_ONLY = ("ext_tool", "ext_from_arm", "ext_tile_size", "ext_overlap",
-                 "ext_max_shift_um", "ext_seg_method")
+EXTERNAL_ONLY = (
+    "ext_tool",
+    "ext_from_arm",
+    "ext_tile_size",
+    "ext_overlap",
+    "ext_max_shift_um",
+    "ext_seg_method",
+)
 
 # ASHLAR_ONLY = ("reg_ashlar_tile", "reg_ashlar_overlap", "reg_ashlar_max_shift_um") is GONE
 # with the arm. Those three are not pipeline params any more -- nextflow.config declares none
@@ -69,13 +76,15 @@ def _registration_arms(cfg: dict) -> list[dict]:
     valis = ra.get("valis") or {}
     for mm in valis.get("memory_mode", []):
         for micro in valis.get("reg_micro_reg", []):
-            arms.append({
-                "arm": valis_arm_name(mm, micro),
-                "backend": "valis",
-                "memory_mode": mm,
-                "reg_micro_reg": micro,
-                "label": f"{mm} / micro {micro}",
-            })
+            arms.append(
+                {
+                    "arm": valis_arm_name(mm, micro),
+                    "backend": "valis",
+                    "memory_mode": mm,
+                    "reg_micro_reg": micro,
+                    "label": f"{mm} / micro {micro}",
+                }
+            )
 
     # ASHLAR IS NOT A *PIPELINE* ARM, AND CANNOT BE. run_arms.sh passes each
     # registration row's columns as --flags, and ashlar is no longer a pipeline backend:
@@ -103,18 +112,20 @@ def _registration_arms(cfg: dict) -> list[dict]:
         # test_project_stare_resolution_axis_mirrors_the_valis_one guards in the sweep --
         # and it was unguarded here, in the block that produces the manuscript figure.
         for mode in tiled.get("reg_tiled_mode", []):
-            arms.append({
-                "arm": tiled_arm_name(mode),
-                "backend": "tiled",
-                # No memory_mode, no reg_micro_reg -- see VALIS_ONLY. The consumer keys
-                # "is this the tiled backend" off the `backend` column when arms.csv is
-                # present, and off the substring `tiled`/`stare` when it is not; the name
-                # satisfies both so the fallback path stays correct too.
-                "memory_mode": "",
-                "reg_micro_reg": "",
-                "reg_tiled_mode": mode,
-                "label": f"tiled (STARE, {mode})",
-            })
+            arms.append(
+                {
+                    "arm": tiled_arm_name(mode),
+                    "backend": "tiled",
+                    # No memory_mode, no reg_micro_reg -- see VALIS_ONLY. The consumer keys
+                    # "is this the tiled backend" off the `backend` column when arms.csv is
+                    # present, and off the substring `tiled`/`stare` when it is not; the name
+                    # satisfies both so the fallback path stays correct too.
+                    "memory_mode": "",
+                    "reg_micro_reg": "",
+                    "reg_tiled_mode": mode,
+                    "label": f"tiled (STARE, {mode})",
+                }
+            )
     return arms
 
 
@@ -161,28 +172,31 @@ def _external_arms(cfg: dict) -> list[dict]:
             "registration arm's published QC nuclei "
             "(<root>/<from_arm>/<patient>/qc/registration/geojson/) rather than "
             "re-segmenting. Scoring against DIFFERENT nuclei than the arms it is ranked "
-            "against would make the comparison meaningless.")
+            "against would make the comparison meaningless."
+        )
 
     for tile in ash.get("tile_size", []):
         for shift in ash.get("maximum_shift_um", []):
             name = ashlar_arm_name(tile, shift)
-            arms.append({
-                "arm": name,
-                "backend": "ashlar",
-                # Blank for the same reason a tiled arm blanks memory_mode: the consumer
-                # must be able to tell "not applicable" from "at default".
-                "memory_mode": "",
-                "reg_micro_reg": "",
-                "reg_tiled_mode": "",
-                "ext_tool": "ashlar",
-                "ext_from_arm": from_arm,
-                "ext_tile_size": tile,
-                "ext_overlap": ash.get("overlap_fraction", 0.1),
-                "ext_max_shift_um": shift,
-                # Filled in by build_arm_plan from ext_from_arm's own seg_method.
-                "ext_seg_method": "",
-                "label": f"ashlar (tile {int(tile)}, shift {int(shift)}um)",
-            })
+            arms.append(
+                {
+                    "arm": name,
+                    "backend": "ashlar",
+                    # Blank for the same reason a tiled arm blanks memory_mode: the consumer
+                    # must be able to tell "not applicable" from "at default".
+                    "memory_mode": "",
+                    "reg_micro_reg": "",
+                    "reg_tiled_mode": "",
+                    "ext_tool": "ashlar",
+                    "ext_from_arm": from_arm,
+                    "ext_tile_size": tile,
+                    "ext_overlap": ash.get("overlap_fraction", 0.1),
+                    "ext_max_shift_um": shift,
+                    # Filled in by build_arm_plan from ext_from_arm's own seg_method.
+                    "ext_seg_method": "",
+                    "label": f"ashlar (tile {int(tile)}, shift {int(shift)}um)",
+                }
+            )
     return arms
 
 
@@ -212,20 +226,22 @@ def _apply_qc_segmenter_cross(arms: list[dict], cfg: dict) -> list[dict]:
         if ref not in names:
             raise ValueError(
                 f"qc_segmenter_cross.reference_arm={ref!r} is not an arm this "
-                f"config produces. Available: {sorted(names)}")
+                f"config produces. Available: {sorted(names)}"
+            )
         targets = [a for a in arms if a["arm"] == ref]
     elif mode == "all":
         targets = list(arms)
     else:
         raise ValueError(
             f"qc_segmenter_cross.cross must be 'reference', 'all' or 'none', "
-            f"got {mode!r}")
+            f"got {mode!r}"
+        )
 
     extra: list[dict] = []
     for base in targets:
         for m in methods:
             if m == base["seg_method"]:
-                continue          # that IS the base arm; a duplicate run measures nothing
+                continue  # that IS the base arm; a duplicate run measures nothing
             a = dict(base)
             a["arm"] = f"{base['arm']}_seg{m}"
             a["seg_method"] = m
@@ -263,7 +279,8 @@ def build_arm_plan(cfg: dict) -> list[dict]:
         raise ValueError(
             "arms.yaml baseline.reg_qc must be 2 — the registration arm ranking "
             f"reads the reg_qc=2 staged QC and nothing else emits it (got "
-            f"{baseline.get('reg_qc')!r})")
+            f"{baseline.get('reg_qc')!r})"
+        )
 
     rows: list[dict] = []
     n = 0
@@ -274,34 +291,58 @@ def build_arm_plan(cfg: dict) -> list[dict]:
     # an identical (and, on a real WSI, expensive) preprocessing step. Run it once
     # and have every registration arm resume from its csv/preprocessed.csv -- the
     # same factoring already applied to the segmentation arms.
-    rows.append({
-        "run_id": PREPROCESS_ARM, "arm_kind": "preprocess",
-        "start": "preprocessing", "stop": "preprocessing",
-        "from_arm": "", "from_csv": "", "rep": 0,
-        "arm": PREPROCESS_ARM, "backend": "", "memory_mode": "",
-        "reg_micro_reg": "", "seg_method": baseline.get("seg_method", ""),
-        "registration_method": "", "reg_qc": "",
-        **{k: "" for k in TILED_ONLY},
-        **{k: "" for k in EXTERNAL_ONLY},
-    })
+    rows.append(
+        {
+            "run_id": PREPROCESS_ARM,
+            "arm_kind": "preprocess",
+            "start": "preprocessing",
+            "stop": "preprocessing",
+            "from_arm": "",
+            "from_csv": "",
+            "rep": 0,
+            "arm": PREPROCESS_ARM,
+            "backend": "",
+            "memory_mode": "",
+            "reg_micro_reg": "",
+            "seg_method": baseline.get("seg_method", ""),
+            "registration_method": "",
+            "reg_qc": "",
+            **{k: "" for k in TILED_ONLY},
+            **{k: "" for k in EXTERNAL_ONLY},
+        }
+    )
     n += 1
 
     arms = _apply_qc_segmenter_cross(_registration_arms(cfg), cfg)
     for a in arms:
         _LABELS[a["arm"]] = a["label"]
-        rows.append({
-            "run_id": a["arm"], "arm_kind": "registration",
-            "start": "registration", "stop": "registration",
-            "from_arm": PREPROCESS_ARM, "from_csv": "preprocessed", "rep": 0,
-            "registration_method": a["backend"],
-            **{k: a[k] for k in ("arm", "backend", "memory_mode",
-                                 "reg_micro_reg", "seg_method")},
-            # Blank on every non-tiled arm, exactly as memory_mode/reg_micro_reg are
-            # blank on non-VALIS arms.
-            **{k: a.get(k, "") for k in TILED_ONLY},
-            **{k: "" for k in EXTERNAL_ONLY},
-            "reg_qc": 2,
-        })
+        rows.append(
+            {
+                "run_id": a["arm"],
+                "arm_kind": "registration",
+                "start": "registration",
+                "stop": "registration",
+                "from_arm": PREPROCESS_ARM,
+                "from_csv": "preprocessed",
+                "rep": 0,
+                "registration_method": a["backend"],
+                **{
+                    k: a[k]
+                    for k in (
+                        "arm",
+                        "backend",
+                        "memory_mode",
+                        "reg_micro_reg",
+                        "seg_method",
+                    )
+                },
+                # Blank on every non-tiled arm, exactly as memory_mode/reg_micro_reg are
+                # blank on non-VALIS arms.
+                **{k: a.get(k, "") for k in TILED_ONLY},
+                **{k: "" for k in EXTERNAL_ONLY},
+                "reg_qc": 2,
+            }
+        )
         n += 1
 
     # EXTERNAL BASELINE (ashlar). Emitted AFTER the registration arms and run in its own
@@ -315,37 +356,48 @@ def build_arm_plan(cfg: dict) -> list[dict]:
             if e["ext_from_arm"] not in known:
                 raise ValueError(
                     f"external_baseline.ashlar.from_arm={e['ext_from_arm']!r} names no "
-                    f"registration arm this plan runs. Available: {sorted(known)}")
+                    f"registration arm this plan runs. Available: {sorted(known)}"
+                )
     for e in ext:
         _LABELS[e["arm"]] = e["label"]
-        rows.append({
-            "run_id": e["arm"], "arm_kind": "external",
-            # No --start/--stop: nothing in this row reaches Nextflow.
-            "start": "", "stop": "",
-            # TWO sources, and they are different arms. The IMAGES come from the shared
-            # preprocessing run, so ashlar registers exactly what VALIS and STARE
-            # registered (comparing it against native slides would hand it a different
-            # input and make the ranking meaningless). The NUCLEI come from
-            # `ext_from_arm`'s published qc/registration/geojson/. `from_arm`/`from_csv`
-            # name the first because that is what run_arms.sh's resume check reads --
-            # which also gets the external arm the "SKIP if upstream did not complete"
-            # guard for free.
-            "from_arm": PREPROCESS_ARM, "from_csv": "preprocessed", "rep": 0,
-            "arm": e["arm"], "backend": e["backend"],
-            "memory_mode": "", "reg_micro_reg": "",
-            # seg_method is BLANK, and ext_seg_method carries the value instead. Not
-            # pedantry: `seg_method` is one of the columns run_pass() forwards as a
-            # --flag, and this row must stay incapable of contributing one even if the
-            # external dispatch branch is ever moved. The value is still recorded, because
-            # WHICH segmenter found the nuclei is a property of the score -- it is just
-            # inherited from ext_from_arm's geojsons rather than chosen here.
-            "seg_method": "",
-            "registration_method": "", "reg_qc": "",
-            **{k: "" for k in TILED_ONLY},
-            **{k: e[k] for k in EXTERNAL_ONLY},
-            "ext_seg_method": next(a["seg_method"] for a in arms
-                                   if a["arm"] == e["ext_from_arm"]),
-        })
+        rows.append(
+            {
+                "run_id": e["arm"],
+                "arm_kind": "external",
+                # No --start/--stop: nothing in this row reaches Nextflow.
+                "start": "",
+                "stop": "",
+                # TWO sources, and they are different arms. The IMAGES come from the shared
+                # preprocessing run, so ashlar registers exactly what VALIS and STARE
+                # registered (comparing it against native slides would hand it a different
+                # input and make the ranking meaningless). The NUCLEI come from
+                # `ext_from_arm`'s published qc/registration/geojson/. `from_arm`/`from_csv`
+                # name the first because that is what run_arms.sh's resume check reads --
+                # which also gets the external arm the "SKIP if upstream did not complete"
+                # guard for free.
+                "from_arm": PREPROCESS_ARM,
+                "from_csv": "preprocessed",
+                "rep": 0,
+                "arm": e["arm"],
+                "backend": e["backend"],
+                "memory_mode": "",
+                "reg_micro_reg": "",
+                # seg_method is BLANK, and ext_seg_method carries the value instead. Not
+                # pedantry: `seg_method` is one of the columns run_pass() forwards as a
+                # --flag, and this row must stay incapable of contributing one even if the
+                # external dispatch branch is ever moved. The value is still recorded, because
+                # WHICH segmenter found the nuclei is a property of the score -- it is just
+                # inherited from ext_from_arm's geojsons rather than chosen here.
+                "seg_method": "",
+                "registration_method": "",
+                "reg_qc": "",
+                **{k: "" for k in TILED_ONLY},
+                **{k: e[k] for k in EXTERNAL_ONLY},
+                "ext_seg_method": next(
+                    a["seg_method"] for a in arms if a["arm"] == e["ext_from_arm"]
+                ),
+            }
+        )
         n += 1
 
     sa = cfg.get("segmentation_arms") or {}
@@ -356,41 +408,59 @@ def build_arm_plan(cfg: dict) -> list[dict]:
                 f"segmentation_arms.from_arm={frm!r} names no registration arm. "
                 f"It must be an arm this plan runs, because the segmentation arms "
                 f"resume from its csv/registered.csv. Available: "
-                f"{sorted({a['arm'] for a in arms})}")
+                f"{sorted({a['arm'] for a in arms})}"
+            )
         for m in sa.get("seg_method", []):
-            rows.append({
-                "run_id": f"seg_{m}", "arm_kind": "segmentation",
-                "start": "segmentation", "stop": "", "from_arm": frm,
-                "from_csv": "registered", "rep": 0,
-                "arm": f"seg_{m}", "backend": "", "memory_mode": "",
-                "reg_micro_reg": "", "seg_method": m,
-                "registration_method": "",
-                "reg_qc": "",
-                **{k: "" for k in TILED_ONLY},
-                **{k: "" for k in EXTERNAL_ONLY},
-            })
+            rows.append(
+                {
+                    "run_id": f"seg_{m}",
+                    "arm_kind": "segmentation",
+                    "start": "segmentation",
+                    "stop": "",
+                    "from_arm": frm,
+                    "from_csv": "registered",
+                    "rep": 0,
+                    "arm": f"seg_{m}",
+                    "backend": "",
+                    "memory_mode": "",
+                    "reg_micro_reg": "",
+                    "seg_method": m,
+                    "registration_method": "",
+                    "reg_qc": "",
+                    **{k: "" for k in TILED_ONLY},
+                    **{k: "" for k in EXTERNAL_ONLY},
+                }
+            )
             n += 1
 
     cp = cfg.get("compute_profile")
     if cp is not None:
-        pats = cp.get("patients") or [""]        # "" = every patient in the input.csv
+        pats = cp.get("patients") or [""]  # "" = every patient in the input.csv
         for p in pats:
             for rep in range(int(cp.get("repeats", 1) or 1)):
-                rows.append({
-                    "run_id": _compute_arm_name(p, rep), "arm_kind": "compute",
-                    "start": "", "stop": "", "from_arm": "", "from_csv": "",
-                    "rep": rep,
-                    "arm": _compute_arm_name(p, rep),
-                    "backend": baseline.get("registration_method", "valis"),
-                    "memory_mode": baseline.get("memory_mode", ""),
-                    "reg_micro_reg": baseline.get("reg_micro_reg", ""),
-                    "seg_method": baseline.get("seg_method", ""),
-                    "registration_method": baseline.get("registration_method", "valis"),
-                    "reg_qc": baseline.get("reg_qc", 2),
-                    "only_patient": p,
-                    **{k: "" for k in TILED_ONLY},
-                    **{k: "" for k in EXTERNAL_ONLY},
-                })
+                rows.append(
+                    {
+                        "run_id": _compute_arm_name(p, rep),
+                        "arm_kind": "compute",
+                        "start": "",
+                        "stop": "",
+                        "from_arm": "",
+                        "from_csv": "",
+                        "rep": rep,
+                        "arm": _compute_arm_name(p, rep),
+                        "backend": baseline.get("registration_method", "valis"),
+                        "memory_mode": baseline.get("memory_mode", ""),
+                        "reg_micro_reg": baseline.get("reg_micro_reg", ""),
+                        "seg_method": baseline.get("seg_method", ""),
+                        "registration_method": baseline.get(
+                            "registration_method", "valis"
+                        ),
+                        "reg_qc": baseline.get("reg_qc", 2),
+                        "only_patient": p,
+                        **{k: "" for k in TILED_ONLY},
+                        **{k: "" for k in EXTERNAL_ONLY},
+                    }
+                )
                 n += 1
     return rows
 
@@ -409,13 +479,17 @@ def arms_manifest_rows(plan: list[dict]) -> list[dict]:
     as neither VALIS nor tiled and labels the box from the raw string. Listing them is
     what makes the external baseline appear as a baseline rather than as a mystery arm.
     """
-    return [{
-        "arm_dir": r["arm"],
-        "backend": r["backend"],
-        "memory_mode": r["memory_mode"],
-        "micro_reg": r["reg_micro_reg"],
-        "label": _LABELS[r["arm"]],
-    } for r in plan if r["arm_kind"] in ("registration", "external")]
+    return [
+        {
+            "arm_dir": r["arm"],
+            "backend": r["backend"],
+            "memory_mode": r["memory_mode"],
+            "micro_reg": r["reg_micro_reg"],
+            "label": _LABELS[r["arm"]],
+        }
+        for r in plan
+        if r["arm_kind"] in ("registration", "external")
+    ]
 
 
 def schema_enums(schema_path: Path) -> dict:
@@ -496,15 +570,24 @@ def main():
     import yaml
 
     ap = argparse.ArgumentParser(
-        description="Expand arms.yaml into arm_plan.csv (+ the consumer's arms.csv)")
+        description="Expand arms.yaml into arm_plan.csv (+ the consumer's arms.csv)"
+    )
     ap.add_argument("--arms", required=True, type=Path)
-    ap.add_argument("--input", required=True, type=Path,
-                    help="the REAL samplesheet (patient_id,path_to_file,is_reference,channels)")
+    ap.add_argument(
+        "--input",
+        required=True,
+        type=Path,
+        help="the REAL samplesheet (patient_id,path_to_file,is_reference,channels)",
+    )
     ap.add_argument("--out", required=True, type=Path, help="arm_plan.csv")
-    ap.add_argument("--results-root", type=Path, default=None,
-                    help="where arms.csv is written (default: alongside --out). "
-                         "Point it at the results root the runs publish into — that "
-                         "is where registration_arms.R looks for it.")
+    ap.add_argument(
+        "--results-root",
+        type=Path,
+        default=None,
+        help="where arms.csv is written (default: alongside --out). "
+        "Point it at the results root the runs publish into — that "
+        "is where registration_arms.R looks for it.",
+    )
     a = ap.parse_args()
 
     cfg = yaml.safe_load(a.arms.read_text())
@@ -520,8 +603,9 @@ def main():
                 "arms.yaml pins values the pipeline will reject:\n"
                 + "\n".join(bad)
                 + "\n\nThese are checked against nextflow_schema.json here because "
-                  "validateParameters() would otherwise only reject them once every "
-                  "run had been queued and scheduled.")
+                "validateParameters() would otherwise only reject them once every "
+                "run had been queued and scheduled."
+            )
 
     patients = read_input_patients(a.input)
     cp = cfg.get("compute_profile") or {}
@@ -529,12 +613,16 @@ def main():
     if unknown:
         raise SystemExit(
             f"compute_profile.patients names patients absent from {a.input}: "
-            f"{unknown}\nPresent: {patients}")
+            f"{unknown}\nPresent: {patients}"
+        )
 
     _write_csv(a.out, plan, ["run_id", "arm_kind", "arm"])
     root = a.results_root or a.out.parent
-    _write_csv(root / "arms.csv", arms_manifest_rows(plan),
-               ["arm_dir", "backend", "memory_mode", "micro_reg", "label"])
+    _write_csv(
+        root / "arms.csv",
+        arms_manifest_rows(plan),
+        ["arm_dir", "backend", "memory_mode", "micro_reg", "label"],
+    )
 
     by_kind: dict[str, int] = {}
     for r in plan:
@@ -546,9 +634,11 @@ def main():
     # Say the multiplier out loud. Every registration/segmentation arm runs the
     # WHOLE cohort, so the launch count is not the run count.
     per_cohort = sum(1 for r in plan if r["arm_kind"] != "compute")
-    print(f"NOTE: {per_cohort} of these launch the full cohort "
-          f"({per_cohort} x {len(patients)} patient-runs), plus "
-          f"{by_kind.get('compute', 0)} compute-profile launch(es).")
+    print(
+        f"NOTE: {per_cohort} of these launch the full cohort "
+        f"({per_cohort} x {len(patients)} patient-runs), plus "
+        f"{by_kind.get('compute', 0)} compute-profile launch(es)."
+    )
 
 
 if __name__ == "__main__":

@@ -30,8 +30,8 @@ def test_parse_size_logs_averages_multi_task_process(tmp_path):
     csv = tmp_path / "input_sizes.csv"
     csv.write_text(
         "process,sample_id,filename,bytes\n"
-        "PREPROCESS,pt1,c0.ome.tif,1073741824\n"   # 1 GiB
-        "PREPROCESS,pt1,c1.ome.tif,3221225472\n"   # 3 GiB
+        "PREPROCESS,pt1,c0.ome.tif,1073741824\n"  # 1 GiB
+        "PREPROCESS,pt1,c1.ome.tif,3221225472\n"  # 3 GiB
         "SEGMENT,pt1,merged.ome.tif,4294967296\n"  # 4 GiB (single task)
     )
     s = load.parse_size_logs(csv)
@@ -42,15 +42,17 @@ def test_parse_size_logs_averages_multi_task_process(tmp_path):
 def test_aggregate_repeats_reports_mean_std_cv_per_config():
     import pandas as pd
 
-    df = pd.DataFrame({
-        "process": ["SEGMENT"] * 6,
-        "config_id": ["cfg000"] * 3 + ["cfg001"] * 3,
-        "varied_axis": ["baseline"] * 3 + ["scaling_grid"] * 3,
-        "target_px": [4096] * 3 + [8192] * 3,
-        "n_channels": [2] * 6,
-        "peak_rss_gb": [10.0, 12.0, 14.0, 20.0, 20.0, 20.0],
-        "realtime_s": [100.0, 100.0, 100.0, 200.0, 210.0, 220.0],
-    })
+    df = pd.DataFrame(
+        {
+            "process": ["SEGMENT"] * 6,
+            "config_id": ["cfg000"] * 3 + ["cfg001"] * 3,
+            "varied_axis": ["baseline"] * 3 + ["scaling_grid"] * 3,
+            "target_px": [4096] * 3 + [8192] * 3,
+            "n_channels": [2] * 6,
+            "peak_rss_gb": [10.0, 12.0, 14.0, 20.0, 20.0, 20.0],
+            "realtime_s": [100.0, 100.0, 100.0, 200.0, 210.0, 220.0],
+        }
+    )
     out = load.aggregate_repeats(df)
     assert len(out) == 2
 
@@ -73,8 +75,16 @@ def test_load_runs_joins_trace_sizes_and_params():
     )
     # 2 runs x 2 processes = 4 rows
     assert len(df) == 4
-    assert {"run_id", "process", "peak_rss_gb", "realtime_s", "input_gb",
-            "target_px", "n_channels", "varied_axis"} <= set(df.columns)
+    assert {
+        "run_id",
+        "process",
+        "peak_rss_gb",
+        "realtime_s",
+        "input_gb",
+        "target_px",
+        "n_channels",
+        "varied_axis",
+    } <= set(df.columns)
     seg1 = df[(df["run_id"] == "run0001") & (df["process"] == "SEGMENT")].iloc[0]
     assert seg1["peak_rss_gb"] == pytest.approx(40.0)
     assert seg1["input_gb"] == pytest.approx(8.0)
@@ -85,16 +95,21 @@ def test_only_successful_drops_failed_and_aborted():
     import pandas as pd
 
     from benchmarks.analysis.lib.load import only_successful
-    df = pd.DataFrame({
-        "process": ["A", "B", "C", "D"],
-        "status": ["COMPLETED", "FAILED", "CACHED", "ABORTED"],
-        "exit": [0, 137, 0, 143],
-        "peak_rss_gb": [10, 999, 12, 500],
-    })
+
+    df = pd.DataFrame(
+        {
+            "process": ["A", "B", "C", "D"],
+            "status": ["COMPLETED", "FAILED", "CACHED", "ABORTED"],
+            "exit": [0, 137, 0, 143],
+            "peak_rss_gb": [10, 999, 12, 500],
+        }
+    )
     out = only_successful(df)
-    assert set(out["process"]) == {"A", "C"}          # FAILED/ABORTED dropped
+    assert set(out["process"]) == {"A", "C"}  # FAILED/ABORTED dropped
     # exit-only signal (no status column) also works
-    df2 = pd.DataFrame({"process": ["A", "B"], "exit": [0, 1], "peak_rss_gb": [10, 999]})
+    df2 = pd.DataFrame(
+        {"process": ["A", "B"], "exit": [0, 1], "peak_rss_gb": [10, 999]}
+    )
     assert list(only_successful(df2)["process"]) == ["A"]
 
 
@@ -109,21 +124,26 @@ def test_load_runs_reads_the_ARM_layout_too(tmp_path):
     IS ihc_method's consumer contract.
     """
     import shutil
+
     root = tmp_path / "arm_results"
     for arm in ("valis_high_micro2", "tiled_defaults"):
         (root / arm).mkdir(parents=True)
         shutil.copytree(FIX / "runs" / "run0000" / "trace", root / arm / "trace")
         # arm layout: NO intervening out/
-        shutil.copytree(FIX / "runs" / "run0000" / "out" / "size_logs",
-                        root / arm / "size_logs")
+        shutil.copytree(
+            FIX / "runs" / "run0000" / "out" / "size_logs", root / arm / "size_logs"
+        )
     plan = tmp_path / "arm_plan.csv"
-    plan.write_text("run_id,arm_kind,arm\n"
-                    "valis_high_micro2,registration,valis_high_micro2\n"
-                    "tiled_defaults,registration,tiled_defaults\n")
+    plan.write_text(
+        "run_id,arm_kind,arm\n"
+        "valis_high_micro2,registration,valis_high_micro2\n"
+        "tiled_defaults,registration,tiled_defaults\n"
+    )
 
     df = load.load_runs(root, plan)
     assert len(df) == 4, "2 arms x 2 processes"
     assert df["input_gb"].notna().all(), (
         "input_gb is NaN — the size logs were not found, so the resource "
-        "regression would silently fit on nothing")
+        "regression would silently fit on nothing"
+    )
     assert set(df["run_id"]) == {"valis_high_micro2", "tiled_defaults"}

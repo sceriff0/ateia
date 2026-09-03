@@ -3,6 +3,7 @@
 Pure functions (compute_target_shape, synthesize_channels) are unit-tested.
 Heavy I/O (read/resize/write OME-TIFF) is isolated in run_matrix().
 """
+
 from __future__ import annotations
 
 import argparse
@@ -12,7 +13,9 @@ from pathlib import Path
 import numpy as np
 
 
-def compute_target_shape(src_hw: tuple[int, int], target_long_edge: int) -> tuple[int, int]:
+def compute_target_shape(
+    src_hw: tuple[int, int], target_long_edge: int
+) -> tuple[int, int]:
     """Scale (height, width) so the longer edge equals target_long_edge, preserving aspect."""
     h, w = src_hw
     long_edge = max(h, w)
@@ -22,8 +25,9 @@ def compute_target_shape(src_hw: tuple[int, int], target_long_edge: int) -> tupl
     return (round(h * scale), round(w * scale))
 
 
-def synthesize_channels(src_2d: np.ndarray, n_channels: int, seed: int = 0,
-                        block_rows: int = 4096) -> np.ndarray:
+def synthesize_channels(
+    src_2d: np.ndarray, n_channels: int, seed: int = 0, block_rows: int = 4096
+) -> np.ndarray:
     """Replicate a single 2-D channel into n_channels with per-channel perturbation.
 
     Channel 0 is the unmodified source. Channels 1..N-1 add intensity jitter,
@@ -52,7 +56,9 @@ def synthesize_channels(src_2d: np.ndarray, n_channels: int, seed: int = 0,
         for r0 in range(0, h, block_rows):
             r1 = min(r0 + block_rows, h)
             noise = rng.normal(0.0, 3.0, size=(r1 - r0, src_2d.shape[1]))
-            vals = np.clip(shifted[r0:r1].astype(np.float64) * gain + noise, info.min, info.max)
+            vals = np.clip(
+                shifted[r0:r1].astype(np.float64) * gain + noise, info.min, info.max
+            )
             out[c, r0:r1] = vals.astype(src_2d.dtype)
             del noise, vals
         del shifted
@@ -61,8 +67,14 @@ def synthesize_channels(src_2d: np.ndarray, n_channels: int, seed: int = 0,
 
 # numpy dtype -> pyvips band format string
 _VIPS_FORMATS = {
-    "uint8": "uchar", "int8": "char", "uint16": "ushort", "int16": "short",
-    "uint32": "uint", "int32": "int", "float32": "float", "float64": "double",
+    "uint8": "uchar",
+    "int8": "char",
+    "uint16": "ushort",
+    "int16": "short",
+    "uint32": "uint",
+    "int32": "int",
+    "float32": "float",
+    "float64": "double",
 }
 
 
@@ -79,6 +91,7 @@ def _resize(src_2d: np.ndarray, target_hw: tuple[int, int]) -> np.ndarray:
     except (ImportError, OSError):
         # ImportError: package missing. OSError: pyvips installed but libvips.so won't load.
         from PIL import Image
+
         if src_2d.dtype == np.uint8:
             im = Image.fromarray(src_2d)
         elif src_2d.dtype in (np.uint16, np.int32):
@@ -132,6 +145,7 @@ def _read_source_2d(path: Path) -> np.ndarray:
         arr = np.squeeze(np.asarray(BioImage(path).get_image_data("CYX")))
     else:
         import tifffile
+
         arr = np.squeeze(tifffile.imread(path))
     while arr.ndim > 2:
         # Collapse the smallest leading axis (assumed channel/Z/T) by taking index 0.
@@ -142,8 +156,16 @@ def _read_source_2d(path: Path) -> np.ndarray:
     return arr
 
 
-def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = False,
-               n_moving: int = 1, n_moving_map: dict | None = None):
+def run_matrix(
+    source,
+    outdir,
+    target_px,
+    n_channels,
+    seed=0,
+    paired: bool = False,
+    n_moving: int = 1,
+    n_moving_map: dict | None = None,
+):
     import tifffile
 
     outdir = Path(outdir)
@@ -151,7 +173,15 @@ def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = Fal
     src = _read_source_2d(Path(source))
     manifest_path = outdir / "matrix_manifest.csv"
 
-    base_fieldnames = ["cell_id", "target_px", "width", "height", "n_channels", "bytes", "path"]
+    base_fieldnames = [
+        "cell_id",
+        "target_px",
+        "width",
+        "height",
+        "n_channels",
+        "bytes",
+        "path",
+    ]
     # `moving_paths` is a ';'-joined list of moving images (one per extra registration
     # panel) so the sweep can register N images, not just a pair. Empty for n_channels==1.
     fieldnames = base_fieldnames + ["moving_paths"] if paired else base_fieldnames
@@ -164,7 +194,9 @@ def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = Fal
         for tpx in target_px:
             th, tw = compute_target_shape(src.shape, tpx)
             resized = _resize(src, (th, tw))
-            rh, rw = resized.shape  # actual dims (may differ from th,tw by backend rounding)
+            rh, rw = (
+                resized.shape
+            )  # actual dims (may differ from th,tw by backend rounding)
             for nch in n_channels:
                 cell_id = f"px{tpx}_ch{nch}"
                 out_path = outdir / f"{cell_id}.ome.tif"
@@ -172,8 +204,12 @@ def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = Fal
                 data = stack[0] if nch == 1 else stack
                 metadata = {"axes": "YX" if nch == 1 else "CYX"}
                 if nch > 1:
-                    metadata["Channel"] = {"Name": ["DAPI"] + [f"ch{i}" for i in range(1, nch)]}
-                tifffile.imwrite(out_path, data, photometric="minisblack", metadata=metadata)
+                    metadata["Channel"] = {
+                        "Name": ["DAPI"] + [f"ch{i}" for i in range(1, nch)]
+                    }
+                tifffile.imwrite(
+                    out_path, data, photometric="minisblack", metadata=metadata
+                )
                 # RELEASE THE REFERENCE STACK BEFORE BUILDING ANY MOVING PANEL.
                 # Without this both are live at once and the peak is TWO full stacks:
                 # a 90000px x 4ch cell is 64.8 GB each, so 16.2 (resized) + 64.8 + 64.8
@@ -181,8 +217,13 @@ def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = Fal
                 # them here caps the peak at resized + ONE stack.
                 del data, stack
                 row = {
-                    "cell_id": cell_id, "target_px": tpx, "width": rw, "height": rh,
-                    "n_channels": nch, "bytes": out_path.stat().st_size, "path": str(out_path),
+                    "cell_id": cell_id,
+                    "target_px": tpx,
+                    "width": rw,
+                    "height": rh,
+                    "n_channels": nch,
+                    "bytes": out_path.stat().st_size,
+                    "path": str(out_path),
                 }
                 if paired:
                     # Per-cell panel count: the map (from derive_from_sweep) gives big
@@ -201,9 +242,17 @@ def run_matrix(source, outdir, target_px, n_channels, seed=0, paired: bool = Fal
                             mov_stack = synthesize_channels(resized, nch, seed=seed + j)
                             mov_out = outdir / f"{cell_id}_moving{j}.ome.tif"
                             tifffile.imwrite(
-                                mov_out, mov_stack, photometric="minisblack",
-                                metadata={"axes": "CYX",
-                                          "Channel": {"Name": ["DAPI"] + [f"m{j}_{i}" for i in range(1, nch)]}})
+                                mov_out,
+                                mov_stack,
+                                photometric="minisblack",
+                                metadata={
+                                    "axes": "CYX",
+                                    "Channel": {
+                                        "Name": ["DAPI"]
+                                        + [f"m{j}_{i}" for i in range(1, nch)]
+                                    },
+                                },
+                            )
                             # Same reason: the next iteration allocates another full
                             # stack before this one would otherwise be rebound.
                             del mov_stack
@@ -240,7 +289,7 @@ def derive_from_sweep(sweep_path) -> dict:
             if isinstance(v, (list, tuple)):
                 vals |= set(v)
             elif v is not None:
-                vals.add(v)                # registration_grid.n_channels is a scalar
+                vals.add(v)  # registration_grid.n_channels is a scalar
         if key in baseline:
             vals.add(baseline[key])
         return sorted(vals) if vals else default
@@ -277,40 +326,75 @@ def derive_from_sweep(sweep_path) -> dict:
         for t in target_px:
             for c in n_channels:
                 n_moving_map[(t, c)] = 0 if c < 2 else max(need.get((t, c), 0), 1)
-    return {"target_px": target_px, "n_channels": n_channels, "n_moving": n_moving,
-            "paired": paired, "n_moving_map": n_moving_map}
+    return {
+        "target_px": target_px,
+        "n_channels": n_channels,
+        "n_moving": n_moving,
+        "paired": paired,
+        "n_moving_map": n_moving_map,
+    }
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Generate a (size x channels) benchmark matrix.")
-    ap.add_argument("--source", required=True, type=Path, help="Source image (user-supplied).")
+    ap = argparse.ArgumentParser(
+        description="Generate a (size x channels) benchmark matrix."
+    )
+    ap.add_argument(
+        "--source", required=True, type=Path, help="Source image (user-supplied)."
+    )
     ap.add_argument("--outdir", required=True, type=Path)
-    ap.add_argument("--sweep", type=Path, default=None,
-                    help="Derive --target-px, --n-channels, --n-moving, and --paired straight "
-                         "from a sweep.yaml so the matrix matches the sweep with no manual sync. "
-                         "Explicit flags below override the derived values.")
+    ap.add_argument(
+        "--sweep",
+        type=Path,
+        default=None,
+        help="Derive --target-px, --n-channels, --n-moving, and --paired straight "
+        "from a sweep.yaml so the matrix matches the sweep with no manual sync. "
+        "Explicit flags below override the derived values.",
+    )
     ap.add_argument("--target-px", type=int, nargs="+", default=None)
     ap.add_argument("--n-channels", type=int, nargs="+", default=None)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--paired", action="store_true", default=None,
-                    help="Also emit moving image(s) per cell (n_channels>=2) with distinct channel names.")
-    ap.add_argument("--n-moving", type=int, default=None,
-                    help="Moving images per paired cell (=extra registration panels). "
-                         "Set >= max(n_register_images)-1 to benchmark N-image registration.")
+    ap.add_argument(
+        "--paired",
+        action="store_true",
+        default=None,
+        help="Also emit moving image(s) per cell (n_channels>=2) with distinct channel names.",
+    )
+    ap.add_argument(
+        "--n-moving",
+        type=int,
+        default=None,
+        help="Moving images per paired cell (=extra registration panels). "
+        "Set >= max(n_register_images)-1 to benchmark N-image registration.",
+    )
     a = ap.parse_args()
 
     # Start from sweep-derived values (if given), then let explicit flags override.
     d = derive_from_sweep(a.sweep) if a.sweep else {}
-    target_px = a.target_px if a.target_px is not None else d.get("target_px", [2048, 4096, 8192, 16384, 32768, 65536, 131072])
-    n_channels = a.n_channels if a.n_channels is not None else d.get("n_channels", [1, 2, 4, 8])
+    target_px = (
+        a.target_px
+        if a.target_px is not None
+        else d.get("target_px", [2048, 4096, 8192, 16384, 32768, 65536, 131072])
+    )
+    n_channels = (
+        a.n_channels if a.n_channels is not None else d.get("n_channels", [1, 2, 4, 8])
+    )
     n_moving = a.n_moving if a.n_moving is not None else d.get("n_moving", 1)
     paired = a.paired if a.paired is not None else d.get("paired", False)
     # Explicit --n-moving forces a uniform count (legacy behaviour); otherwise use the
     # per-cell map so large cells aren't given panels no run consumes.
     n_moving_map = None if a.n_moving is not None else d.get("n_moving_map")
 
-    path = run_matrix(a.source, a.outdir, target_px, n_channels, a.seed,
-                      paired=paired, n_moving=n_moving, n_moving_map=n_moving_map)
+    path = run_matrix(
+        a.source,
+        a.outdir,
+        target_px,
+        n_channels,
+        a.seed,
+        paired=paired,
+        n_moving=n_moving,
+        n_moving_map=n_moving_map,
+    )
     print(f"Wrote matrix manifest: {path}")
 
 

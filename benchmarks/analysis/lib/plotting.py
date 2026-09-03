@@ -3,6 +3,7 @@
 Plot styles consolidated from notebooks/resources.ipynb (scaling scatter) and
 notebooks/rTRE.ipynb (before/after boxplots).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -49,8 +50,13 @@ def scatter_with_fit(x, y, slope, intercept, xlabel, ylabel, title):
     fig, ax = plt.subplots()
     ax.scatter(x, y, s=18, alpha=0.8)
     xs = np.linspace(x.min(), x.max(), 50) if x.size else np.array([0, 1])
-    ax.plot(xs, slope * xs + intercept, color="C3", lw=1.5,
-            label=f"y = {slope:.2f}x + {intercept:.2f}")
+    ax.plot(
+        xs,
+        slope * xs + intercept,
+        color="C3",
+        lw=1.5,
+        label=f"y = {slope:.2f}x + {intercept:.2f}",
+    )
     ax.set(xlabel=xlabel, ylabel=ylabel, title=title)
     ax.legend()
     return fig
@@ -70,8 +76,9 @@ def scatter(x, y, xlabel, ylabel, title, labels=None):
     ax.scatter(x, y, s=24, alpha=0.85)
     if labels is not None:
         for xi, yi, li in zip(x, y, labels):
-            ax.annotate(str(li), (xi, yi), fontsize=7,
-                        xytext=(3, 3), textcoords="offset points")
+            ax.annotate(
+                str(li), (xi, yi), fontsize=7, xytext=(3, 3), textcoords="offset points"
+            )
     ax.set(xlabel=xlabel, ylabel=ylabel, title=title)
     return fig
 

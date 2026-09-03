@@ -15,6 +15,7 @@ at launch, after the input matrix had already been generated.
 benchmarks/params_json.py builds a -params-file instead, which carries JSON
 types and works on both engines.
 """
+
 import json
 import subprocess
 import sys
@@ -37,14 +38,17 @@ def test_the_schema_scan_finds_the_real_params():
         assert expected in TYPES, f"{expected} missing from the schema scan"
 
 
-@pytest.mark.parametrize("name,raw,expected", [
-    ("reg_qc", "1", 1),                       # the case that broke the sweep
-    ("pyramid_resolutions", "4", 4),
-    ("memory_mode", "high", "high"),
-    ("cleanup_work", "false", False),
-    ("cleanup_work", "true", True),
-    ("cleanup_level", "none", "none"),        # a STRING whose value is the word none
-])
+@pytest.mark.parametrize(
+    "name,raw,expected",
+    [
+        ("reg_qc", "1", 1),  # the case that broke the sweep
+        ("pyramid_resolutions", "4", 4),
+        ("memory_mode", "high", "high"),
+        ("cleanup_work", "false", False),
+        ("cleanup_work", "true", True),
+        ("cleanup_level", "none", "none"),  # a STRING whose value is the word none
+    ],
+)
 def test_values_take_the_type_the_schema_declares(name, raw, expected):
     got = params_json.coerce(name, raw, TYPES)
     assert got == expected
@@ -91,9 +95,19 @@ def test_an_undeclared_param_is_reported_not_dropped(capsys):
 def test_the_cli_writes_a_usable_params_file(tmp_path):
     out = tmp_path / "p.json"
     rc = subprocess.run(
-        [sys.executable, "-m", "benchmarks.params_json", "--out", str(out),
-         "reg_qc=1", "memory_mode=high", "cleanup_work=false"],
-        cwd=ROOT, capture_output=True, text=True,
+        [
+            sys.executable,
+            "-m",
+            "benchmarks.params_json",
+            "--out",
+            str(out),
+            "reg_qc=1",
+            "memory_mode=high",
+            "cleanup_work=false",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
     )
     assert rc.returncode == 0, rc.stderr
     doc = json.loads(out.read_text())
@@ -122,6 +136,7 @@ def test_no_runner_passes_a_typed_param_on_the_command_line():
     """A single `--<axis> <value>` reintroduced into a runner puts the whole
     sweep back to failing at launch on NF26."""
     import re
+
     offenders = []
     for rel in RUNNERS:
         for i, line in _code_lines(rel):
@@ -151,6 +166,7 @@ def test_no_runner_builds_a_param_flag_dynamically():
     "guard that was never observed failing" failure this repo keeps finding.
     """
     import re
+
     offenders = [
         f"{rel}:{i}: {line.strip()}"
         for rel in RUNNERS

@@ -14,6 +14,7 @@ Plus per-run COST derived from the trace (cpu-hours, gpu-hours, wall-clock, bott
 Everything is BEST-EFFORT and robust to missing/failed runs (a CellSAM run that OOMs just contributes
 no rows) — so the analysis + plots keep working when some runs fail.
 """
+
 from __future__ import annotations
 
 import json
@@ -32,7 +33,12 @@ SWEEP_PATH = Path(__file__).resolve().parents[2] / "configs" / "sweep.yaml"
 ARMS_PATH = Path(__file__).resolve().parents[2] / "configs" / "arms.yaml"
 
 # Processes that run on the GPU (approximate — for a GPU-hours estimate).
-GPU_LEAVES = {"SEGMENT", "QUANTIFY", "EXTRACT_CELL_PROPERTIES", "GENERATE_POSTPROCESSING_QC"}
+GPU_LEAVES = {
+    "SEGMENT",
+    "QUANTIFY",
+    "EXTRACT_CELL_PROPERTIES",
+    "GENERATE_POSTPROCESSING_QC",
+}
 
 
 def _leaf(process: str) -> str:
@@ -71,28 +77,30 @@ def harvest_registration_qc(results_root, run_plan_csv) -> pd.DataFrame:
             stages = d.get("stages") or {}
             deltas = d.get("delta_vs_anchor") or {}
             pair_fraction = _f((d.get("matching") or {}).get("pair_fraction"))
-            for stage in (d.get("stage_order") or list(stages)):
+            for stage in d.get("stage_order") or list(stages):
                 s = stages.get(stage) or {}
                 dv = deltas.get(stage) or {}
-                rows.append({
-                    "run_id": run_id,
-                    "patient_id": d.get("patient_id"),
-                    "moving": d.get("moving"),
-                    "stage": stage,
-                    "n_pairs": int(s.get("n_pairs") or 0),
-                    "pair_fraction": pair_fraction,
-                    "iou_mean": _f(s.get("iou_mean")),
-                    "iou_p50": _f(s.get("iou_p50")),
-                    "frac_iou_ge_0.5": _f(s.get("frac_iou_ge_0.5")),
-                    "dice_matched": _f(s.get("dice_matched")),
-                    "displacement_px_p50": _f(s.get("displacement_px_p50")),
-                    "displacement_px_p90": _f(s.get("displacement_px_p90")),
-                    "displacement_um_p50": _f(s.get("displacement_um_p50")),
-                    "displacement_um_p90": _f(s.get("displacement_um_p90")),
-                    "delta_dice_vs_rigid": _f(dv.get("dice_matched")),
-                    "delta_disp_um_p50_vs_rigid": _f(dv.get("displacement_um_p50")),
-                    "delta_disp_px_p50_vs_rigid": _f(dv.get("displacement_px_p50")),
-                })
+                rows.append(
+                    {
+                        "run_id": run_id,
+                        "patient_id": d.get("patient_id"),
+                        "moving": d.get("moving"),
+                        "stage": stage,
+                        "n_pairs": int(s.get("n_pairs") or 0),
+                        "pair_fraction": pair_fraction,
+                        "iou_mean": _f(s.get("iou_mean")),
+                        "iou_p50": _f(s.get("iou_p50")),
+                        "frac_iou_ge_0.5": _f(s.get("frac_iou_ge_0.5")),
+                        "dice_matched": _f(s.get("dice_matched")),
+                        "displacement_px_p50": _f(s.get("displacement_px_p50")),
+                        "displacement_px_p90": _f(s.get("displacement_px_p90")),
+                        "displacement_um_p50": _f(s.get("displacement_um_p50")),
+                        "displacement_um_p90": _f(s.get("displacement_um_p90")),
+                        "delta_dice_vs_rigid": _f(dv.get("dice_matched")),
+                        "delta_disp_um_p50_vs_rigid": _f(dv.get("displacement_um_p50")),
+                        "delta_disp_px_p50_vs_rigid": _f(dv.get("displacement_px_p50")),
+                    }
+                )
     return pd.DataFrame(rows)
 
 
@@ -124,13 +132,16 @@ def registration_accuracy_per_run(reg_qc_long: pd.DataFrame) -> pd.DataFrame:
     df = reg_qc_long.copy()
     df["_rank"] = df["stage"].map(_STAGE_RANK).fillna(-1)
     # final stage per (run, moving)
-    final = df.sort_values("_rank").groupby(["run_id", "moving"], as_index=False).tail(1)
+    final = (
+        df.sort_values("_rank").groupby(["run_id", "moving"], as_index=False).tail(1)
+    )
     agg = final.groupby("run_id", as_index=False).agg(
         reg_dice_matched=("dice_matched", "median"),
         reg_displacement_um_p50=("displacement_um_p50", "median"),
         reg_delta_disp_um_p50_vs_rigid=("delta_disp_um_p50_vs_rigid", "median"),
         reg_delta_dice_vs_rigid=("delta_dice_vs_rigid", "median"),
-        reg_pair_fraction=("pair_fraction", "median"))
+        reg_pair_fraction=("pair_fraction", "median"),
+    )
     return agg
 
 
@@ -147,8 +158,11 @@ def harvest_valis_rtre(results_root, run_plan_csv) -> pd.DataFrame:
     for run_id in plan["run_id"]:
         out = root / str(run_id) / "out"
         # VALIS summaries are published under .../registered/summary/ (conf/modules.config REGISTER).
-        csvs = [c for c in out.rglob("*.csv")
-                if "registered/summary" in c.as_posix() or c.parent.name == "summary"]
+        csvs = [
+            c
+            for c in out.rglob("*.csv")
+            if "registered/summary" in c.as_posix() or c.parent.name == "summary"
+        ]
         for c in csvs:
             try:
                 df = pd.read_csv(c)
@@ -159,7 +173,11 @@ def harvest_valis_rtre(results_root, run_plan_csv) -> pd.DataFrame:
             df.insert(0, "run_id", run_id)
             df.insert(1, "summary_csv", c.name)
             frames.append(df)
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["run_id"])
+    return (
+        pd.concat(frames, ignore_index=True)
+        if frames
+        else pd.DataFrame(columns=["run_id"])
+    )
 
 
 def valis_rtre_per_run(valis_long: pd.DataFrame) -> pd.DataFrame:
@@ -195,11 +213,14 @@ def _n_cells(path, reader):
         return None
 
 
-def harvest_segmentation_counts(results_root, run_plan_csv, reader=None) -> pd.DataFrame:
+def harvest_segmentation_counts(
+    results_root, run_plan_csv, reader=None
+) -> pd.DataFrame:
     """Per-run cell count = max label of the cell mask (I/O-light: one max() per run). Robust to
     missing masks. reader is injectable for tests; defaults to tifffile.imread."""
     if reader is None:
         import tifffile
+
         reader = tifffile.imread
     root = Path(results_root)
     plan = pd.read_csv(run_plan_csv)
@@ -222,9 +243,16 @@ def instance_f1(ma, mb, iou_thresh=0.5) -> dict:
     na, nb = int(a.max()) if a.size else 0, int(b.max()) if b.size else 0
     nan = float("nan")
     if na == 0 or nb == 0:
-        return {"f1": nan, "precision": nan, "recall": nan, "matched": 0, "n_a": na, "n_b": nb}
+        return {
+            "f1": nan,
+            "precision": nan,
+            "recall": nan,
+            "matched": 0,
+            "n_a": na,
+            "n_b": nb,
+        }
     fg = (a > 0) & (b > 0)
-    pair = a[fg] * (nb + 1) + b[fg]                       # unique key per (a_label, b_label)
+    pair = a[fg] * (nb + 1) + b[fg]  # unique key per (a_label, b_label)
     counts = np.bincount(pair)
     idx = np.nonzero(counts)[0]
     inter = counts[idx].astype(np.float64)
@@ -233,7 +261,7 @@ def instance_f1(ma, mb, iou_thresh=0.5) -> dict:
     area_b = np.bincount(b, minlength=nb + 1).astype(np.float64)
     iou = inter / (area_a[al] + area_b[bl] - inter)
     used_a, used_b, matched = set(), set(), 0
-    for k in np.argsort(-iou):                            # greedy, highest IoU first
+    for k in np.argsort(-iou):  # greedy, highest IoU first
         if iou[k] < iou_thresh:
             break
         if al[k] in used_a or bl[k] in used_b:
@@ -243,8 +271,17 @@ def instance_f1(ma, mb, iou_thresh=0.5) -> dict:
         matched += 1
     precision = matched / nb
     recall = matched / na
-    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
-    return {"f1": f1, "precision": precision, "recall": recall, "matched": matched, "n_a": na, "n_b": nb}
+    f1 = (
+        (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+    )
+    return {
+        "f1": f1,
+        "precision": precision,
+        "recall": recall,
+        "matched": matched,
+        "n_a": na,
+        "n_b": nb,
+    }
 
 
 def segmentation_agreement(results_root, run_plan_csv, reader=None) -> pd.DataFrame:
@@ -253,6 +290,7 @@ def segmentation_agreement(results_root, run_plan_csv, reader=None) -> pd.DataFr
     (over/under-segmentation rate). Uses one representative run per (cell, method). Best-effort."""
     if reader is None:
         import tifffile
+
         reader = tifffile.imread
     root = Path(results_root)
     plan = pd.read_csv(run_plan_csv)
@@ -262,7 +300,9 @@ def segmentation_agreement(results_root, run_plan_csv, reader=None) -> pd.DataFr
     rows = []
     for cell, g in plan.groupby(keys):
         by_method = {}
-        for _, r in g.groupby("seg_method").head(1).iterrows():   # one run per method at this cell
+        for _, r in (
+            g.groupby("seg_method").head(1).iterrows()
+        ):  # one run per method at this cell
             masks = _cell_masks(root / str(r["run_id"]) / "out")
             if masks:
                 by_method[r["seg_method"]] = masks[0]
@@ -271,7 +311,10 @@ def segmentation_agreement(results_root, run_plan_csv, reader=None) -> pd.DataFr
             for k in range(i + 1, len(methods)):
                 a, b = methods[i], methods[k]
                 try:
-                    ma, mb = np.asarray(reader(by_method[a])), np.asarray(reader(by_method[b]))
+                    ma, mb = (
+                        np.asarray(reader(by_method[a])),
+                        np.asarray(reader(by_method[b])),
+                    )
                 except Exception:
                     continue
                 if ma.shape != mb.shape:
@@ -280,14 +323,20 @@ def segmentation_agreement(results_root, run_plan_csv, reader=None) -> pd.DataFr
                 inter = int(np.logical_and(fa, fb).sum())
                 union = int(np.logical_or(fa, fb).sum())
                 na, nb = int(ma.max()), int(mb.max())
-                inst = instance_f1(ma, mb)               # IoU-matched per-cell agreement
+                inst = instance_f1(ma, mb)  # IoU-matched per-cell agreement
                 row = dict(zip(keys, cell if isinstance(cell, tuple) else (cell,)))
-                row.update(method_a=a, method_b=b,
-                           foreground_iou=(inter / union if union else float("nan")),
-                           instance_f1=inst["f1"], instance_precision=inst["precision"],
-                           instance_recall=inst["recall"], matched_cells=inst["matched"],
-                           n_cells_a=na, n_cells_b=nb,
-                           cell_count_ratio=(na / nb if nb else float("nan")))
+                row.update(
+                    method_a=a,
+                    method_b=b,
+                    foreground_iou=(inter / union if union else float("nan")),
+                    instance_f1=inst["f1"],
+                    instance_precision=inst["precision"],
+                    instance_recall=inst["recall"],
+                    matched_cells=inst["matched"],
+                    n_cells_a=na,
+                    n_cells_b=nb,
+                    cell_count_ratio=(na / nb if nb else float("nan")),
+                )
                 rows.append(row)
     return pd.DataFrame(rows)
 
@@ -328,12 +377,17 @@ def run_cost_summary(runs_df: pd.DataFrame) -> pd.DataFrame:
         # end-to-end wall-clock from timestamps if load parsed them (else NaN)
         if {"start_ts", "complete_ts"} <= set(g.columns):
             s, c = g["start_ts"].dropna(), g["complete_ts"].dropna()
-            row["wall_clock_s"] = (float((c.max() - s.min()).total_seconds())
-                                   if len(s) and len(c) else float("nan"))
+            row["wall_clock_s"] = (
+                float((c.max() - s.min()).total_seconds())
+                if len(s) and len(c)
+                else float("nan")
+            )
         else:
             row["wall_clock_s"] = float("nan")
         if len(rt) and rt.max() > 0:
             row["bottleneck_stage"] = g.loc[rt.idxmax(), "_leaf"]
-            row["bottleneck_frac"] = float(rt.max() / rt.sum()) if rt.sum() else float("nan")
+            row["bottleneck_frac"] = (
+                float(rt.max() / rt.sum()) if rt.sum() else float("nan")
+            )
         out.append(row)
     return pd.DataFrame(out)

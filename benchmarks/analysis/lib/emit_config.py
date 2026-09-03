@@ -11,6 +11,7 @@ memory/time against params.max_* for EVERY process without per-process wrapping.
 Emitting check_max() produced a config that parsed fine and then died with a
 MissingMethodException the first time a closure was evaluated at task-submit time.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -43,14 +44,14 @@ def memory_closure(process: str, model: dict, input_expr: str | None = None) -> 
     if expr is None:
         # No known input-size expression: emit an INERT commented block so the
         # config stays valid Groovy. The operator fills in the real expression.
-        body = (f"( <input_gb> * {slope} + {intercept} + "
-                f"{sigma} * task.attempt ).GB")
-        return ("    // TODO set the input-size (GiB) expression for this process, then uncomment:\n"
-                f"    // withName: '{process}' {{\n"
-                f"    //     memory = {{ {body} }}\n"
-                "    // }")
-    body = (f"( {expr} * {slope} + {intercept} + "
-            f"{sigma} * task.attempt ).GB")
+        body = f"( <input_gb> * {slope} + {intercept} + {sigma} * task.attempt ).GB"
+        return (
+            "    // TODO set the input-size (GiB) expression for this process, then uncomment:\n"
+            f"    // withName: '{process}' {{\n"
+            f"    //     memory = {{ {body} }}\n"
+            "    // }"
+        )
+    body = f"( {expr} * {slope} + {intercept} + {sigma} * task.attempt ).GB"
     return f"    withName: '{process}' {{\n        memory = {{ {body} }}\n    }}"
 
 
@@ -65,7 +66,9 @@ def write_optimized_config(models: dict, out_path) -> None:
     ]
     for process, model in sorted(models.items()):
         r2 = model.get("r2")
-        note = f"    // fit: r2={round(r2, 2) if r2 == r2 else 'n/a'}, n={model.get('n')}"
+        note = (
+            f"    // fit: r2={round(r2, 2) if r2 == r2 else 'n/a'}, n={model.get('n')}"
+        )
         if r2 is None or r2 != r2 or r2 < R2_LOW:
             note += "  // LOW CONFIDENCE — verify against observed peaks"
         lines.append(note)

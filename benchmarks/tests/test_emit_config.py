@@ -30,7 +30,13 @@ def test_emitted_config_never_calls_check_max():
 def test_write_optimized_config_emits_header_and_blocks(tmp_path):
     models = {
         "SEGMENT": {"slope": 7.0, "intercept": 8.0, "sigma": 4.0, "r2": 0.97, "n": 5},
-        "CONVERT_IMAGE": {"slope": 1.0, "intercept": 2.0, "sigma": 0.5, "r2": 0.9, "n": 5},
+        "CONVERT_IMAGE": {
+            "slope": 1.0,
+            "intercept": 2.0,
+            "sigma": 0.5,
+            "r2": 0.9,
+            "n": 5,
+        },
     }
     out = tmp_path / "modules.optimized.config"
     emit_config.write_optimized_config(models, out)
@@ -52,30 +58,44 @@ def test_low_confidence_fit_is_flagged(tmp_path):
 def test_known_process_emits_live_block_with_continuous_gib(tmp_path):
     out = tmp_path / "k.config"
     emit_config.write_optimized_config(
-        {"SEGMENT": {"slope": 7.0, "intercept": 8.0, "sigma": 4.0, "r2": 0.97, "n": 5}}, out)
+        {"SEGMENT": {"slope": 7.0, "intercept": 8.0, "sigma": 4.0, "r2": 0.97, "n": 5}},
+        out,
+    )
     text = out.read_text()
-    assert "    withName: 'SEGMENT'" in text          # live (uncommented) block
+    assert "    withName: 'SEGMENT'" in text  # live (uncommented) block
     # continuous GiB, matching the model fit on bytes / 2**30 (not floored >> 30)
     assert "merged_file.size() / (1024 ** 3)" in text
-    assert ">> 30" not in text                        # no integer-floor GiB
-    assert "?: 1" not in text                         # no 1 GiB minimum floor
+    assert ">> 30" not in text  # no integer-floor GiB
+    assert "?: 1" not in text  # no 1 GiB minimum floor
 
 
 def test_unknown_process_emitted_commented_not_invalid_var(tmp_path):
     out = tmp_path / "u.config"
     emit_config.write_optimized_config(
-        {"QUANTIFY": {"slope": 1.0, "intercept": 2.0, "sigma": 0.5, "r2": 0.9, "n": 5}}, out)
+        {"QUANTIFY": {"slope": 1.0, "intercept": 2.0, "sigma": 0.5, "r2": 0.9, "n": 5}},
+        out,
+    )
     text = out.read_text()
-    assert "file_gb" not in text                      # no invalid placeholder variable
+    assert "file_gb" not in text  # no invalid placeholder variable
     assert "total_gb" not in text
-    assert "// withName: 'QUANTIFY'" in text           # emitted but inert (commented)
-    assert "    withName: 'QUANTIFY'" not in text      # NOT an active block
+    assert "// withName: 'QUANTIFY'" in text  # emitted but inert (commented)
+    assert "    withName: 'QUANTIFY'" not in text  # NOT an active block
 
 
 def test_merge_and_pyramid_is_not_emitted_with_invalid_total_gb(tmp_path):
     out = tmp_path / "m.config"
     emit_config.write_optimized_config(
-        {"MERGE_AND_PYRAMID": {"slope": 1.0, "intercept": 2.0, "sigma": 0.5, "r2": 0.9, "n": 5}}, out)
+        {
+            "MERGE_AND_PYRAMID": {
+                "slope": 1.0,
+                "intercept": 2.0,
+                "sigma": 0.5,
+                "r2": 0.9,
+                "n": 5,
+            }
+        },
+        out,
+    )
     text = out.read_text()
     assert "total_gb" not in text
     assert "// withName: 'MERGE_AND_PYRAMID'" in text  # commented, awaiting a real expr

@@ -4,6 +4,7 @@ Generalises notebooks/resource_regression.ipynb:load_resource_data over a result
 tree laid out by benchmarks/run_sweep.sh: <root>/<run_id>/trace/trace.txt and
 <root>/<run_id>/out/size_logs/input_sizes.csv.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,17 +16,19 @@ from .parsing import parse_duration, parse_to_gb
 
 def parse_trace(trace_txt) -> pd.DataFrame:
     df = pd.read_csv(trace_txt, sep="\t")
-    out = pd.DataFrame({
-        "process": df["process"],
-        "tag": df.get("tag"),
-        "status": df.get("status"),
-        "exit": pd.to_numeric(df.get("exit"), errors="coerce"),
-        "peak_rss_gb": df["peak_rss"].map(parse_to_gb),
-        "peak_vmem_gb": df["peak_vmem"].map(parse_to_gb),
-        "realtime_s": df["realtime"].map(parse_duration),
-        "duration_s": df["duration"].map(parse_duration),
-        "cpus": pd.to_numeric(df.get("cpus"), errors="coerce"),
-    })
+    out = pd.DataFrame(
+        {
+            "process": df["process"],
+            "tag": df.get("tag"),
+            "status": df.get("status"),
+            "exit": pd.to_numeric(df.get("exit"), errors="coerce"),
+            "peak_rss_gb": df["peak_rss"].map(parse_to_gb),
+            "peak_vmem_gb": df["peak_vmem"].map(parse_to_gb),
+            "realtime_s": df["realtime"].map(parse_duration),
+            "duration_s": df["duration"].map(parse_duration),
+            "cpus": pd.to_numeric(df.get("cpus"), errors="coerce"),
+        }
+    )
     # I/O volume: rchar/wchar are the cumulative bytes a process moved through read()/write()
     # syscalls (Nextflow trace fields; nextflow.config enables both). This is transferred VOLUME,
     # not throughput. Present-only, so a trace lacking the fields degrades to NaN, never an error.
@@ -33,7 +36,11 @@ def parse_trace(trace_txt) -> pd.DataFrame:
         out[dst] = df[src].map(parse_to_gb) if src in df.columns else float("nan")
     # Timestamps (start/complete) enable an end-to-end wall-clock; present only if the trace config
     # includes them. Parsed leniently so a missing/odd format degrades to NaT, never an error.
-    for src, dst in (("start", "start_ts"), ("complete", "complete_ts"), ("submit", "submit_ts")):
+    for src, dst in (
+        ("start", "start_ts"),
+        ("complete", "complete_ts"),
+        ("submit", "submit_ts"),
+    ):
         if src in df.columns:
             out[dst] = pd.to_datetime(df[src], errors="coerce")
     return out
@@ -73,9 +80,18 @@ def only_successful(runs_df: pd.DataFrame) -> pd.DataFrame:
     return runs_df[ok]
 
 
-def aggregate_repeats(runs_df: pd.DataFrame,
-                      metrics=("peak_rss_gb", "peak_vmem_gb", "realtime_s",
-                               "duration_s", "input_gb", "read_gb", "write_gb")) -> pd.DataFrame:
+def aggregate_repeats(
+    runs_df: pd.DataFrame,
+    metrics=(
+        "peak_rss_gb",
+        "peak_vmem_gb",
+        "realtime_s",
+        "duration_s",
+        "input_gb",
+        "read_gb",
+        "write_gb",
+    ),
+) -> pd.DataFrame:
     """Collapse replicate runs into per-(process, config) mean / std / CV.
 
     Replicates share a ``config_id`` (from build_run_plan --repeats); this reports
@@ -88,7 +104,9 @@ def aggregate_repeats(runs_df: pd.DataFrame,
     if runs_df.empty:
         return pd.DataFrame()
     keys = ["process"] + [k for k in ("config_id",) if k in runs_df.columns]
-    carry = [c for c in ("varied_axis", "target_px", "n_channels") if c in runs_df.columns]
+    carry = [
+        c for c in ("varied_axis", "target_px", "n_channels") if c in runs_df.columns
+    ]
     metrics = [m for m in metrics if m in runs_df.columns]
 
     out_rows = []
@@ -106,8 +124,12 @@ def aggregate_repeats(runs_df: pd.DataFrame,
             row[f"{m}_std"] = std
             row[f"{m}_cv"] = (std / mean) if mean else float("nan")
         out_rows.append(row)
-    cols = keys + ["n_reps"] + carry + [
-        f"{m}_{s}" for m in metrics for s in ("mean", "std", "cv")]
+    cols = (
+        keys
+        + ["n_reps"]
+        + carry
+        + [f"{m}_{s}" for m in metrics for s in ("mean", "std", "cv")]
+    )
     return pd.DataFrame(out_rows, columns=cols)
 
 
@@ -158,8 +180,12 @@ def load_runs(results_root, run_plan_csv) -> pd.DataFrame:
 # METHOD-NATIVE self-reports (each method scoring its own transform), which is
 # a different claim and already has its own table via quality.harvest_valis_rtre.
 GROUND_TRUTH_COLS = (
-    "true_median_px", "true_mean_px", "true_p90_px",
-    "true_median_rtre", "true_median_um", "true_p90_um",
+    "true_median_px",
+    "true_mean_px",
+    "true_p90_px",
+    "true_median_rtre",
+    "true_median_um",
+    "true_p90_um",
 )
 
 

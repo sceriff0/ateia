@@ -60,13 +60,17 @@ def test_synthesize_single_block_matches_reference_formula():
     EXACTLY clip(roll(src, c)*gain + noise) with the documented rng draw order (gain, then one
     whole-image noise draw per channel) — i.e. it is unchanged from the original whole-image code."""
     src = (np.arange(6 * 5, dtype=np.uint16).reshape(6, 5) % 60).astype(np.uint16)
-    out = synthesize_channels(src, n_channels=2, seed=4, block_rows=4096)  # 6 rows -> 1 block
+    out = synthesize_channels(
+        src, n_channels=2, seed=4, block_rows=4096
+    )  # 6 rows -> 1 block
     rng = np.random.default_rng(4)
     info = np.iinfo(np.uint16)
-    gain = 1.0 + rng.uniform(-0.1, 0.1)                 # same first draw
+    gain = 1.0 + rng.uniform(-0.1, 0.1)  # same first draw
     shifted = np.roll(src, shift=1, axis=1)
-    noise = rng.normal(0.0, 3.0, size=src.shape)        # same second draw (whole image)
-    ref = np.clip(shifted.astype(np.float64) * gain + noise, info.min, info.max).astype(np.uint16)
+    noise = rng.normal(0.0, 3.0, size=src.shape)  # same second draw (whole image)
+    ref = np.clip(shifted.astype(np.float64) * gain + noise, info.min, info.max).astype(
+        np.uint16
+    )
     np.testing.assert_array_equal(out[1], ref)
 
 
@@ -74,15 +78,19 @@ def test_synthesize_blockwise_covers_all_rows_incl_partial_last_block():
     """Non-divisible boundary (h=10, block_rows=4 -> rows 0:4, 4:8, 8:10). Every row of every
     channel must be written into the np.empty output (no uninitialized gap at block seams), the
     result is deterministic, and channel 0 is the exact source across all blocks."""
-    src = (np.arange(10 * 6, dtype=np.uint16).reshape(10, 6) * 7 % 500).astype(np.uint16)
+    src = (np.arange(10 * 6, dtype=np.uint16).reshape(10, 6) * 7 % 500).astype(
+        np.uint16
+    )
     a = synthesize_channels(src, n_channels=3, seed=3, block_rows=4)
     b = synthesize_channels(src, n_channels=3, seed=3, block_rows=4)
-    np.testing.assert_array_equal(a, b)                 # deterministic for a fixed block_rows
-    np.testing.assert_array_equal(a[0], src)            # ch0 unchanged incl. the partial last block
+    np.testing.assert_array_equal(a, b)  # deterministic for a fixed block_rows
+    np.testing.assert_array_equal(
+        a[0], src
+    )  # ch0 unchanged incl. the partial last block
     assert a.shape == (3, 10, 6) and a.dtype == np.uint16
     assert a.max() <= np.iinfo(np.uint16).max
     for c in (1, 2):
-        assert not np.array_equal(a[c], src)            # every extra channel actually perturbed
+        assert not np.array_equal(a[c], src)  # every extra channel actually perturbed
         # the partial last block (rows 8:9) was written, not left as np.empty garbage matching src
         assert not np.array_equal(a[c, 8:], src[8:])
 
@@ -116,8 +124,11 @@ def test_run_matrix_preserves_uint16_dtype(tmp_path):
     tifffile.imwrite(src, np.full((200, 100), 4000, dtype=np.uint16))
 
     manifest = run_matrix(
-        source=src, outdir=tmp_path / "m16",
-        target_px=[50], n_channels=[1, 2], seed=0,
+        source=src,
+        outdir=tmp_path / "m16",
+        target_px=[50],
+        n_channels=[1, 2],
+        seed=0,
     )
     with open(manifest) as fh:
         rows = list(csv.DictReader(fh))
@@ -140,8 +151,11 @@ def test_run_matrix_writes_cells_and_manifest(tmp_path):
     tifffile.imwrite(src, np.full((400, 200), 100, dtype=np.uint8))
 
     manifest = run_matrix(
-        source=src, outdir=tmp_path / "matrix",
-        target_px=[100, 50], n_channels=[1, 2], seed=0,
+        source=src,
+        outdir=tmp_path / "matrix",
+        target_px=[100, 50],
+        n_channels=[1, 2],
+        seed=0,
     )
 
     with open(manifest) as fh:
@@ -149,7 +163,13 @@ def test_run_matrix_writes_cells_and_manifest(tmp_path):
     # 2 sizes x 2 channel-counts = 4 cells
     assert len(rows) == 4
     assert set(rows[0].keys()) == {
-        "cell_id", "target_px", "width", "height", "n_channels", "bytes", "path",
+        "cell_id",
+        "target_px",
+        "width",
+        "height",
+        "n_channels",
+        "bytes",
+        "path",
     }
     for r in rows:
         p = Path(r["path"])
@@ -164,10 +184,17 @@ def test_run_matrix_paired_writes_moving_with_distinct_channels(tmp_path):
     import tifffile
 
     from benchmarks.generate_matrix import run_matrix
+
     src = tmp_path / "s.tif"
     tifffile.imwrite(src, np.full((200, 100), 100, dtype=np.uint8))
-    manifest = run_matrix(source=src, outdir=tmp_path / "m",
-                          target_px=[50], n_channels=[1, 2], seed=0, paired=True)
+    manifest = run_matrix(
+        source=src,
+        outdir=tmp_path / "m",
+        target_px=[50],
+        n_channels=[1, 2],
+        seed=0,
+        paired=True,
+    )
     rows = {r["cell_id"]: r for r in csv.DictReader(open(manifest))}
     assert "moving_paths" in next(iter(rows.values()))
     # n>=2 gets one moving file (default n_moving=1); n==1 does not (would collide on {DAPI})
@@ -182,10 +209,18 @@ def test_run_matrix_n_moving_writes_distinct_panels(tmp_path):
     import tifffile
 
     from benchmarks.generate_matrix import run_matrix
+
     src = tmp_path / "s.tif"
     tifffile.imwrite(src, np.full((200, 100), 100, dtype=np.uint8))
-    manifest = run_matrix(source=src, outdir=tmp_path / "m",
-                          target_px=[50], n_channels=[2], seed=0, paired=True, n_moving=3)
+    manifest = run_matrix(
+        source=src,
+        outdir=tmp_path / "m",
+        target_px=[50],
+        n_channels=[2],
+        seed=0,
+        paired=True,
+        n_moving=3,
+    )
     row = next(iter(csv.DictReader(open(manifest))))
     movs = row["moving_paths"].split(";")
     assert len(movs) == 3  # one distinct moving image per extra registration panel
@@ -195,6 +230,7 @@ def test_run_matrix_n_moving_writes_distinct_panels(tmp_path):
 
 def test_derive_from_sweep_computes_matrix_shape(tmp_path):
     from benchmarks.generate_matrix import derive_from_sweep
+
     sweep = tmp_path / "sweep.yaml"
     sweep.write_text(
         "baseline:\n"
@@ -207,10 +243,10 @@ def test_derive_from_sweep_computes_matrix_shape(tmp_path):
         "  n_register_images: [2, 4, 8]\n"
     )
     d = derive_from_sweep(sweep)
-    assert d["target_px"] == [2048, 4096, 8192]      # axis ∪ baseline, sorted
+    assert d["target_px"] == [2048, 4096, 8192]  # axis ∪ baseline, sorted
     assert d["n_channels"] == [1, 2, 4]
-    assert d["n_moving"] == 7                         # max(n_register_images) - 1 = 8 - 1
-    assert d["paired"] is True                        # >1 panel requested
+    assert d["n_moving"] == 7  # max(n_register_images) - 1 = 8 - 1
+    assert d["paired"] is True  # >1 panel requested
 
 
 def test_derive_from_sweep_matches_repo_sweep():
@@ -218,6 +254,7 @@ def test_derive_from_sweep_matches_repo_sweep():
     from pathlib import Path
 
     from benchmarks.generate_matrix import derive_from_sweep
+
     d = derive_from_sweep(Path(__file__).parents[1] / "configs" / "sweep.yaml")
     assert d["n_moving"] == 7 and d["paired"] is True
     # input-scale cells come from the scaling_grid; 90000 is the largest benchmarked size.
@@ -231,6 +268,7 @@ def test_derive_moving_map_matches_registration_grid():
     from pathlib import Path
 
     from benchmarks.generate_matrix import derive_from_sweep
+
     d = derive_from_sweep(Path(__file__).parents[1] / "configs" / "sweep.yaml")
     mm = d["n_moving_map"]
     # The registration grid runs N=8 at EVERY size and at BOTH 2 and 4 channels, so every
@@ -245,32 +283,56 @@ def test_run_matrix_moving_map_generates_per_cell_counts(tmp_path):
     import tifffile
 
     from benchmarks.generate_matrix import run_matrix
+
     src = tmp_path / "s.tif"
     tifffile.imwrite(src, np.full((64, 64), 100, dtype=np.uint8))
     mm = {(32, 2): 3, (48, 2): 1}
-    manifest = run_matrix(source=src, outdir=tmp_path / "m", target_px=[32, 48],
-                          n_channels=[2], seed=0, paired=True, n_moving_map=mm)
+    manifest = run_matrix(
+        source=src,
+        outdir=tmp_path / "m",
+        target_px=[32, 48],
+        n_channels=[2],
+        seed=0,
+        paired=True,
+        n_moving_map=mm,
+    )
     rows = {r["cell_id"]: r for r in csv.DictReader(open(manifest))}
-    assert len(rows["px32_ch2"]["moving_paths"].split(";")) == 3   # 3 panels for this cell
-    assert len(rows["px48_ch2"]["moving_paths"].split(";")) == 1   # only 1 for this cell
+    assert (
+        len(rows["px32_ch2"]["moving_paths"].split(";")) == 3
+    )  # 3 panels for this cell
+    assert len(rows["px48_ch2"]["moving_paths"].split(";")) == 1  # only 1 for this cell
     assert (tmp_path / "m" / "px32_ch2_moving3.ome.tif").exists()
-    assert not (tmp_path / "m" / "px48_ch2_moving2.ome.tif").exists()  # not over-generated
+    assert not (
+        tmp_path / "m" / "px48_ch2_moving2.ome.tif"
+    ).exists()  # not over-generated
 
 
 def test_run_matrix_default_unpaired_manifest_columns_unchanged(tmp_path):
     import tifffile
 
     from benchmarks.generate_matrix import run_matrix
+
     src = tmp_path / "s.tif"
     tifffile.imwrite(src, np.full((80, 80), 100, dtype=np.uint8))
-    manifest = run_matrix(source=src, outdir=tmp_path / "m", target_px=[40], n_channels=[2], seed=0)
+    manifest = run_matrix(
+        source=src, outdir=tmp_path / "m", target_px=[40], n_channels=[2], seed=0
+    )
     rows = list(csv.DictReader(open(manifest)))
-    assert set(rows[0].keys()) == {"cell_id", "target_px", "width", "height", "n_channels", "bytes", "path"}
+    assert set(rows[0].keys()) == {
+        "cell_id",
+        "target_px",
+        "width",
+        "height",
+        "n_channels",
+        "bytes",
+        "path",
+    }
 
 
 # ---------------------------------------------------------------------------
 # Source formats — the matrix generator must accept what the PIPELINE accepts
 # ---------------------------------------------------------------------------
+
 
 def test_bioio_only_suffixes_are_a_subset_of_the_pipeline_format_table():
     """bin/utils/ome_io.py is the authority on what the pipeline can read.
@@ -300,14 +362,16 @@ def test_bioio_only_suffixes_are_a_subset_of_the_pipeline_format_table():
     import ome_io
 
     pipeline_bioio_suffixes = {
-        suffix for suffix, reader in ome_io._SUFFIX_TO_READER.items()
+        suffix
+        for suffix, reader in ome_io._SUFFIX_TO_READER.items()
         if reader in ("bioio", "bioio-bioformats")
     }
     missing = sorted(_BIOIO_ONLY_SUFFIXES - pipeline_bioio_suffixes)
     assert not missing, (
         f"generate_matrix routes {missing} to bioio but ome_io._SUFFIX_TO_READER "
         f"does not route them through bioio/bioio-bioformats: "
-        f"{sorted(pipeline_bioio_suffixes)}")
+        f"{sorted(pipeline_bioio_suffixes)}"
+    )
 
 
 def test_nd2_without_bioio_fails_with_an_actionable_message(tmp_path, monkeypatch):
@@ -368,13 +432,16 @@ def test_only_one_synthesized_stack_is_alive_at_a_time(tmp_path, monkeypatch):
 
     src = tmp_path / "src.tif"
     import tifffile
+
     tifffile.imwrite(src, np.full((64, 64), 700, dtype=np.uint16))
 
-    gm.run_matrix(src, tmp_path / "m", target_px=[32, 48], n_channels=[2],
-                  paired=True, n_moving=3)
+    gm.run_matrix(
+        src, tmp_path / "m", target_px=[32, 48], n_channels=[2], paired=True, n_moving=3
+    )
 
     assert seen_max, "synthesize_channels was never called"
     assert max(seen_max) == 0, (
         f"up to {max(seen_max)} previously-built stack(s) were still alive when the "
         "next was allocated; the peak is then N+1 stacks, not one. Release each "
-        "stack (del) before building the next.")
+        "stack (del) before building the next."
+    )
