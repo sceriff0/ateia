@@ -19,8 +19,11 @@
  * versions.yml IS RENDERED BY ``lib/ProcessEnvelope.groovy``, IN BOTH BLOCKS, FROM ONE
  * LIST. Until this was done, ``script:`` and ``stub:`` each hand-wrote their own heredoc
  * and they named DISJOINT keys: script: reported ``python`` plus the backend's real tools
- * (deepcell/tensorflow, instanseg/torch, cellSAM/torch), stub: reported ``python`` plus a
- * bare ``seg_method: <name>`` that is not a tool at all. ``-stub`` never evaluates a
+ * (at the time: deepcell/tensorflow for StarDist, instanseg/torch, cellSAM/torch --
+ * ``deepcell`` was itself a phantom no image ever installed, and was removed from
+ * StarDist's tools 2026-09-02, so read that pairing as history rather than as the
+ * current table), stub: reported ``python`` plus a bare ``seg_method: <name>`` that is
+ * not a tool at all. ``-stub`` never evaluates a
  * ``script:`` block, and CI's blocking gate is ``nf-test --tag stub``, so the branch that
  * ships was the branch nothing ran. Both blocks now pass ``backend.versionTools``, and
  * both resolve ``backend`` from the same ``SegBackends.of(params.seg_method)`` expression.

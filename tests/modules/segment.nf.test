@@ -63,12 +63,14 @@ nextflow_process {
             // through ProcessEnvelope from SegBackends' one `versionTools` list, so this
             // stub run is direct evidence about what a REAL run reports.
             with(path(process.out.versions.get(0)).text) {
-                assert contains('deepcell: stub')
                 assert contains('tensorflow: stub')
                 assert contains('python: stub')
-                // The old hand-written key, and the OTHER backends' tools: a stub that
-                // names either is reporting a stack this task never loaded.
+                // The old hand-written key, `deepcell` (a phantom -- no image installs
+                // it, and it was removed from SegBackends' versionTools 2026-09-02), and
+                // the OTHER backends' tools: a stub that names any of these is reporting
+                // a stack this task never loaded.
                 assert !contains('seg_method')
+                assert !contains('deepcell')
                 assert !contains('torch')
                 assert !contains('instanseg')
                 assert !contains('cellSAM')
@@ -457,7 +459,7 @@ nextflow_process {
         // SEGMENT is not runnable without its container, and that is fine: the assertions
         // read the rendered .command.sh, which Nextflow writes before it executes
         // anything, so this case holds whether the task succeeds or dies importing
-        // deepcell. It asserts nothing about process outcome for exactly that reason.
+        // tensorflow. It asserts nothing about process outcome for exactly that reason.
         tag "stub"
 
         when {
@@ -489,12 +491,12 @@ nextflow_process {
                     "no rendered SEGMENT .command.sh found under the task work dir" },
 
                 // The `test` profile pins seg_method='stardist', so the rendered command
-                // must carry StarDist's two probes -- the rows ProcessEnvelope built from
+                // must carry StarDist's one probe -- the row ProcessEnvelope built from
                 // SegBackends' versionTools list, byte-for-byte what the hand-written
-                // heredoc used to contain.
-                { assert rendered.every {
-                    it.contains('deepcell: $(python -c "import deepcell; print(deepcell.__version__)" 2>/dev/null || echo "unknown")') },
-                    "rendered command: " + rendered.join(' --- ') },
+                // heredoc used to contain. `deepcell` was removed from that list
+                // 2026-09-02 (it was a phantom -- no image installs it, and StarDist has
+                // nothing to do with DeepCell); its absence is asserted below, alongside
+                // `torch`, as one of the "negative with teeth" checks.
                 { assert rendered.every {
                     it.contains('tensorflow: $(python -c "import tensorflow; print(tensorflow.__version__)" 2>/dev/null || echo "unknown")') },
                     "rendered command: " + rendered.join(' --- ') },
@@ -520,7 +522,10 @@ nextflow_process {
                 { assert rendered.every { !it.contains('seg_method:') },
                     "rendered command carries the stub-only seg_method row: " + rendered.join(' --- ') },
                 { assert rendered.every { !it.contains('import torch') },
-                    "StarDist run reports a torch version it never loaded: " + rendered.join(' --- ') }
+                    "StarDist run reports a torch version it never loaded: " + rendered.join(' --- ') },
+                { assert rendered.every { !it.contains('import deepcell') },
+                    "StarDist run reports a deepcell version -- a phantom no image " +
+                    "installs and StarDist has nothing to do with: " + rendered.join(' --- ') }
             )
         }
     }
