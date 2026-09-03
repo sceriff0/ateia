@@ -515,4 +515,16 @@
 # `pytest --collect-only -q` reports "1610 tests collected", and a full run
 # (also re-checked with MIRAGE_STRICT_SKIPS=1) gives 1597 passed, 13 skipped,
 # 0 failed -- 1597 + 13 = 1610, matching exactly. 1584 + 26 = 1610.
-1610
+#
+# RE-MEASURED 2026-09-03, plan 08's CI-fix round. Two new cases in
+# tests/test_registration_qc_before_after.py --
+# test_render_before_after_warns_when_the_registered_plane_is_off_canvas and
+# test_render_before_after_is_silent_when_only_the_native_differs -- covering the
+# logger.warning render_before_after now emits when the REGISTERED plane is not on
+# the reference canvas. The round's other edits (the tifffile RESUNIT lookup, the
+# PhysicalSizeXUnit assertions, the quote-aware comment stripper in
+# tests/test_container_harmonisation.py) add assertions inside existing test
+# functions and collect nothing new. `pytest --collect-only -q` reports "1612 tests
+# collected", and a full run with MIRAGE_STRICT_SKIPS=1 gives 1599 passed, 13
+# skipped, 0 failed -- 1599 + 13 = 1612. 1610 + 2 = 1612.
+1612

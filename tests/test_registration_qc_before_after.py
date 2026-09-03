@@ -15,6 +15,7 @@ pins the two properties that make the added "before" panel honest:
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -39,6 +40,16 @@ import qc  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
 CLI = REPO / "bin" / "generate_registration_qc.py"
+
+# The ResolutionUnit enum moved: it is a MODULE-level `tifffile.RESUNIT` in current
+# tifffile (2025.5.10, the version requirements/constraints.txt pins and CI installs),
+# and only a `tifffile.TIFF.RESUNIT` attribute in older ones (2023.4.12, what a local
+# venv may still hold). Reading it off `TIFF` alone made these assertions raise
+# `AttributeError: '_TIFF' object has no attribute 'RESUNIT'` in CI while passing
+# locally. The value itself is stable across both: RESUNIT.MICROMETER == 5 (standard
+# TIFF defines only 1-3; tifffile extends it with 4 = mm and 5 = um, following DNG).
+RESUNIT = getattr(tifffile, "RESUNIT", None) or tifffile.TIFF.RESUNIT
+assert int(RESUNIT.MICROMETER) == 5
 
 
 def test_smaller_moving_image_is_zero_padded_at_the_origin():
@@ -174,6 +185,41 @@ def test_render_before_after_pads_a_smaller_native_onto_the_reference_canvas():
     out = qc.render_before_after(ref, native, registered, scale_factor=1.0, gap=6)
 
     assert out.shape == (3, 20, 24 * 2 + 6)
+
+
+def test_render_before_after_warns_when_the_registered_plane_is_off_canvas(caplog):
+    """A registered slide is supposed to already be on the reference canvas.
+
+    Routing the REGISTERED plane through ``compose_on_reference_canvas`` (which the
+    native panel needs) means one that is not gets silently pad-or-cropped, where
+    ``create_nuclear_overlay`` used to raise ``ValueError("Shape mismatch...")``.
+    Drawing it is right -- a QC figure that refuses to render tells its reader
+    nothing -- but the discrepancy is a registration-output defect and must be said
+    out loud, naming BOTH shapes so the reader can tell which way it went.
+    """
+    ref = _plane(1, 20, 24)
+    native = _plane(2, 11, 13)
+    registered = _plane(3, 18, 24)  # NOT the reference canvas
+
+    with caplog.at_level(logging.WARNING, logger=qc.logger.name):
+        out = qc.render_before_after(ref, native, registered, scale_factor=1.0, gap=6)
+
+    # Still rendered, still on the reference canvas.
+    assert out.shape == (3, 20, 24 * 2 + 6)
+    assert "(18, 24)" in caplog.text and "(20, 24)" in caplog.text
+
+
+def test_render_before_after_is_silent_when_only_the_native_differs(caplog):
+    """The native plane differing from the reference IS the normal case -- warning on
+    it would train a reader to ignore the warning above."""
+    ref = _plane(1, 20, 24)
+    native = _plane(2, 11, 13)
+    registered = _plane(3, 20, 24)
+
+    with caplog.at_level(logging.WARNING, logger=qc.logger.name):
+        qc.render_before_after(ref, native, registered, scale_factor=1.0, gap=6)
+
+    assert caplog.text.strip() == ""
 
 
 def test_render_before_after_honours_the_scale_factor():
@@ -390,13 +436,13 @@ def test_cli_pixel_size_um_stamps_both_qc_tiffs(tmp_path):
 
     with tifffile.TiffFile(str(outdir / "registered_QC_RGB.tif")) as tf:
         tags = tf.pages[0].tags
-        assert tags["ResolutionUnit"].value == tifffile.TIFF.RESUNIT.MICROMETER
+        assert tags["ResolutionUnit"].value == RESUNIT.MICROMETER
         x_num, x_den = tags["XResolution"].value
         preview_resolution = x_num / x_den
 
     with tifffile.TiffFile(str(outdir / "registered_QC_RGB_fullres.tif")) as tf:
         tags = tf.pages[0].tags
-        assert tags["ResolutionUnit"].value == tifffile.TIFF.RESUNIT.MICROMETER
+        assert tags["ResolutionUnit"].value == RESUNIT.MICROMETER
         x_num, x_den = tags["XResolution"].value
         fullres_resolution = x_num / x_den
 
@@ -417,6 +463,17 @@ def test_cli_pixel_size_um_stamps_both_qc_tiffs(tmp_path):
     assert match, f"no PhysicalSizeX in OME-XML: {ome_xml}"
     assert float(match.group(1)) == pytest.approx(
         pixel_size_um / scale_factor, rel=1e-3
+    )
+    # A bare PhysicalSizeX is not a scale: OME's default unit is um, but a reader that
+    # honours the attribute reads whatever PhysicalSizeXUnit says, so a number written
+    # without its unit is one ome_io._MICRON change away from silently meaning nm.
+    # ome_io.ome_metadata writes the pair together (bin/utils/ome_io.py:262-266); this
+    # pins that BOTH halves reach the file.
+    assert 'PhysicalSizeXUnit="\u00b5m"' in ome_xml, (
+        f"no PhysicalSizeXUnit in OME-XML: {ome_xml}"
+    )
+    assert 'PhysicalSizeYUnit="\u00b5m"' in ome_xml, (
+        f"no PhysicalSizeYUnit in OME-XML: {ome_xml}"
     )
 
 
@@ -449,9 +506,7 @@ def test_cli_without_pixel_size_um_leaves_output_unstamped(tmp_path):
     # controls is whether that tag is STAMPED WITH A MICROMETER SCALE, so the
     # "unstamped" assertion is on the unit, not on the tag's mere presence.
     with tifffile.TiffFile(str(outdir / "registered_QC_RGB.tif")) as tf:
-        assert (
-            tf.pages[0].tags["ResolutionUnit"].value != tifffile.TIFF.RESUNIT.MICROMETER
-        )
+        assert tf.pages[0].tags["ResolutionUnit"].value != RESUNIT.MICROMETER
         assert "PhysicalSizeX" not in tf.ome_metadata
 
     with tifffile.TiffFile(str(outdir / "registered_QC_RGB_fullres.tif")) as tf:
@@ -484,13 +539,13 @@ def test_create_registration_qc_stamps_resolution_on_both_tiffs_when_given(tmp_p
         tags = tf.pages[0].tags
         x_num, x_den = tags["XResolution"].value
         preview_resolution = x_num / x_den
-        assert tags["ResolutionUnit"].value == tifffile.TIFF.RESUNIT.MICROMETER
+        assert tags["ResolutionUnit"].value == RESUNIT.MICROMETER
 
     with tifffile.TiffFile(str(tmp_path / "P001_mov1_QC_RGB_fullres.tif")) as tf:
         tags = tf.pages[0].tags
         x_num, x_den = tags["XResolution"].value
         fullres_resolution = x_num / x_den
-        assert tags["ResolutionUnit"].value == tifffile.TIFF.RESUNIT.MICROMETER
+        assert tags["ResolutionUnit"].value == RESUNIT.MICROMETER
 
     assert fullres_resolution == pytest.approx(1.0 / pixel_size_um, rel=1e-3)
     # The downsampled preview's pixel is 1/scale_factor times bigger in microns,
@@ -508,6 +563,17 @@ def test_create_registration_qc_stamps_resolution_on_both_tiffs_when_given(tmp_p
     assert match, f"no PhysicalSizeX in OME-XML: {ome_xml}"
     assert float(match.group(1)) == pytest.approx(
         pixel_size_um / scale_factor, rel=1e-3
+    )
+    # A bare PhysicalSizeX is not a scale: OME's default unit is um, but a reader that
+    # honours the attribute reads whatever PhysicalSizeXUnit says, so a number written
+    # without its unit is one ome_io._MICRON change away from silently meaning nm.
+    # ome_io.ome_metadata writes the pair together (bin/utils/ome_io.py:262-266); this
+    # pins that BOTH halves reach the file.
+    assert 'PhysicalSizeXUnit="\u00b5m"' in ome_xml, (
+        f"no PhysicalSizeXUnit in OME-XML: {ome_xml}"
+    )
+    assert 'PhysicalSizeYUnit="\u00b5m"' in ome_xml, (
+        f"no PhysicalSizeYUnit in OME-XML: {ome_xml}"
     )
 
 
@@ -532,12 +598,12 @@ def test_create_registration_qc_without_pixel_size_um_leaves_output_unstamped(tm
 
     with tifffile.TiffFile(str(out)) as tf:
         tags = tf.pages[0].tags
-        assert tags["ResolutionUnit"].value != tifffile.TIFF.RESUNIT.MICROMETER
+        assert tags["ResolutionUnit"].value != RESUNIT.MICROMETER
         assert tags["XResolution"].value == (1, 1)
         assert "PhysicalSizeX" not in tf.ome_metadata
 
     with tifffile.TiffFile(str(tmp_path / "P001_mov1_QC_RGB_fullres.tif")) as tf:
         tags = tf.pages[0].tags
-        assert tags["ResolutionUnit"].value != tifffile.TIFF.RESUNIT.MICROMETER
+        assert tags["ResolutionUnit"].value != RESUNIT.MICROMETER
         assert tags["XResolution"].value == (1, 1)
         assert "unit=um" not in tags["ImageDescription"].value

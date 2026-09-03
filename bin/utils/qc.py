@@ -322,6 +322,25 @@ def render_before_after(
     the pair comparable at a glance: fringing that shrinks from left to right is
     exactly the correction registration applied.
     """
+    # The REGISTERED plane is expected to already be on the reference canvas -- that is
+    # what registration produced it for. Routing it through compose_on_reference_canvas
+    # (needed because the NATIVE plane genuinely differs in shape) means a registered
+    # slide that is NOT on the reference canvas is now silently padded or cropped, where
+    # create_nuclear_overlay used to raise "Shape mismatch". Pad-or-crop is the right
+    # rendering behaviour -- a QC figure that refuses to draw tells its reader nothing --
+    # but it must not be silent, because the discrepancy is a registration-output defect,
+    # not a QC one. The native panel is deliberately NOT warned about: differing there is
+    # the normal case.
+    if registered.shape != reference.shape:
+        logger.warning(
+            "Registered plane %s does not match the reference canvas %s; the 'after' "
+            "panel was pad-or-cropped at the origin to fit. A registered slide is "
+            "expected to already be on the reference canvas, so this is a registration "
+            "output to check, not a QC setting.",
+            registered.shape,
+            reference.shape,
+        )
+
     panels = []
     if native is not None:
         panels.append(
