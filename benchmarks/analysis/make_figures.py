@@ -48,10 +48,15 @@ accuracy number in this directory is either a COST measure or a method scoring
 its own transform (valis_rtre, the STARE intrinsic TRE, the reg_qc=2
 segmentation overlap). None of them is independent.
 
-The independent measure is the landmark TRE from benchmarks/registration_eval/:
-ANHIR/ACROBAT expert landmarks warped through each method's transform. Produce
-it with benchmarks/registration_eval/run_registration.sh and aggregate_eval.py,
-then re-run this analysis with --reg-eval <that csv>.
+THERE IS NO GROUND-TRUTH HARNESS IN THIS REPOSITORY, and --reg-eval none is
+therefore the normal path, not an unusual one. Two harnesses have occupied that
+slot and both were deleted; benchmarks/README.md section B is the record of what
+each was and why it went. Nothing here can produce the CSV that --reg-eval takes.
+
+--reg-eval <csv> is kept for an EXTERNALLY produced landmark TRE table -- one row
+per (pair_id, mode), `mode` naming the registration method, carrying at least one
+of the columns in load.GROUND_TRUTH_COLS. If you have one, pass it and this note
+is not written.
 
 This file exists because the alternative -- a cost-only result that reads like a
 complete one -- is how the number came to be missing for so long: it sat unread
@@ -116,10 +121,10 @@ def run(results_root, run_plan_csv, reg_eval_csv, outdir, formats=("pdf", "svg")
               f"(measurements.csv keeps them)")
 
     # ── GROUND TRUTH ──────────────────────────────────────────────────────────
-    # reg_eval_csv carries the landmark TRE from benchmarks/registration_eval/ --
-    # ANHIR/ACROBAT expert landmarks warped through each method's transform, and
-    # the ONLY ground-truth accuracy number in the whole benchmark. Everything
-    # else here is cost, or a method scoring its own transform.
+    # reg_eval_csv, if passed, carries an OPTIONAL EXTERNALLY produced landmark
+    # table -- this benchmark ships no producer for one, and none of its own
+    # accuracy numbers are ground-truth. Everything else here is cost, or a
+    # method scoring its own transform.
     #
     # It used to sit UNREAD in this signature, its docstring and its call site,
     # with every test passing None -- so the number reached no table and no

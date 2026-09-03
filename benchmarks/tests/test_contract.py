@@ -166,10 +166,10 @@ def _unread_params(path: Path, func: str) -> list:
 
 def test_no_analysis_entry_point_takes_a_parameter_it_never_reads():
     """reg_eval_csv sat in make_figures.run()'s signature, its docstring and its
-    call site and was never read in the body. It carries the ANHIR/ACROBAT
-    landmark TRE -- the ONLY ground-truth registration accuracy number in the
-    whole benchmark -- so that number reached no table and no figure. Every test
-    passed None for it, so nothing could detect it.
+    call site and was never read in the body. It carries an optional external
+    ground-truth table; the benchmark ships no producer for one. So that number
+    reached no table and no figure. Every test passed None for it, so nothing
+    could detect it.
 
     A signature decoration that reads as a data dependency is worse than an
     absent one: it makes the analysis look complete.

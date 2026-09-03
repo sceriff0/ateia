@@ -1,5 +1,0 @@
-pair_id,point_id,annotator,mpp,x_ihc,y_ihc,x_he,y_he
-pairA,0,ann1,1.0,100.0,200.0,105.0,195.0
-pairA,0,ann2,1.0,102.0,198.0,107.0,193.0
-pairA,1,ann1,1.0,300.0,400.0,295.0,405.0
-pairA,1,ann2,1.0,302.0,398.0,297.0,403.0

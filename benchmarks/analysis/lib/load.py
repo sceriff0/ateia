@@ -153,10 +153,10 @@ def load_runs(results_root, run_plan_csv) -> pd.DataFrame:
     return df
 
 
-# The ground-truth accuracy columns aggregate_eval.py emits per (pair_id, mode).
-# Only the landmark-derived ones: valis_rtre/stare_* are METHOD-NATIVE self-reports
-# (each method scoring its own transform), which is a different claim and already
-# has its own table via quality.harvest_valis_rtre.
+# The ground-truth accuracy columns an external landmark table may carry, keyed
+# per (pair_id, mode). Only the landmark-derived ones: valis_rtre/stare_* are
+# METHOD-NATIVE self-reports (each method scoring its own transform), which is
+# a different claim and already has its own table via quality.harvest_valis_rtre.
 GROUND_TRUTH_COLS = (
     "true_median_px", "true_mean_px", "true_p90_px",
     "true_median_rtre", "true_median_um", "true_p90_um",
@@ -166,20 +166,19 @@ GROUND_TRUTH_COLS = (
 def load_reg_eval(reg_eval_csv) -> pd.DataFrame:
     """Landmark TRE per registration METHOD, ready to join onto the run table.
 
-    This is the benchmark's only GROUND-TRUTH registration accuracy number --
-    ANHIR/ACROBAT expert landmarks, warped through each method's transform. It
-    used to reach nothing: `make_figures.run()` took `reg_eval_csv` in its
-    signature, its docstring and its call site and never read it in the body,
-    and every test passed None, so nothing could detect it.
+    This benchmark ships no producer for a ground-truth registration accuracy
+    number; `reg_eval_csv` is an OPTIONAL EXTERNALLY produced table. The column
+    contract this function enforces is what a caller needs to know: a CSV with a
+    `mode` column naming the registration method, and at least one of
+    GROUND_TRUTH_COLS, one row per (pair_id, mode). It used to reach nothing:
+    `make_figures.run()` took `reg_eval_csv` in its signature, its docstring and
+    its call site and never read it in the body, and every test passed None, so
+    nothing could detect it.
 
-    KEYED ON METHOD, NOT ON run_id, and that is not a shortcut. The registration
-    evaluation is a separate experiment: benchmarks/registration_eval/ registers
-    a fixed set of landmark PAIRS with each method and writes one row per
-    (pair_id, mode), where `mode` is the registration method name
-    (run_registration.sh loops `for method in valis tiled`). There is no run_id
-    in it and there cannot be -- the pairs are not sweep runs. So the honest join
-    is "this run used method M, and M's measured ground-truth TRE is X", with the
-    median taken across pairs.
+    KEYED ON METHOD, NOT ON run_id, and that is not a shortcut. The pairs a
+    landmark table carries are not sweep runs -- there is no run_id in it and
+    there cannot be. So the honest join is "this run used method M, and M's
+    measured ground-truth TRE is X", with the median taken across pairs.
 
     The returned frame is keyed `registration_method` so it merges directly onto
     the run table, and its columns are prefixed `gt_` so a reader cannot mistake
@@ -188,8 +187,8 @@ def load_reg_eval(reg_eval_csv) -> pd.DataFrame:
     df = pd.read_csv(reg_eval_csv)
     if "mode" not in df.columns:
         raise ValueError(
-            f"{reg_eval_csv} has no 'mode' column; it does not look like the output "
-            f"of benchmarks/registration_eval/aggregate_eval.py"
+            f"{reg_eval_csv} has no 'mode' column; it needs a 'mode' column "
+            f"naming the registration method"
         )
     present = [c for c in GROUND_TRUTH_COLS if c in df.columns]
     if not present:
