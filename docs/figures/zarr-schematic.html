@@ -254,7 +254,7 @@
         <p class="x">A slide is <code>(C, H, W)</code>. <code>tifffile.imread</code> decodes every marker channel;
           the consumer then indexes one out of it. A zarr view indexes first and decodes only the tiles that slice
           touches. This is the axis all four changed sites moved on.</p>
-        <div class="src">open_lazy — bin/utils/tiled_io.py:32</div>
+        <div class="src">open_lazy — bin/utils/tiled_io.py:34</div>
       </div>
       <div class="bx mut">
         <h4>THE SPATIAL AXIS &mdash; not removable here</h4>
@@ -269,7 +269,7 @@
           <b>g</b> give the three separate reasons the win is unavailable in each case.</p>
         <div class="src">bin/utils/qc.py:382 (the one decimation_factor call) ·
           bin/generate_preprocess_qc.py:211 (factor=1, hard-coded) ·
-          decimation_factor — bin/utils/tiled_io.py:86 (returns 1 when max_dim is None)</div>
+          decimation_factor — bin/utils/tiled_io.py:88 (returns 1 when max_dim is None)</div>
       </div>
     </div>
     <div class="callout"><span class="wl">the capability was never missing — only its reach</span>
@@ -305,21 +305,21 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
         <p class="x"><code>open_lazy</code> presents channel-<b>first</b> only. It has no notion of a
           <code>(Y, X, C)</code> layout, which is why every new call site keeps an eager fallback for that case —
           see panel <b>g</b>, blocker 4.</p>
-        <div class="src">bin/utils/tiled_io.py:66-84</div>
+        <div class="src">bin/utils/tiled_io.py:68-85</div>
       </div>
       <div class="bx">
         <h4>why bytes, not rows</h4>
         <p class="x">A fixed row count is not a memory bound: a band of a 30k-wide slide is ~7&times; the same band
           of a 4k-wide one. <code>band_rows_for</code> divides the budget by the row width, then snaps down to a
           multiple of <code>factor</code> so the sampled rows stay globally aligned.</p>
-        <div class="src">bin/utils/tiled_io.py:106-114</div>
+        <div class="src">bin/utils/tiled_io.py:113-125</div>
       </div>
       <div class="bx">
         <h4>one factor, not one per slide</h4>
         <p class="x">The shared factor is a correctness requirement of the STARE coarse anchor, not a convenience:
           squeezing each slide under <code>max_dim</code> independently would introduce a scale change between the
           two thumbnails and bake a bogus scale term into <code>M0</code>.</p>
-        <div class="src">bin/utils/tiled_io.py:86-102</div>
+        <div class="src">bin/utils/tiled_io.py:88-99</div>
       </div>
     </div>
   </section>
@@ -582,7 +582,7 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
         <text x="558" y="173" font-size="9" fill="var(--ink)" font-weight="700">none</text>
       </svg>
       <p class="cap">Verified directly on the 6-channel probe of panel <b>d</b>. The same
-        <code>out="memmap"</code> pattern survives at <code>bin/utils/image_utils.py:209</code>, behind
+        <code>out="memmap"</code> pattern survives at <code>bin/utils/image_utils.py:210</code>, behind
         <code>load_image(..., memmap=True)</code>, and was deliberately left alone: <b>no caller in
         <code>bin/</code> ever passes <code>memmap=True</code></b>, so it is reported dead code rather than a
         fixed site.</p>
@@ -735,14 +735,14 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
             (<code>np.squeeze</code>, <code>np.transpose</code>, <code>np.take</code>, plain indexing) dispatches
             through dask's <code>__array_function__</code> and stays lazy, so <b>none</b> of the dimension-order
             logic had to be rewritten.</p>
-          <div class="src">bin/convert_image.py:61 (read_image_bioio) · :466 (write_ome_tiff)</div></div>
+          <div class="src">bin/convert_image.py:61 (read_image_bioio) · bin/utils/ome_io.py:428 (write_ome_tiff)</div></div>
         <div><div class="lb">why the read alone would have saved nothing</div>
           <p class="tx"><b>Both halves had to change.</b> A lazy handle passed to <code>tifffile.imwrite</code> is
             simply <code>np.asarray</code>'d — the materialisation moves from the read to the write and the peak is
             unchanged. The write now streams: <code>TiffWriter.write(iterator, shape=, dtype=)</code>, the same form
             <code>bin/tiled_stitch.py</code> already used in production. Measured at
             <b>435 &rarr; 168 MB</b> peak (panel <b>d</b>).</p>
-          <div class="src">bin/convert_image.py:397 (_iter_planes) · :389 (_axis0_slabs)</div></div>
+          <div class="src">bin/utils/ome_io.py:321 (_iter_planes) · :313 (_axis0_slabs)</div></div>
       </div>
     </div>
 
@@ -779,7 +779,7 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
             <td class="d">Byte budget for one streamed row band — independent of slide width. Bounds peak
               memory to one band plus the accumulated decimated result when <code>factor &gt; 1</code>; at
               <code>factor == 1</code> (sites 1 and 2 below) striding is a no-op, so this bounds a per-band
-              read, not the read's overall peak. <code>bin/utils/tiled_io.py:103</code></td></tr>
+              read, not the read's overall peak. <code>bin/utils/tiled_io.py:110</code></td></tr>
           <tr><td class="k">max_dim</td><td class="v"><span class="nul">None</span> wherever it is passed</td>
             <td class="d">Passed to <code>decimation_factor</code>. <code>None</code> &rarr; factor 1 &rarr; no
               spatial decimation. STARE passes a real value; nothing else does.</td></tr>
@@ -791,7 +791,7 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
             <td class="d">The BioIO convert only. Peak of the streamed write is one chunk of whatever
               <code>dask_data</code> hands back — one plane in the good case, the whole stack in the bad one. It is
               <b>not a dial this pipeline owns</b>, which is why the bad case is warned about at runtime instead of
-              configured away. <code>bin/convert_image.py:397</code></td></tr>
+              configured away. <code>bin/utils/ome_io.py:321</code> (<code>_iter_planes</code>)</td></tr>
         </table>
       </div>
       <div class="pcol">
