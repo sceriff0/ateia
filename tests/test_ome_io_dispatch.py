@@ -72,9 +72,22 @@ def test_every_reader_the_table_names_is_in_READERS():
     routed = {
         ome_io.detect_reader(Path(f"slide{suffix}"))
         for suffix in (
-            ".ome.tif", ".tif", ".nd2", ".czi", ".lif",
-            ".ndpi", ".ndpis", ".h5", ".hdf5",
-            ".svs", ".qptiff", ".vsi", ".scn", ".mrxs", ".bif", ".ims",
+            ".ome.tif",
+            ".tif",
+            ".nd2",
+            ".czi",
+            ".lif",
+            ".ndpi",
+            ".ndpis",
+            ".h5",
+            ".hdf5",
+            ".svs",
+            ".qptiff",
+            ".vsi",
+            ".scn",
+            ".mrxs",
+            ".bif",
+            ".ims",
         )
     }
     assert routed <= set(ome_io.READERS)
