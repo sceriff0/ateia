@@ -37,6 +37,35 @@ nextflow self-update
 !!! info "Java first"
     Nextflow needs Java 11+. On most clusters this is a module (`module load java`); on a Mac, `brew install openjdk@17` works well.
 
+## Make a site config { #size-your-run }
+
+`max_cpus` and `max_memory` are **required and have no default** — the pipeline
+refuses to launch without them, because a default here would be a guess about
+your machine:
+
+```text
+ERROR ~ Validation of pipeline parameters failed!
+
+The following invalid input values have been detected:
+
+* Missing required parameter(s): max_cpus, max_memory
+```
+
+Copy the template once and layer it on every run with `-c`:
+
+```bash
+cp conf/site.config.template site.config
+```
+
+Then edit `max_cpus`, `max_memory` and `max_time` to match the machine or the
+partition, plus `slurm_partition` / `slurm_account` / `slurm_qos` on a cluster.
+`site.config` at the repository root is gitignored, so cluster paths and account
+names never reach a commit. Every command on this site ends in `-c site.config`.
+
+!!! tip "The bundled test profiles need no site config"
+    `-profile test` and `-profile test_full` pin their own small ceilings, so the
+    demo runs with nothing else set.
+
 ## Choose a container backend
 
 Every MIRAGE process runs inside a container with a pinned version tag — you don't install the scientific tools (VALIS, StarDist, Bio-Formats, …) yourself. Pick the backend that matches where you're running.
@@ -46,7 +75,7 @@ Every MIRAGE process runs inside a container with a pinned version tag — you d
     Best for **local development and laptops**. Make sure the Docker daemon is running, then add `docker` to your profile:
 
     ```bash
-    nextflow run . --input samplesheet.csv --outdir results -profile docker
+    nextflow run . --input samplesheet.csv --outdir results -profile docker -c site.config
     ```
 
     !!! tip
@@ -57,7 +86,7 @@ Every MIRAGE process runs inside a container with a pinned version tag — you d
     **Recommended on HPC**, where Docker is usually unavailable or disallowed. Singularity runs rootless and plays well with shared filesystems:
 
     ```bash
-    nextflow run . --input samplesheet.csv --outdir results -profile singularity
+    nextflow run . --input samplesheet.csv --outdir results -profile singularity -c site.config
     ```
 
     Apptainer (the renamed successor to Singularity) is a drop-in replacement and uses the same `singularity` profile.
@@ -74,7 +103,7 @@ Every MIRAGE process runs inside a container with a pinned version tag — you d
     A containerless option using Conda-managed environments. Slower to set up and less reproducible than containers, but useful where neither Docker nor Singularity is available:
 
     ```bash
-    nextflow run . --input samplesheet.csv --outdir results -profile conda
+    nextflow run . --input samplesheet.csv --outdir results -profile conda -c site.config
     ```
 
 !!! note "Combine profiles"

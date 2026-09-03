@@ -343,7 +343,7 @@ would fail every run of a fresh clone.
 ```bash
 # publish the image once (Actions -> Build & Push Container Images -> Run workflow),
 # then:
-nextflow run . -params-file params/seg_quality_eval.json --cse_max_pixels 50000000 ...
+nextflow run . --input samplesheet.csv --outdir results -c site.config -params-file params/seg_quality_eval.json --cse_max_pixels 50000000 ...
 ```
 
 Two things to know before reading the numbers:

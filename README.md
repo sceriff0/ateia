@@ -32,6 +32,19 @@ MIRAGE is a Nextflow DSL2 pipeline for whole slide image (WSI) processing. It su
    cd mirage
    ```
 
+### Size your run first
+
+`max_cpus` and `max_memory` have no default and are required — a run that omits
+them is refused at launch. Make a `site.config` once and layer it on every
+command with `-c`:
+
+```bash
+cp conf/site.config.template site.config
+# edit max_cpus / max_memory (and the SLURM fields, if any) to match your machine
+```
+
+`site.config` is gitignored, so your paths never reach a commit.
+
 ### Full pipeline from raw images
 
 Use `--start` to choose the entry point and `--stop` to terminate early at a given step. Both flags accept `preprocessing`, `registration`, `segmentation`, or `postprocessing`. If `--stop` is omitted, the pipeline runs through to the end.
@@ -43,7 +56,8 @@ nextflow run . \
   --start preprocessing \
   --stop registration \
   --registration_method valis \
-  -profile slurm \
+  -profile slurm,singularity \
+  -c site.config \
   -params-file params/full_pipeline.json
 ```
 
@@ -55,7 +69,8 @@ nextflow run . \
   --start registration \
   --registration_method valis \
   --outdir results \
-  -profile slurm \
+  -profile slurm,singularity \
+  -c site.config \
   -resume
 ```
 
@@ -66,7 +81,8 @@ nextflow run . \
   --input results/csv/registered.csv \
   --start segmentation \
   --outdir results \
-  -profile slurm \
+  -profile slurm,singularity \
+  -c site.config \
   -resume
 ```
 
@@ -77,7 +93,8 @@ nextflow run . \
   --input results/csv/segmented.csv \
   --start postprocessing \
   --outdir results \
-  -profile slurm \
+  -profile slurm,singularity \
+  -c site.config \
   -resume
 ```
 
@@ -86,7 +103,9 @@ nextflow run . \
 ```bash
 nextflow run . \
   --input samplesheet.csv \
+  --outdir results \
   --start preprocessing \
+  -c site.config \
   -params-file params/dry_run.json
 ```
 

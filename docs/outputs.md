@@ -95,10 +95,10 @@ resume points, and their headers are a published contract
 
 ```bash
 # run preprocessing only …
-nextflow run . --input samplesheet.csv --outdir results --stop preprocessing
+nextflow run . --input samplesheet.csv --outdir results --stop preprocessing -c site.config
 
 # … then pick up from its checkpoint later
-nextflow run . --input results/csv/preprocessed.csv --outdir results --start registration
+nextflow run . --input results/csv/preprocessed.csv --outdir results --start registration -c site.config
 ```
 
 !!! note "The schema is fixed across parameter settings"

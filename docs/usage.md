@@ -59,12 +59,12 @@ nextflow run . -profile test,docker --outdir results
 Run the whole pipeline on your own data:
 
 ```bash
-nextflow run . --input samplesheet.csv --outdir results -profile docker
+nextflow run . --input samplesheet.csv --outdir results -profile docker -c site.config
 ```
 
-`--input` and `--outdir` are **required**. `-profile` selects execution + container
-profiles, comma-combined — e.g. `-profile slurm,singularity` on a cluster or
-`-profile test,docker` for the bundled demo.
+`--input`, `--outdir`, `--max_cpus` and `--max_memory` are all **required**; the
+last two come from `site.config` — see [Make a site config](installation.md#size-your-run).
+`-profile` selects execution + container profiles, comma-combined.
 
 !!! note "Two kinds of flags"
     Nextflow distinguishes **pipeline parameters** (double dash, `--input`) from
@@ -85,7 +85,7 @@ profiles, comma-combined — e.g. `-profile slurm,singularity` on a cluster or
 | `-profile` | option | no | Execution/config profiles, comma-combined (e.g. `slurm,singularity`). |
 | `-params-file` | option | no | JSON preset of parameters, e.g. `params/full_pipeline.json`. |
 | `-resume` | option | no | Reuse cached results from a previous run's `work/`. |
-| `-c` | option | no | Layer an extra config file (e.g. site-specific SLURM settings). |
+| `-c` | option | yes on a cluster | Layer your `site.config` (required `max_cpus`/`max_memory`, SLURM fields). See [Make a site config](installation.md#size-your-run). |
 
 For the complete parameter list see [Parameters](parameters.md).
 
@@ -96,7 +96,7 @@ For the complete parameter list see [Parameters](parameters.md).
 
 ```bash
 # works
-nextflow run . --input samplesheet.csv -params-file params/dry_run.json
+nextflow run . --input samplesheet.csv --outdir results -c site.config -params-file params/dry_run.json
 
 nextflow run . --input samplesheet.csv --dry_run true   # x fails on Nextflow 26
 nextflow run . --input samplesheet.csv --dry_run        # x fails on Nextflow 26
@@ -125,42 +125,48 @@ and works on both engines.
     ```bash
     nextflow run . --input samplesheet.csv --outdir results \
       --start preprocessing -profile docker \
-      -params-file params/full_pipeline.json
+      -params-file params/full_pipeline.json \
+      -c site.config
     ```
 
 === "Single stage"
 
     ```bash
     nextflow run . --input samplesheet.csv --outdir results \
-      --start preprocessing --stop preprocessing -profile docker
+      --start preprocessing --stop preprocessing -profile docker \
+      -c site.config
     ```
 
 === "Resume at registration"
 
     ```bash
     nextflow run . --input results/csv/preprocessed.csv --outdir results \
-      --start registration -profile docker -resume
+      --start registration -profile docker -resume \
+      -c site.config
     ```
 
 === "Resume at segmentation"
 
     ```bash
     nextflow run . --input results/csv/registered.csv --outdir results \
-      --start segmentation -profile docker -resume
+      --start segmentation -profile docker -resume \
+      -c site.config
     ```
 
 === "Resume at postprocessing"
 
     ```bash
     nextflow run . --input results/csv/segmented.csv --outdir results \
-      --start postprocessing -profile docker -resume
+      --start postprocessing -profile docker -resume \
+      -c site.config
     ```
 
 === "Dry run"
 
     ```bash
     nextflow run . --input samplesheet.csv --outdir results \
-      --start preprocessing -params-file params/dry_run.json
+      --start preprocessing -params-file params/dry_run.json \
+      -c site.config
     ```
 
 ## The samplesheet
@@ -306,7 +312,7 @@ Profiles are defined in `nextflow.config` and combine with commas — pick one
 # Laptop demo
 nextflow run . -profile test,docker --outdir results
 # HPC production
-nextflow run . -profile slurm,singularity --input samplesheet.csv --outdir results
+nextflow run . -profile slurm,singularity --input samplesheet.csv --outdir results -c site.config
 ```
 
 JSON presets in `params/` (`full_pipeline.json`, `preprocessing_only.json`,
@@ -319,7 +325,8 @@ On a cluster, combine the SLURM executor with Singularity containers:
 
 ```bash
 nextflow run . -profile slurm,singularity \
-  --input samplesheet.csv --outdir results --start preprocessing
+  --input samplesheet.csv --outdir results --start preprocessing \
+  -c site.config
 ```
 
 - **Cache images once** — point `NXF_SINGULARITY_CACHEDIR` (and
@@ -429,7 +436,7 @@ Then set `NXF_OFFLINE=true` on the cluster so Nextflow skips every remote check
 
 ```bash
 export NXF_OFFLINE=true
-nextflow run . -profile slurm,singularity --input samplesheet.csv --outdir results
+nextflow run . -profile slurm,singularity -c site.config --input samplesheet.csv --outdir results
 ```
 
 The plugin version is pinned exactly, never as a range, so the copy you

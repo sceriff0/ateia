@@ -30,13 +30,18 @@ pyramid has no embedded mask series, `mode=add_cycle` **fast-fails** before
 doing any work — see [Fast-fail behavior](#fast-fail-behavior).
 
 ## Run
+
+!!! note "Sizing"
+    Every command on this page assumes a `site.config` — see [Make a site config](installation.md#size-your-run).
+
 ```bash
 nextflow run . -profile <profile> \
   --mode add_cycle \
   --cleanup_level none \
   --prior_outdir results_cycle1 \
   --input new_cycle.csv \
-  --outdir results_cycle2
+  --outdir results_cycle2 \
+  -c site.config
 ```
 - `--input`: same schema as a preprocessing start (`patient_id,path_to_file,is_reference,channels`),
   one row per new-cycle slide, `is_reference=false`, a `params.nuclear_markers`
@@ -96,17 +101,20 @@ cycle, so cycles chain without limit. Point each run at the previous run's
 # downstream can read them. This is the one place the mistake can be made
 # silently; the add_cycle runs below refuse the wrong level at launch.
 nextflow run . -profile <site> \
-    --input cycle1.csv --cleanup_level none --outdir results/cycle1
+    --input cycle1.csv --cleanup_level none --outdir results/cycle1 \
+    -c site.config
 
 # cycle 2 — prior is the full linear run
 nextflow run . -profile <site> \
     --input cycle2.csv --mode add_cycle --cleanup_level none \
-    --prior_outdir results/cycle1 --outdir results/cycle2
+    --prior_outdir results/cycle1 --outdir results/cycle2 \
+    -c site.config
 
 # cycle 3 — prior is cycle 2
 nextflow run . -profile <site> \
     --input cycle3.csv --mode add_cycle --cleanup_level none \
-    --prior_outdir results/cycle2 --outdir results/cycle3
+    --prior_outdir results/cycle2 --outdir results/cycle3 \
+    -c site.config
 ```
 
 `--outdir` must not be the same directory as `--prior_outdir`
