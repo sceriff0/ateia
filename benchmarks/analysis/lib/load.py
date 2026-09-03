@@ -196,7 +196,11 @@ def load_reg_eval(reg_eval_csv) -> pd.DataFrame:
     number; `reg_eval_csv` is an OPTIONAL EXTERNALLY produced table. The column
     contract this function enforces is what a caller needs to know: a CSV with a
     `mode` column naming the registration method, and at least one of
-    GROUND_TRUTH_COLS, one row per (pair_id, mode). It used to reach nothing:
+    GROUND_TRUTH_COLS. The table is KEYED ON `mode`; `pair_id` is not read by
+    this function — values are medianed per `mode` (non-numeric GROUND_TRUTH_COLS
+    are silently dropped by `median(numeric_only=True)`), and `gt_n_pairs` is a
+    count of non-null rows per `mode`, not a distinct pair_id count. It used to
+    reach nothing:
     `make_figures.run()` took `reg_eval_csv` in its signature, its docstring and
     its call site and never read it in the body, and every test passed None, so
     nothing could detect it.

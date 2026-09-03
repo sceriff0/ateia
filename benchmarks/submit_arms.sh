@@ -233,9 +233,15 @@ echo "    cd $SRC_DIR"
 echo "    python -m benchmarks.analysis.make_tables \\"
 echo "        --results-root $RESULTS --run-plan $BENCH_DIR/arm_plan.csv \\"
 echo "        --outdir benchmarks/_handoff/arms"
+# --reg-eval is REQUIRED by make_figures, with an explicit opt-out: this repo
+# ships no ground-truth harness (see benchmarks/README.md section B), so `none`
+# is the normal path, not an unusual one -- it writes NO_GROUND_TRUTH.txt into
+# the output, so a cost-only result says so in the deliverable instead of
+# reading like a complete one. If you have an EXTERNALLY produced landmark TRE
+# CSV (one row per pair_id/mode, see load.GROUND_TRUTH_COLS), pass it instead.
 echo "    python -m benchmarks.analysis.make_figures \\"
 echo "        --results-root $RESULTS --run-plan $BENCH_DIR/arm_plan.csv \\"
-echo "        --reg-eval <aggregate_eval.csv | none> \\"
+echo "        --reg-eval <external landmark TRE csv | none> \\"
 echo "        --outdir benchmarks/_handoff/arms"
 echo
 echo "Then hand off to ihc_method (small QC artifacts only — the images stay here):"

@@ -296,11 +296,13 @@ def main():
         "--reg-eval",
         required=True,
         help=(
-            "aggregate_eval.py's per-(pair, mode) CSV — the landmark TRE that is "
-            f"this benchmark's only GROUND-TRUTH accuracy measure. Pass "
-            f"'{NO_GROUND_TRUTH}' to run deliberately without it; that writes a "
-            "NO_GROUND_TRUTH.txt into the output so the omission is visible in "
-            "the deliverable rather than only in the command line."
+            "an EXTERNALLY produced landmark TRE table, one row per "
+            "(pair_id, mode) — this repository ships no producer for it. Keyed "
+            "on `mode` (the registration method) and carrying at least one of "
+            f"load.GROUND_TRUTH_COLS. Pass '{NO_GROUND_TRUTH}' to run "
+            "deliberately without it; that writes a NO_GROUND_TRUTH.txt into "
+            "the output so the omission is visible in the deliverable rather "
+            "than only in the command line."
         ),
     )
     ap.add_argument("--outdir", default="benchmarks/analysis")

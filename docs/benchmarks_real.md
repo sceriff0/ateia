@@ -243,8 +243,16 @@ python -m benchmarks.analysis.make_tables \
     --results-root arm_results --run-plan arm_plan.csv --outdir benchmarks/paper_data
 
 python -m benchmarks.analysis.make_figures \
-    --results-root arm_results --run-plan arm_plan.csv --outdir benchmarks/analysis
+    --results-root arm_results --run-plan arm_plan.csv \
+    --reg-eval none --outdir benchmarks/analysis
 ```
+
+`--reg-eval` is required. `none` is the normal path — this repository ships no
+ground-truth registration-accuracy harness (see `benchmarks/README.md` section
+B) — and it writes a `NO_GROUND_TRUTH.txt` marker into the output so a cost-only
+result says so in the deliverable. If you have an externally produced landmark
+TRE CSV (one row per pair_id/mode; see `load.GROUND_TRUTH_COLS`), pass its path
+instead of `none`.
 
 Both read whatever has finished; re-run them as arms land.
 
