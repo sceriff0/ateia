@@ -445,9 +445,15 @@
       <div class="rn">
         <h4>GENERATE_REGISTRATION_QC</h4>
         <div class="gate">gate · reg_qc ≥ 1</div>
-        <p class="x">Reads the registered slide <i>and</i> the reference together and writes an RGB overlay —
-          a full-resolution TIFF plus a scaled PNG. It is the one process whose memory tier is keyed on the
-          <b>combined</b> size of two inputs, because it holds both.</p>
+        <p class="x">Reads three images — the registered slide, the <b>native</b> pre-registration slide, and
+          the reference — and writes a two-panel before/after composite (a blue separator between panels):
+          left is the reference overlaid with the native slide, right is the reference overlaid with the
+          registered one, so a reader sees what registration corrected, not only what it produced. Both panels
+          are built on the reference's own canvas by <b>pad-or-crop, never rescale</b>. Rescaling the native
+          image to the reference's shape would absorb the scale component of the pre-registration mismatch
+          into the resampling, understating the "before" error and making registration look better than it
+          was. It is the one process whose memory tier is keyed on the <b>combined</b> size of all
+          <b>three</b> inputs, because it holds them at once.</p>
         <dl>
           <dt>container</dt><dd>…mirage-regqc:1.0.0</dd>
           <dt>resources</dt><dd>1 cpu (withName) · 100 / 200 / 300 GB × attempt, tiered · 12 h × attempt (label process_high)</dd>
@@ -576,8 +582,20 @@
         <div class="rn" style="border-top-width:2.5px">
           <h4>GENERATE_QC_REPORT</h4>
           <div class="gate">gate · !skip_final_qc_report</div>
-          <p class="x">One HTML report plus a data bundle, both timestamped. Its <code>versions.yml</code> is
-            dropped at publish time by a <code>saveAs</code> that returns null for it.</p>
+          <p class="x">One HTML report plus a data bundle, both timestamped, eight sections in order: Run
+            Summary, Pipeline Stages, Preprocessing QC, Registration QC, Feature-TRE vs Cell-Displacement
+            Reconciliation, Per-Cell Registration Residuals, Segmentation Overlays, Postprocessing QC. The
+            old Software Versions and Sample Manifest sections are cut from the rendered HTML — but
+            <code>collated_versions.yml</code> and <code>run_summary.json</code> still ship, copied into
+            <code>&lt;outdir&gt;/qc/mirage_qc_data_&lt;ts&gt;/</code>, so cutting the sections loses nothing.
+            Where the report used to print a per-slide TRE table, a row-by-row reconciliation table and a
+            head-of-CSV row dump, it now renders per-stage error-distribution plots, a feature-TRE vs
+            cell-displacement scatter (log-log, with the divergence ratio drawn as a diagonal band) and a
+            per-cell residual histogram. The plots are hand-rolled inline SVG, <b>stdlib-only</b>, following
+            this same file's pre-existing <code>_tiled_tre_heatmap_svg()</code> precedent — a report that
+            needed matplotlib could not run inside the <code>preprocess</code> image it is published from.
+            Its own <code>versions.yml</code> (distinct from the collated copy in the data bundle) is dropped
+            at publish time by a <code>saveAs</code> that returns null for it.</p>
           <dl>
             <dt>container</dt><dd>…mirage-preprocess:1.0.0</dd>
             <dt>resources</dt><dd>label process_low — 2 cpu · 32 GB × attempt · 2 h × attempt</dd>
@@ -729,12 +747,17 @@
     that no consumer reads. <b>(c)</b> The kind vocabulary is derived from <code>ParamUtils.STEPS</code>, the same
     table that fixes step order, required samplesheet columns and entry columns, plus a separate list of the
     cross-cutting kinds every step emits. <b>(d)</b> Three per-step renderers produce the QC images, each pinned to
-    a container and published under the patient's <code>qc/</code> tree. <b>(e)</b> At <code>reg_qc = 2</code> a
-    shared subworkflow segments each slide on its native image with the run's <i>own</i> segmenter — an alias of
+    a container and published under the patient's <code>qc/</code> tree; the registration renderer draws a
+    two-panel before/after composite from all three of its staged inputs, built by pad-or-crop rather than
+    rescale so the "before" panel cannot understate the pre-registration error. <b>(e)</b> At
+    <code>reg_qc = 2</code> a shared subworkflow segments each slide on its native image with the run's <i>own</i> segmenter — an alias of
     <code>SEGMENT</code>, so the QC cannot drift from what the run ships — traces the mask to polygons, and warps
     those polygons through every registration stage in one process that serves both registration backends from a
     table keyed on the method <i>argument</i>. <b>(f)</b> Aggregation is eight fixed, sorted input slots plus a
-    size-log rollup, both uncacheable by construction. <b>(g)</b> All seven QC processes retry the whole signal
+    size-log rollup, both uncacheable by construction; the report itself renders per-stage error-distribution
+    plots and a log-log feature-TRE-vs-cell-displacement scatter rather than per-slide tables, hand-rolled as
+    stdlib-only inline SVG so it stays runnable inside the <code>preprocess</code> container that publishes it.
+    <b>(g)</b> All seven QC processes retry the whole signal
     range and then <code>finish</code>: a broken QC step fails the run, so on the default path a green run does
     imply a complete QC tree. Only the two opt-in evaluators (<code>SEG_QUALITY_EVAL</code>,
     <code>MERGE_SEG_EVAL</code>) still fall back to <code>ignore</code>, and a drop is announced through
