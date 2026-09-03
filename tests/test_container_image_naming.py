@@ -51,6 +51,10 @@ PREFIX = "mirage-"
 EXTERNAL_ALLOWED = {
     "cdgatenbee/valis-wsi@sha256:eac27cc599ae0e54aa01c1bef97538301994ce1abd4da44be3f3130ab85a40e6",
     "docker.io/labsyspharm/basicpy-docker-mcmicro@sha256:355b14e2ec80b7b152272f333afd47234f007d0d37633b3ec948e87ec2c8e9b4",
+    # The vendored module (modules/nf-core/basicpy/main.nf) stays byte-for-byte upstream and
+    # so still carries this tagged reference; the R6 digest pin lives in conf/modules.config's
+    # `withName: 'BASICPY'` override instead. See modules/nf-core/basicpy/MIRAGE-NOTES.md.
+    "docker.io/labsyspharm/basicpy-docker-mcmicro:1.2.0-patch5",
 }
 
 # The retired single-repository name. Nothing may reference it again.

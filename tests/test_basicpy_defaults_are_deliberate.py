@@ -143,12 +143,8 @@ def test_the_config_states_that_the_empty_args_are_deliberate():
 
 
 def test_the_vendored_module_pins_the_upstream_container():
-    """Digest-pinned per ruling R6 (2026-09-02): tag only, no digest, would let the
-    image move under us; see tests/test_base_images_are_digest_pinned.py and
-    modules/nf-core/basicpy/MIRAGE-NOTES.md's "byte-for-byte upstream" exception."""
     assert (
-        'container "docker.io/labsyspharm/basicpy-docker-mcmicro@sha256:'
-        '355b14e2ec80b7b152272f333afd47234f007d0d37633b3ec948e87ec2c8e9b4"'
+        'container "docker.io/labsyspharm/basicpy-docker-mcmicro:1.2.0-patch5"'
         in MODULE.read_text()
     )
 

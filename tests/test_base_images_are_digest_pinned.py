@@ -52,7 +52,7 @@ EXTERNAL_SITES = {
         "cdgatenbee/valis-wsi@sha256:"
         "eac27cc599ae0e54aa01c1bef97538301994ce1abd4da44be3f3130ab85a40e6"
     ),
-    "modules/nf-core/basicpy/main.nf": (
+    "conf/modules.config": (
         "docker.io/labsyspharm/basicpy-docker-mcmicro@sha256:"
         "355b14e2ec80b7b152272f333afd47234f007d0d37633b3ec948e87ec2c8e9b4"
     ),

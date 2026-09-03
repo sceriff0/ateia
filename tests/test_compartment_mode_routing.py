@@ -318,12 +318,16 @@ ALLOWED_LINES = {
         #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1256
         # 1256 -> 1260 on 2026-09-03 (release/p08-dapi-overlay, Task 6): +4 lines --
         # GENERATE_REGISTRATION_QC's memory closure gained a comment explaining why its
-        # tier now sums THREE inputs (registered + native_image + reference) instead of
-        # two, above this line. Composition check: 1256 + 4 = 1260, and
-        # `wc -l conf/modules.config` rose 1343 -> 1347, the same 4. Re-pinned directly
-        # from the file, not computed:
-        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1260
-        1260: (
+        # tier now sums THREE inputs (registered + native_image + reference).
+        # 1260 -> 1269 at the plan-06 rebase onto dev-with-08 (2026-09-03): +9 more lines
+        # ABOVE this line, in the `withName: 'BASICPY'` block -- a `container = '...'`
+        # digest pin (ruling R6) plus its 8-line rationale comment, added there rather
+        # than in the vendored modules/nf-core/basicpy/main.nf so that file stays
+        # byte-for-byte upstream. Composition: 1256 + 4 + 9 = 1269, and
+        # `wc -l conf/modules.config` rose 1343 -> 1347 -> 1356. Re-pinned directly
+        # from the merged file, not computed:
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1269
+        1269: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."
