@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "bin" / "generate_qc_report.py"
 
@@ -775,6 +777,52 @@ def test_reconcile_rows_merges_valis_csv_and_stare_json_rather_than_shadowing(tm
     # Both slides are present: the CSV reader did not shadow the JSON reader, or vice versa.
     assert rows[("mov_valis", "rigid")]["feature_tre_um"] == 2.0
     assert rows[("mov_stare", "rigid")]["feature_tre_um"] == 1.5
+
+
+def test_reconcile_rows_yields_a_comparable_point_on_the_committed_repo_fixtures():
+    """The reconciliation scatter's own end-to-end proof, on the TRACKED
+    tests/testdata/ fixtures rather than a synthetic tmp_path pair.
+
+    tests/testdata/sample_seg_qc.json and tests/testdata/sample_valis_summary.csv
+    are both hand-authored (generate_complete_testdata.py does not write either --
+    see .gitignore's per-file exception list), and BOTH had drifted from the
+    schema reconcile_rows/its readers actually expect: sample_seg_qc.json carried
+    an old {dice_matched, median_displacement_um, n_matched} stage shape instead
+    of the current {n_pairs, iou_*, displacement_px_*, displacement_um_*} bin/
+    warp_seg_qc.py writes (see docs/registration_qc.md's documented example),
+    and sample_valis_summary.csv carried {img_name, original_rTRE, rigid_rTRE,
+    non_rigid_rTRE, n_matches} instead of the {from, rigid_D, non_rigid_D}
+    _read_intrinsic_tre actually reads (matching _valis_csvs() above and VALIS's
+    real preprocessed_summary.csv). Neither file is asserted on by content
+    anywhere else -- the two nf-test files wiring GENERATE_QC_REPORT and
+    FINAL_QC's fixture channel to these paths (under tests/modules and
+    tests/subworkflows/local respectively) only check that the process accepts
+    them as an input path -- so the drift produced ZERO comparable points in
+    bin/generate_qc_report.py's reconciliation scatter with no test catching
+    it. Pointing reconcile_rows at tests/testdata itself (both files live there
+    alongside many unrelated CSVs/JSONs the generator DOES write; both readers
+    silently skip anything missing their required keys/columns) is what makes
+    this a real regression test rather than a copy of the synthetic fixtures
+    above.
+    """
+    gqr = _load()
+    testdata = str(REPO / "tests" / "testdata")
+    rows = [
+        r
+        for r in gqr.reconcile_rows(testdata, testdata)
+        if r["slide"] == "P001_mov1"
+        and r["feature_tre_um"] is not None
+        and r["cell_disp_um"] is not None
+    ]
+    assert rows, (
+        "reconcile_rows(tests/testdata, tests/testdata) found no comparable point for "
+        "P001_mov1 -- sample_seg_qc.json's 'moving' value and/or its stage schema no "
+        "longer line up with sample_valis_summary.csv's 'from' column and rigid_D/"
+        "non_rigid_D schema."
+    )
+    by_stage = {r["stage"]: r for r in rows}
+    assert by_stage["rigid"]["feature_tre_um"] == 4.3
+    assert by_stage["rigid"]["cell_disp_um"] == pytest.approx(1.33)
 
 
 # ── inline-SVG plotting: the pure-math seams ───────────────────────────────────

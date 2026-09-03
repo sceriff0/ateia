@@ -1,8 +1,55 @@
 {
+  "patient_id": "P001",
   "moving": "P001_mov1",
   "reference": "P001_ref",
+  "stages_separable": true,
+  "stage_order": ["native", "rigid", "non_rigid", "micro"],
+  "matching": {
+    "method": "lsa_centroid",
+    "anchor_stage": "rigid",
+    "radius_px": 9.3,
+    "median_cell_radius_px": 6.2,
+    "n_pairs": 184203,
+    "pair_fraction": 0.91
+  },
   "stages": {
-    "rigid": { "dice_matched": 0.83, "median_displacement_um": 2.1, "n_matched": 19 },
-    "non_rigid": { "dice_matched": 0.91, "median_displacement_um": 0.9, "n_matched": 20 }
-  }
+    "rigid": {
+      "n_pairs": 184203,
+      "n_pairs_scored": 184203,
+      "iou_mean": 0.42,
+      "iou_p50": 0.4,
+      "displacement_px_p50": 4.1,
+      "displacement_px_p90": 7.8,
+      "displacement_um_p50": 1.33,
+      "displacement_um_p90": 2.54,
+      "dice_matched": 0.83
+    },
+    "non_rigid": {
+      "n_pairs": 184203,
+      "n_pairs_scored": 184203,
+      "iou_mean": 0.71,
+      "iou_p50": 0.73,
+      "displacement_px_p50": 1.6,
+      "displacement_px_p90": 3.2,
+      "displacement_um_p50": 0.52,
+      "displacement_um_p90": 1.04,
+      "dice_matched": 0.91
+    },
+    "micro": {
+      "n_pairs": 184203,
+      "n_pairs_scored": 184203,
+      "iou_mean": 0.78,
+      "iou_p50": 0.8,
+      "displacement_px_p50": 1.1,
+      "displacement_px_p90": 2.1,
+      "displacement_um_p50": 0.36,
+      "displacement_um_p90": 0.68,
+      "dice_matched": 0.94
+    }
+  },
+  "delta_vs_anchor": {
+    "non_rigid": { "iou_mean": 0.29, "displacement_px_p50": -2.5 },
+    "micro": { "iou_mean": 0.36, "displacement_px_p50": -3.0 }
+  },
+  "counts": { "features_ref": 201884, "features_moving": 198110 }
 }

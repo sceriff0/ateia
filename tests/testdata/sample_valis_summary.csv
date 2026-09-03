@@ -1,2 +1,2 @@
-img_name,original_rTRE,rigid_rTRE,non_rigid_rTRE,n_matches
-P001_mov1,50.2,10.1,5.1,100
+from,rigid_D,non_rigid_D
+P001_mov1,4.3,1.5

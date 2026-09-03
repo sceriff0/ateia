@@ -51,6 +51,25 @@ view is the correct one here: the thing under assertion is code, and a
 GString-interpolated `"... ${f.name} ..."` inside an assertion message is code
 that runs and throws just like the bare expression, so blanking string contents
 would hide real hits.
+
+**Known gap.** This guard does not catch every way a `real` case can misread an
+nf-test output -- only the type-confusion class above. Two of the FOUR reds
+fixed in `783cfaa` (`preprocessing.nf.test`/`registration.nf.test`'s
+`3dc7c107`/`7ef417e4`) were a different bug entirely: an unqualified
+`collect`/`each`/etc. called *inside* a `with(receiver) { ... }` block does not
+resolve against `receiver` the way a qualified `receiver.collect { ... }` does
+-- Groovy hands the closure the WHOLE enclosing scope's `it`, not the `with`
+receiver, so `it[0]` inside such a closure is the first element of whatever
+`it` happens to be at that call site, not an element of `receiver`. That
+produced `MissingPropertyException: ... No such property: patient_id for
+class: java.lang.String` where the author's intent was clearly `receiver[0]`.
+Closing it statically needs delegate-scope analysis (tracking what `with`'s
+receiver actually binds `it`/an implicit call to, across nested closures) that
+this file's taint walk does not attempt -- the walk here tracks TYPE (String
+vs File), not SCOPE (which receiver a closure call resolves against). A
+one-off scan over every `with(...)` body in `tests/**/*.nf.test` at the time
+found no other instance of it; a standing guard for this class remains
+unwritten.
 """
 
 import re
@@ -119,10 +138,17 @@ def _depth(chain: str) -> int:
 
 def _is_the_meta_slot(chain: str, depth: int) -> bool:
     """True for `...get(i).get(0)` / `...[i][0]` -- element 0 of an emitted
-    tuple. Every tuple output in this pipeline is `tuple val(meta), path(...)`,
-    so slot 0 is the meta MAP, not a path, and a `.name` on it is a map lookup
-    rather than the bug this guard is about. Only meaningful from depth two: on
-    a `path`-only emit, `...get(0)` IS the path."""
+    tuple. MOST tuple outputs in this pipeline are `tuple val(meta), path(...)`,
+    so slot 0 is usually a Map, and a `.name` on it is a map lookup rather than
+    the bug this guard is about -- but not every emit agrees: `register.nf`'s
+    `registered` emit is `tuple val(patient_id), path(...), val(all_metas),
+    path(...)`, where slot 0 is a `val` holding a plain String, so `.get(0).size()`
+    there really would be the path-length bug. This heuristic is process-blind
+    (it has no way to know which emit produced a given chain) and deliberately
+    accepts that false negative rather than flag every legitimate meta-map
+    lookup; a chain against `register.nf`'s `registered` output is not currently
+    distinguished from one against a `tuple val(meta), path(...)` emit. Only
+    meaningful from depth two: on a `path`-only emit, `...get(0)` IS the path."""
     if depth < AMBIGUOUS_MIN_DEPTH:
         return False
     last = re.findall(_INDEXER, chain)[-1]
@@ -350,3 +376,25 @@ def test_the_scan_actually_reaches_real_tagged_blocks():
             if 'tag "real"' in text[brace:end]:
                 seen += 1
     assert seen >= 20, f"only {seen} real-tagged test blocks found -- the scan is blind"
+
+
+def test_scan_flags_an_unwrapped_dot_name_in_a_synthetic_real_block():
+    """The test above proves `real`-tagged BLOCKS are counted; it says nothing
+    about whether `_scan` actually finds anything inside one -- a scan that
+    counted blocks but walked none of their bodies would pass it too. This runs
+    `_scan` directly against a synthetic block containing exactly one unwrapped
+    `.name` access on a tainted output and asserts it is reported, closing that
+    gap the way `SIZE_IS_CARDINALITY_BELOW`'s and the taint-fixpoint's own
+    watched-failing runs closed theirs."""
+    body = """
+        then {
+            assertAll(
+                { assert process.out.nuclei_mask.get(0).get(1).name == 'foo.tif' }
+            )
+        }
+    """
+    problems: list = []
+    _scan(body, {}, problems, "synthetic:0")
+    assert problems, (
+        "_scan found nothing in a block with a real, unwrapped .name access"
+    )
