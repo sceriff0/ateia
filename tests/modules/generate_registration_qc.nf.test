@@ -188,13 +188,21 @@ nextflow_process {
                 { assert process.out.qc },
                 { assert process.out.qc_fullres },
                 { assert process.out.versions },
+                // `qc` is `path("qc/*_QC_RGB.{png,tif}")`, so slot 1 is a LIST of two
+                // files, not one path -- flatten before wrapping. (`qc_fullres` matches a
+                // single file and comes back as a bare String; `[x].flatten()` covers
+                // both without the assertion having to know which.)
                 { with(process.out.qc) {
                     assert size() == 1
-                    assert file(get(0).get(1)).size() > 100
+                    def rendered = [get(0).get(1)].flatten().collect { file(it) }
+                    assert rendered*.name.toSorted().collect { it.tokenize('.').last() } == ['png', 'tif']
+                    assert rendered.every { it.size() > 100 }
                 }},
                 { with(process.out.qc_fullres) {
                     assert size() == 1
-                    assert file(get(0).get(1)).size() > 100
+                    def rendered = [get(0).get(1)].flatten().collect { file(it) }
+                    assert rendered.size() == 1
+                    assert rendered.every { it.size() > 100 }
                 }}
             )
         }

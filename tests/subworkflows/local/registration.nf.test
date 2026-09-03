@@ -515,10 +515,21 @@ nextflow_workflow {
                     assert get(1).get(1) != null
                 }},
                 // patient_id preserved in all outputs
-                { with(workflow.out.registered) {
-                    def patient_ids = collect { it[0].patient_id }
+                // Explicit receiver on the collect, NOT `with(...) { collect { ... } }`.
+                // Unqualified, `collect` inside a `with` block does not reach the
+                // delegate List: the closure is handed the WHOLE list as `it`, so
+                // `it[0]` is the first [meta, path] tuple and `.patient_id` spreads over
+                // it, giving `MissingPropertyException ... for java.util.ArrayList,
+                // Reason: No such property: patient_id for class: java.lang.String`.
+                // Measured on nightly runs 33633986188 and 33740335196. `get(n)` in a
+                // `with` block is fine (it is a real List method); it is the Groovy
+                // extension methods that miss. The stub cases in this file already use
+                // the explicit form and are green.
+                {
+                    def patient_ids = workflow.out.registered.collect { it[0].patient_id }
+                    assert patient_ids.size() == 2
                     assert patient_ids.every { it == 'P001' }
-                }},
+                },
                 // Checkpoint CSV created
                 { with(workflow.out.checkpoint_csv) {
                     assert size() == 1
