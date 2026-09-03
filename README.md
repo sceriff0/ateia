@@ -63,8 +63,11 @@ Every reader is installed in the `mirage-convert` image; the dispatch happens in
 | `.ndpi`, `.ndpis` | `tifffile` |
 | `.h5`, `.hdf5` | `hdf5` |
 
-Which of these have been exercised on real bytes, and which on synthetic fixtures only, is
-recorded in
+Everything above is exercised on synthetic fixtures in CI on every push. The five
+vendor formats that cannot be synthesised (`.czi`, `.nd2`, `.lif`, real scanner
+`.ndpi` bytes, `.svs`) need a cluster run against real vendor files, and as of
+this release none has been recorded yet — the current state, tracked format by
+format, is in
 [`docs/validation/format_validation.md`](docs/validation/format_validation.md).
 
 ## Quick Start

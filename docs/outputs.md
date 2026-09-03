@@ -320,16 +320,20 @@ apart from a real one.
 |---|---|---|
 | `versions.yml` | per task, aggregated into `qc/mirage_qc_data_<timestamp>/collated_versions.yml` | tool versions + the resolved container, per process |
 | `*.size.csv` | per task, aggregated into `size_logs/input_sizes.csv` | one row per task: `process,sample_id,filename,bytes` — the byte total of that task's inputs |
-| `qc/` (run level) | `<outdir>/qc/` | the aggregated HTML QC report + its data folder |
-| `<trace_dir>/` | resolved against the **launch directory**, not `--outdir` | `trace.txt`, `report.html`, `timeline.html`, and `mirage_resource_report.html` |
+| `qc/` (run level) | `<outdir>/qc/` | the aggregated HTML QC report, `mirage_resource_report.html`, and both reports' data folders |
+| `<trace_dir>/` | resolved against the **launch directory**, not `--outdir` | Nextflow's own `trace.txt`, `report.html`, `timeline.html` only |
 
-!!! note "`trace_dir` is relative to where you launched, not to `--outdir`"
-    `--trace_dir` defaults to `.trace` and is resolved against the launch
-    directory, matching where Nextflow itself resolves `trace.file`. A run
-    launched from a different directory writes its traces somewhere else, and
-    the resource report names the exact path it looked in when it finds nothing
-    there — see [Resources → When no report appears](resources.md#when-no-report-appears)
-    — rather than silently producing an empty report.
+!!! note "The resource report lives in `<outdir>/qc/`; only its INPUT lives under `trace_dir`"
+    `mirage_resource_report.html` is written to `<outdir>/qc/` by `main.nf`'s
+    `workflow.onComplete` handler (`Layout.runDir(cfg.outdir, 'qc')`), not into
+    `trace_dir` — `--trace_dir` only names where it *reads* `trace.txt` from,
+    and where it points its own `report.html`/`timeline.html` links. `--trace_dir`
+    defaults to `.trace` and is resolved against the launch directory, matching
+    where Nextflow itself resolves `trace.file`. A run launched from a different
+    directory reads its traces from somewhere else, and the resource report names
+    the exact path it looked in when it finds nothing there — see
+    [Resources → When no report appears](resources.md#when-no-report-appears) —
+    rather than silently producing an empty report.
 
 ## The measurement-key contract
 

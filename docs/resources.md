@@ -319,14 +319,23 @@ parameters:
 launch. Supply them from a `site.config` (`-c site.config`, copied from
 `conf/site.config.template`) or from a profile that pins them:
 
-| Profile | `max_cpus` | `max_memory` | `max_time` |
+| Profile / example | `max_cpus` | `max_memory` | `max_time` |
 |---|---|---|---|
 | *(none)* | — required — | — required — | `240.h` |
 | `local` | `4` | `16.GB` | `72.h` |
-| `ieo` | `128` | `700.GB` | `240.h` |
 | `test` | `2` | `6.GB` | `1.h` |
 | `test_full` | `8` | `32.GB` | `6.h` |
 | `shipped_defaults_test` | `2` | `6.GB` | `1.h` |
+| *(a `site.config` sized for a large SLURM partition, e.g.)* | `128` | `700.GB` | `240.h` |
+
+!!! note "There is no shipped site profile"
+    `nextflow.config` still carries an internal `ieo` profile pinning
+    `max_cpus=128` / `max_memory=700.GB` / `max_time=240.h` (CI parses it), but
+    it is not something a reader can invoke — its site-local overlay,
+    `conf/ieo.config`, is gitignored and never ships. The row above shows those
+    same numbers only as an example of what a large-partition `site.config`
+    looks like; make your own from `conf/site.config.template` — see
+    [Installation → Make a site config](installation.md#size-your-run).
 
 !!! warning "`-profile slurm` freezes the ceiling; `-c site.config` does not reach it"
     The top-level `process.resourceLimits` in `nextflow.config` is a **closure**,

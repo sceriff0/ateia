@@ -200,8 +200,11 @@ different kind of image:
 Which formats this pipeline reads, and what each was verified against, is
 recorded in [Format validation](validation/format_validation.md) — synthesised
 fixtures for everything CI can generate (pyramidal OME-TIFF, BigTIFF, RGB,
-8-bit, float32, HDF5, NDPI/NDPIS), and a cluster run against real vendor files
-for the rest.
+8-bit, float32, HDF5, NDPI/NDPIS) on every push. The five vendor formats that
+cannot be synthesised (`.czi`, `.nd2`, `.lif`, `.ndpi` real scanner bytes,
+`.svs`) each need a cluster run against real vendor files, and as of this
+release none has been recorded — the page marks all five "kit-validated:
+pending" rather than omitting them.
 
 Example raw samplesheet (`--start preprocessing`):
 
@@ -530,10 +533,15 @@ key grammar is a cross-repository contract — see
     `--memory_mode low` and lower `--reg_max_image_dim`.
 
 ??? failure "The run seems to hang at startup"
-    Usually Nextflow pulling large container images on first run. Every image is
-    named in `modules/local/*.nf`'s `container` directive, or — for the
-    per-backend images — in `lib/SegBackends.groovy` / `lib/WarpBackends.groovy`;
-    resource overrides live in `conf/modules.config`, image names do not.
+    Usually Nextflow pulling large container images on first run. Every
+    MIRAGE-owned image is named in `modules/local/*.nf`'s `container` directive,
+    or — for the per-backend images — in `lib/SegBackends.groovy` /
+    `lib/WarpBackends.groovy`; `conf/modules.config` owns those processes'
+    resources, not their images. The one exception is `BASICPY`, the single
+    vendored nf-core module: `conf/modules.config`'s `withName: 'BASICPY'` block
+    overrides its image to a digest-pinned reference, so that one image comes
+    from `conf/modules.config` on purpose (see
+    [Installation → Where tags live, and what they pin](installation.md#pre-pulling-container-images-optional)).
     Pre-pull them once with the list in
     [Installation → Pre-pulling container images](installation.md#pre-pulling-container-images-optional).
 

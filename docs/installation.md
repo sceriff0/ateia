@@ -147,7 +147,7 @@ If that completes without `FAILED` processes, your installation is sound. (You'l
 
 ## Pre-pulling container images (optional)
 
-The first real run downloads each tool's image, which can take several minutes. Pull them ahead of time to make that first run snappy. MIRAGE runs eleven first-party images plus one upstream image:
+The first real run downloads each tool's image, which can take several minutes. Pull them ahead of time to make that first run snappy. MIRAGE runs **13 images**: 11 first-party (`modules/local/*.nf`), plus 2 externals — one upstream-maintained and not vendored (`REGISTER`'s VALIS image, `modules/local/register.nf:22`), and one vendored nf-core module whose image `conf/modules.config`'s `withName: 'BASICPY'` block repins to a digest (`conf/modules.config:362`; the vendored `modules/nf-core/basicpy/main.nf:5` itself still names the image by tag):
 
 | Image | Used for |
 |---|---|
@@ -162,26 +162,38 @@ The first real run downloads each tool's image, which can take several minutes. 
 | `bolt3x/mirage-tiled:1.0.0` | the `tiled` (STARE) registration backend, and `WARP_SEG_QC`'s tiled path |
 | `bolt3x/mirage-spatialdata:1.0.0` | `EXPORT_SPATIALDATA` |
 | `bolt3x/mirage-segeval:1.0.0` | `SEG_QUALITY_EVAL`, `MERGE_SEG_EVAL` (opt-in) |
-| `cdgatenbee/valis-wsi@sha256:eac27cc…` (upstream, not vendored) | `REGISTER`, and `WARP_SEG_QC`'s VALIS path |
+| `cdgatenbee/valis-wsi@sha256:eac27cc599ae0e54aa01c1bef97538301994ce1abd4da44be3f3130ab85a40e6` (upstream, not vendored) | `REGISTER`, and `WARP_SEG_QC`'s VALIS path |
+| `docker.io/labsyspharm/basicpy-docker-mcmicro@sha256:355b14e2ec80b7b152272f333afd47234f007d0d37633b3ec948e87ec2c8e9b4` (vendored nf-core module's own image, repinned) | `BASICPY` — real by default, since illumination correction is not `--skip_preprocessing` |
 
 === "Docker"
 
     ```bash
-    docker pull cdgatenbee/valis-wsi:1.0.0
+    docker pull cdgatenbee/valis-wsi@sha256:eac27cc599ae0e54aa01c1bef97538301994ce1abd4da44be3f3130ab85a40e6
+    docker pull docker.io/labsyspharm/basicpy-docker-mcmicro@sha256:355b14e2ec80b7b152272f333afd47234f007d0d37633b3ec948e87ec2c8e9b4
     docker pull bolt3x/mirage-<component>:1.0.0   # e.g. convert, preprocess, quantify, tiled...
     ```
 
 === "Singularity / Apptainer"
 
     ```bash
-    singularity pull docker://cdgatenbee/valis-wsi:1.0.0
+    singularity pull docker://cdgatenbee/valis-wsi@sha256:eac27cc599ae0e54aa01c1bef97538301994ce1abd4da44be3f3130ab85a40e6
+    singularity pull docker://docker.io/labsyspharm/basicpy-docker-mcmicro@sha256:355b14e2ec80b7b152272f333afd47234f007d0d37633b3ec948e87ec2c8e9b4
     singularity pull docker://bolt3x/mirage-<component>:1.0.0
     ```
 
 !!! note "Where tags live, and what they pin"
-    Image names live in `modules/local/*.nf`'s `container` directive and in
+    Every MIRAGE-owned process names its image in `modules/local/*.nf`'s
+    `container` directive, or — for the per-backend images — in
     `lib/SegBackends.groovy` / `lib/WarpBackends.groovy`; `conf/modules.config`
-    owns resources, not images. MIRAGE never uses `:latest`. Every `FROM` inside
+    owns those processes' *resources*, not their images. The one exception is
+    the single vendored nf-core module, `BASICPY`: its own `modules/nf-core/basicpy/main.nf:5`
+    pins `docker.io/labsyspharm/basicpy-docker-mcmicro:1.2.0-patch5` by tag, and
+    `conf/modules.config`'s `withName: 'BASICPY'` block overrides it to the same
+    image pinned by content digest (`container = '...@sha256:355b14e2...'`,
+    `conf/modules.config:362`) — done there, rather than edited into the vendored
+    file, precisely so the vendored module stays byte-identical to upstream
+    (`tests/test_basicpy_module_is_vendored_unmodified.py`). MIRAGE never uses
+    `:latest`. Every `FROM` inside
     `containers/*/Dockerfile` is **digest-pinned** (`FROM <base>@sha256:...`), so
     an image rebuilt a year from now still starts from the same base bytes.
 

@@ -59,12 +59,18 @@ resolved from `nuclear_markers` (`metadata.pick_nuclear_index`); if no configure
 marker matches a slide's OME channel names, `create_registration_qc` raises rather
 than silently falling back to channel 0.
 
-**A missing native image is a hard failure, not a silent one-panel figure.**
-`native_image` is a required path in the process's own input tuple, and
-`create_registration_qc` raises `FileNotFoundError` if the path it is given does
-not resolve. There is no code path left that renders only the "after" composite
-because a native image was unavailable — that was the single-panel figure this
-replaced.
+**The CLI keeps `--native` optional; the pipeline never exercises that path.**
+`bin/generate_registration_qc.py --native` is `nargs="+", default=None` — a
+caller who omits it gets the old single "after" panel
+(`bin/generate_registration_qc.py:151-158`, `bin/utils/qc.py`'s `native_nuc`
+guarded on `if native_path is not None`, ~line 599) — that flexibility exists
+because the same script also has callers outside this process. But
+`GENERATE_REGISTRATION_QC` (`modules/local/generate_registration_qc.nf:38,60`)
+declares `native_image` as a **required** path in its input tuple and always
+passes `--native ${native_image}`, so a pipeline run never takes the
+single-panel branch. If the file that path names does not resolve,
+`create_registration_qc` raises `FileNotFoundError`
+(`bin/utils/qc.py:479-480`) rather than silently falling back to one panel.
 
 The published names are unchanged —
 `<outdir>/<patient>/qc/registration/<slide>_QC_RGB.png`, `_QC_RGB.tif` and
