@@ -155,4 +155,78 @@ nextflow_workflow {
         }
     }
 
+    /*
+     * THE ASSERTION WITH TEETH for the native-image join (Task 8). ch_for_qc pairs the
+     * new cycle's NATIVE (pre-registration) image -- ch_new_pre, the same channel
+     * ch_grouped hands to REGISTER_PATIENT -- to its own registered file via
+     * `.join(ch_new_pre.map { ... }, by: 0)` keyed on meta.id. add_cycle registers
+     * exactly one new slide per patient, so a wrong key cannot cross-pair two slides
+     * the way registration.nf's twin test can prove; the only observable failure mode
+     * here is join() silently dropping the pair -- ch_for_qc, and therefore
+     * GENERATE_REGISTRATION_QC, would emit nothing while workflow.success stays true.
+     * GENERATE_REGISTRATION_QC stages its native input into its own `native/`
+     * subdirectory (stageAs: 'native/*'), so finding it at all is the proof the join
+     * matched, and the file it contains being the new cycle's preprocessed output (not
+     * empty, not the frozen reference) is the proof of WHICH slide matched.
+     */
+    test("Should pair the new cycle's own native image with its registered file - stub") {
+        tag "stub"
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.of([
+                    [ id: 'P001_cycle2', patient_id: 'P001', is_reference: false,
+                      channels: ['DAPI','CD8'], images_count: 1, channels_count: 2 ],
+                    file('tests/testdata/P001_image.tiff')
+                ])
+                input[1] = [compartments: false, expanded: false, embedMasks: false]
+                """
+            }
+            params {
+                outdir = "$outputDir"
+                mode = 'add_cycle'
+                prior_outdir = "$projectDir/tests/testdata/prior_run"
+                reg_qc = 1
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                {
+                    def taskDirs = []
+                    new File("$workDir").eachFileRecurse { f ->
+                        if (f.isDirectory() && f.name == 'native') {
+                            taskDirs << f.parentFile
+                        }
+                    }
+                    assert taskDirs.size() == 1 :
+                        "expected 1 GENERATE_REGISTRATION_QC task dir, found ${taskDirs.size()} " +
+                        "-- a dropped join (wrong meta.id key on either side) leaves this at 0"
+
+                    def nativeFiles = new File(taskDirs[0], 'native').listFiles()
+                    assert nativeFiles.size() == 1 :
+                        "expected exactly one staged native file, found ${nativeFiles*.name}"
+                    // The teeth: the staged native file is the NEW CYCLE's own
+                    // preprocessed output, not empty and not the frozen prior
+                    // reference (whose meta.id is 'P001_reference', never
+                    // 'P001_cycle2') -- so a join keyed on the wrong side's meta.id
+                    // could not have produced this pairing by accident.
+                    assert nativeFiles[0].name.contains('P001_cycle2') :
+                        "staged native file was '${nativeFiles[0].name}', expected the new " +
+                        "cycle's own preprocessed output (named from meta.id 'P001_cycle2')"
+
+                    def registeredFiles = taskDirs[0].listFiles()
+                        .findAll { it.name.endsWith('_registered.ome.tiff') }
+                    assert registeredFiles.size() == 1
+                    assert registeredFiles[0].name.contains('CD8') :
+                        "registered file staged alongside it was '${registeredFiles[0].name}', " +
+                        "expected the new cycle's own DAPI_CD8 channel set"
+                }
+            )
+        }
+    }
+
 }

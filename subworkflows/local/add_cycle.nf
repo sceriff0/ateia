@@ -198,12 +198,21 @@ workflow ADD_CYCLE {
     // Level 2 needs the classic registrar pickle, which the classic VALIS adapter produces.
     def do_seg_qc = reg_qc_level >= 2
 
-    // Level >= 1: DAPI-overlay image QC — new registered vs prior reference.
+    // Level >= 1: before/after DAPI-overlay QC — the new cycle's NATIVE image and its
+    // registered counterpart, both against the frozen prior reference.
+    //
+    // The native is ch_new_pre, which is also what ch_grouped hands to REGISTER_PATIENT
+    // above: on this path the only moving slide is the new cycle, and the prior reference
+    // is a fixed frame with no "before" of its own. Joined on meta.id for the reason
+    // registration.nf's twin of this block gives -- a meta MAP key is one `meta + [k: v]`
+    // away from never matching, and join() drops an unmatched pair silently.
     if (reg_qc_level >= 1) {
         ch_for_qc = ch_new_registered
-            .map { meta, f -> [meta.patient_id, meta, f] }
+            .map { meta, f -> [meta.id, meta, f] }
+            .join(ch_new_pre.map { meta, f -> [meta.id, f] }, by: 0)
+            .map { _id, meta, reg_f, nat_f -> [meta.patient_id, meta, reg_f, nat_f] }
             .combine(ch_prior_assets.map { pid, prior -> [pid, prior.ref_image] }, by: 0)
-            .map { _pid, meta, reg_f, ref_f -> [meta, reg_f, ref_f] }
+            .map { _pid, meta, reg_f, nat_f, ref_f -> [meta, reg_f, nat_f, ref_f] }
         GENERATE_REGISTRATION_QC(ch_for_qc)
         ch_qc = GENERATE_REGISTRATION_QC.out.qc
     }
