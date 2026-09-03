@@ -439,10 +439,14 @@ def _module_level_imports(tree):
     """``Import``/``ImportFrom`` nodes reachable WITHOUT descending into a function or
     class body -- i.e. the ones that execute the moment the module is imported.
 
-    A lazy ``import x`` inside a ``def`` (or a ``class`` body, which runs once at class
-    creation but is exactly as deferred from a *module-requirement* standpoint since the
-    class is rarely instantiated at import time either) is a RUNTIME dependency, not a
-    module one: the import statement only executes if something calls the function.
+    A lazy ``import x`` inside a ``def`` is a RUNTIME dependency, not a module one: the
+    import statement only executes if something calls the function. A ``class`` body is
+    excluded for a different reason -- it DOES execute the moment the module is imported,
+    so an import nested in one is a genuine module-scope import in principle -- but no
+    script in ``bin/`` has a class-body import, so excluding ``ClassDef`` bodies here costs
+    nothing and buys symmetry with ``FunctionDef``.
+    ``test_walker_ignores_imports_nested_in_function_bodies`` below asserts the shape this
+    function actually implements, class bodies included.
     ``if``/``try``/``with`` at module scope are still descended into -- a
     ``try: import cupy except ImportError`` guard at module scope runs at import time and
     must still count.
@@ -677,10 +681,12 @@ REQUIRED_RUNTIME_IMPORTS = {
     },
     "merge": {
         "cv2": (
-            "merge_channels_pyramid.py's downsample path lazily imports cv2 (with a "
-            "block-averaging fallback ONLY if the import itself fails); "
-            "requirements/merge.txt installs opencv-python deliberately so that "
-            "fallback is never exercised."
+            "bin/merge_channels_pyramid.py's _downsample_plane_f32 (~line 137) imports "
+            "cv2 UNCONDITIONALLY and is the load-bearing caller, reached from the "
+            "streaming pyramid path; downsample_image's own `import cv2` (which does "
+            "tolerate the import failing, falling back to block averaging) is not what "
+            "runs there. requirements/merge.txt installs opencv-python deliberately so "
+            "that fallback is never exercised."
         ),
         "zarr": (
             "merge_channels_pyramid.py calls open_lazy (bin/utils/tiled_io.py) "
@@ -752,6 +758,12 @@ def test_required_runtime_imports_are_actually_reached(container, name):
     more, and is exactly the shape of exemption-outliving-its-reason this file has
     already shipped once (containers/segeval's aicsimageio, which was NEVER reached --
     the opposite failure this test exists to catch on the other side).
+
+    This proves only that the name is imported SOMEWHERE reachable from the container's
+    scripts -- not that the import is nested (a promoted module-scope import still passes),
+    and not that the function containing it is ever actually called. The judgment that the
+    import genuinely executes on the container's live path lives in the reason string next
+    to each entry, not in this test.
     """
     scripts = sorted(_module_container_and_scripts().get(container, set()))
     assert scripts, (
@@ -931,8 +943,8 @@ def test_tiled_container_torch_kornia_imports_are_confined_to_disk_lightglue():
     assert not offenders, (
         "torch/kornia is imported outside _frontend_disk_lightglue in a script the tiled "
         f'container runs: {offenders}. The ("tiled", "torch")/("tiled", "kornia") '
-        "UNREACHABLE_IMPORTS exemptions assume the import is confined there; a second import "
-        "site needs its own justification, not a free ride on this one."
+        "REQUIRED_RUNTIME_IMPORTS entries assume the import is confined there; a second "
+        "import site needs its own justification, not a free ride on this one."
     )
 
 

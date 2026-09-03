@@ -23,9 +23,11 @@ from a hand-written name list.
 **How a container's requirements are checked.** `tests/test_container_harmonisation.py`'s
 `test_container_installs_what_its_scripts_import` walks each image's own `bin/` scripts
 (and the local modules they import) with `ast`, at MODULE SCOPE only — an `import` nested
-inside a `def`/`class` body executes only if something calls it, so it is a runtime
-dependency, not a module one, and the walker does not report it. A container whose scripts
-reach a package ONLY through such a lazy import declares it explicitly in that file's
+inside a `def` executes only if something calls it, so it is a runtime dependency, not a
+module one, and the walker does not report it. A `class` body is excluded too, for
+symmetry rather than the same reason: it DOES execute at import time, but no script in
+`bin/` imports anything inside a class body, so the exclusion costs nothing. A container
+whose scripts reach a package ONLY through such a lazy import declares it explicitly in that file's
 `REQUIRED_RUNTIME_IMPORTS` table (`{container: {import_name: reason}}`), read alongside the
 walker's own module-scope findings before the installed-package check runs. Each entry is
 paired with `test_required_runtime_imports_are_actually_reached`, which walks the container's
