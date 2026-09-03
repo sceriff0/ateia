@@ -265,7 +265,7 @@
 
   <div class="masthead">
     <div class="kick">Supplementary Figure S6 · accuracy measures</div>
-    <h1>Four registration-accuracy numbers this pipeline reports — three scored by the transform's own features, one independent, and none of them a ground truth</h1>
+    <h1>Four registration-accuracy numbers this pipeline reports — two scored by the transform's own features, two independent, and none of them a ground truth</h1>
   </div>
   <nav class="figset" aria-label="Supplementary figure set">
     <a href="pipeline-schematic.html">S1 · pipeline</a>
@@ -291,20 +291,23 @@
         expects them to describe one thing. They describe four different things, and they
         disagree with each other by design — not by bug.</p></div>
     <div class="tbl-scroll"><table class="rc">
-      <caption>one slide-stage, four numbers — illustrative, from the documented worked example</caption>
+      <caption>one slide-stage, four numbers — mixing a documented worked example with one illustrative value</caption>
       <thead><tr><th>measure</th><th class="v">value</th></tr></thead>
       <tbody>
-        <tr><td class="k">intrinsic TRE (rigid stage, feature-based)</td><td class="v"><span class="em">4.1 px</span></td></tr>
-        <tr><td class="k">cell displacement, centroid p50 (rigid stage)</td><td class="v"><span class="em">1.33 µm</span></td></tr>
+        <tr><td class="k">intrinsic TRE (rigid stage)</td><td class="v"><span class="em">no worked example is documented — illustrative only</span></td></tr>
+        <tr><td class="k">cell displacement, centroid p50 (rigid stage)</td><td class="v"><span class="em">4.1&nbsp;px / 1.33&nbsp;µm</span></td></tr>
         <tr><td class="k">seg-QC mean IoU (rigid stage)</td><td class="v"><span class="em">0.42</span></td></tr>
         <tr><td class="k">matched-pair fraction of segmented cells</td><td class="v"><span class="em">0.91</span></td></tr>
       </tbody>
     </table></div>
     <div class="callout" style="margin-top:12px"><b>None of these four is "the" registration
-      error.</b> Two are computed on the registrar's own optimisation target, one is a Dice-like
-      overlap bounded by how well two independent segmentation runs agree in the first place, and
-      one is a diagnostic about the pairing itself, not about the transform. Panel&nbsp;b names
-      what each one is actually computed from; panel&nbsp;c is why that distinction matters.</div>
+      error.</b> The first has no documented worked value to cite at all — a fact worth sitting
+      with on its own. The second is <code>WARP_SEG_QC</code>'s own centroid residual, reported in
+      both units the same JSON carries. The third is a Dice-like overlap bounded by how well two
+      independent segmentation runs agree in the first place, not only by registration. The fourth
+      is a diagnostic about the pairing itself — how many segmented cells got matched at all — not
+      about the transform's accuracy. Panel&nbsp;b names what each one is actually computed from;
+      panel&nbsp;c is why the distinction between the first and the rest matters.</div>
   </section>
 
   <!-- b — THE FOUR MEASURES -->
@@ -369,10 +372,12 @@
         <div class="opt"><div class="oh"><span>STARE confidence gate</span><span class="tag">↺ self-scored</span></div>
           <div class="ox">The same normalised phase-correlation error is used <i>both</i> to
             decide which control points enter the mesh <i>and</i> as the only quality signal
-            about how well that tile matched. A tile that agrees with itself for the wrong
-            reason (matched a repeating texture, or a section-edge artefact with low error and
-            small displacement) passes the gate the same way a genuinely well-matched tile
-            does.</div></div>
+            about how well that tile matched. Measured, not hypothetical: a tile that is roughly
+            <b>40–90% off-tissue is ACCEPTED with a WRONG recovered shift</b>, in every one of
+            <b>12</b> swept blank-fraction/geometry/seed configurations, injecting a bogus
+            displacement of up to <b>131&nbsp;px</b> — and the range gate cannot catch it, because
+            131&nbsp;px is well inside the default <code>max_disp</code> of <b>256&nbsp;px</b>
+            (<code>reg_tiled_halo</code>).</div></div>
       </div>
       <div class="branch" style="margin-top:0">
         <div class="bh">independent — a signal the registrar never saw</div>
