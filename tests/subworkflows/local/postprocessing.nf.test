@@ -444,7 +444,7 @@ nextflow_workflow {
                     def csv = get(0)
                     assert file(csv).exists()
                     assert file(csv).name == 'postprocessed.csv'
-                    def lines = csv.readLines()
+                    def lines = file(csv).readLines()
                     // Header + at least 1 data row
                     assert lines.size() >= 2
                     // Validate header contains expected columns

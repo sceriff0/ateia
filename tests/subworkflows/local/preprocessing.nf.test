@@ -189,8 +189,8 @@ nextflow_workflow {
                 // Preprocessed outputs exist with real data (> 1000 bytes each)
                 { with(workflow.out.preprocessed) {
                     assert size() == 2
-                    get(0).get(1).with { assert it.size() > 1000 }
-                    get(1).get(1).with { assert it.size() > 1000 }
+                    assert file(get(0).get(1)).size() > 1000
+                    assert file(get(1).get(1)).size() > 1000
                 }},
                 // Metadata preserved
                 { with(workflow.out.preprocessed) {
@@ -203,7 +203,7 @@ nextflow_workflow {
                     def csv = get(0)
                     assert file(csv).exists()
                     assert file(csv).name == 'preprocessed.csv'
-                    def lines = csv.readLines()
+                    def lines = file(csv).readLines()
                     // Header + at least 2 data rows
                     assert lines.size() >= 3
                     // Validate header columns

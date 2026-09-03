@@ -139,8 +139,8 @@ nextflow_process {
                 { assert process.out.nuclei_mask },
                 { assert process.out.cell_mask },
                 // Validate files are not empty (have actual size > 100 bytes)
-                { assert process.out.nuclei_mask.get(0).get(1).size() > 100 },
-                { assert process.out.cell_mask.get(0).get(1).size() > 100 },
+                { assert file(process.out.nuclei_mask.get(0).get(1)).size() > 100 },
+                { assert file(process.out.cell_mask.get(0).get(1)).size() > 100 },
                 // Metadata preserved
                 { assert process.out.nuclei_mask.get(0).get(0).patient_id == 'P001' },
                 { assert process.out.cell_mask.get(0).get(0).patient_id == 'P001' },
@@ -432,12 +432,12 @@ nextflow_process {
                 { assert process.success },
                 // Cell mask should have non-trivial size (actual segmentation, not empty)
                 {
-                    def maskSize = process.out.cell_mask.get(0).get(1).size()
+                    def maskSize = file(process.out.cell_mask.get(0).get(1)).size()
                     assert maskSize > 1000, "Cell mask should be > 1KB (got ${maskSize} bytes), indicating actual segmentation"
                 },
                 // Nuclei mask should also be non-trivial
                 {
-                    def maskSize = process.out.nuclei_mask.get(0).get(1).size()
+                    def maskSize = file(process.out.nuclei_mask.get(0).get(1)).size()
                     assert maskSize > 1000, "Nuclei mask should be > 1KB (got ${maskSize} bytes)"
                 },
                 // Size log should have been generated

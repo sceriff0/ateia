@@ -190,11 +190,11 @@ nextflow_process {
                 { assert process.out.versions },
                 { with(process.out.qc) {
                     assert size() == 1
-                    assert get(0).get(1).toFile().size() > 100
+                    assert file(get(0).get(1)).size() > 100
                 }},
                 { with(process.out.qc_fullres) {
                     assert size() == 1
-                    assert get(0).get(1).toFile().size() > 100
+                    assert file(get(0).get(1)).size() > 100
                 }}
             )
         }

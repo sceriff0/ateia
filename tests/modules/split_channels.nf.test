@@ -164,18 +164,18 @@ nextflow_process {
                 { assert process.out.channels.get(0).get(0).channels == ['DAPI', 'PANCK', 'SMA'] },
                 // Should produce 3 output files
                 {
-                    def files = process.out.channels.get(0).get(1)
+                    def files = process.out.channels.get(0).get(1).collect { file(it) }
                     assert files instanceof List
                     assert files.size() == 3
                 },
                 // Each file should be non-trivial (> 100 bytes)
                 {
-                    def files = process.out.channels.get(0).get(1)
+                    def files = process.out.channels.get(0).get(1).collect { file(it) }
                     files.each { f -> assert f.size() > 100 }
                 },
                 // File names should include channel names
                 {
-                    def fileNames = process.out.channels.get(0).get(1)*.name.sort()
+                    def fileNames = process.out.channels.get(0).get(1).collect { file(it).name }.sort()
                     assert fileNames.any { it.contains('DAPI') }
                     assert fileNames.any { it.contains('PANCK') }
                     assert fileNames.any { it.contains('SMA') }
@@ -212,19 +212,19 @@ nextflow_process {
                 { assert process.out.channels },
                 // Non-reference should produce 2 files (PANCK + SMA), NOT DAPI
                 {
-                    def files = process.out.channels.get(0).get(1)
+                    def files = process.out.channels.get(0).get(1).collect { file(it) }
                     assert files instanceof List
                     assert files.size() == 2, "Non-reference should have 2 channels (no DAPI), got ${files.size()}"
                 },
                 // Verify DAPI is NOT in output
                 {
-                    def fileNames = process.out.channels.get(0).get(1)*.name
+                    def fileNames = process.out.channels.get(0).get(1).collect { file(it).name }
                     assert !fileNames.any { it.toUpperCase().contains('DAPI') },
                         "DAPI should NOT be in non-reference output, got: ${fileNames}"
                 },
                 // Each channel file should have non-trivial content
                 {
-                    def files = process.out.channels.get(0).get(1)
+                    def files = process.out.channels.get(0).get(1).collect { file(it) }
                     files.each { f ->
                         assert f.size() > 100, "Channel file ${f.name} should be > 100 bytes"
                     }

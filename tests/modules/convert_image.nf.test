@@ -238,10 +238,10 @@ nextflow_process {
                 { assert process.out.ome_tiff.get(0).get(0).is_reference == true },
                 { assert process.out.ome_tiff.get(0).get(0).channels == ['DAPI', 'PANCK', 'SMA'] },
                 // OME-TIFF output is non-trivial
-                { assert process.out.ome_tiff.get(0).get(1).size() > 1000 },
+                { assert file(process.out.ome_tiff.get(0).get(1)).size() > 1000 },
                 // channels.txt content matches expected channel names
                 {
-                    def channelsContent = process.out.ome_tiff.get(0).get(2).text.trim()
+                    def channelsContent = file(process.out.ome_tiff.get(0).get(2)).text.trim()
                     assert channelsContent == "DAPI\nPANCK\nSMA"
                 }
             )
