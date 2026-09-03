@@ -302,17 +302,11 @@ workflow READ_SEGMENTED_CHECKPOINT {
 
     main:
     // Columns come from lib/Checkpoint.groovy, the writer's owner: this reader
-    // never restates the schema.
-    //
-    // Fail loudly here if the writer's schema drifts from what this reader indexes.
-    ['patient_id', 'id', 'registered_image', 'is_reference', 'channels',
-     'cell_mask', 'nuclei_mask'].each { col ->
-        if (!(col in Checkpoint.columns(Layout.SEGMENTED))) {
-            throw new IllegalStateException(
-                "READ_SEGMENTED_CHECKPOINT reads '${col}' from a 'segmented' checkpoint, " +
-                "which Checkpoint no longer declares")
-        }
-    }
+    // never restates the schema. Fail loudly here if the writer's schema drifts
+    // from what this reader indexes.
+    Checkpoint.requireColumns(Layout.SEGMENTED,
+        ['patient_id', 'id', 'registered_image', 'is_reference', 'channels',
+         'cell_mask', 'nuclei_mask'])
 
     // Everything Meta.fromCheckpointRow needs, pre-computed ONCE for the whole
     // checkpoint before any row is built -- the checkpoint-side twin of

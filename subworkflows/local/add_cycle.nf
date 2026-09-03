@@ -92,16 +92,12 @@ workflow ADD_CYCLE {
     // workflows/mirage.nf before this subworkflow is ever invoked.
 
     // Columns come from lib/Checkpoint.groovy, the writer's owner: this reader
-    // never restates the schema.
-    //
-    // Fail loudly here if the writer's schema drifts from what this reader indexes.
-    ['patient_id', 'registered_image', 'is_reference', 'channels'].each { col ->
-        if (!(col in Checkpoint.columns(Layout.REGISTERED))) {
-            throw new IllegalStateException(
-                "add_cycle reads '${col}' from ${Layout.checkpointCsvRelative(Layout.REGISTERED)}, " +
-                "which Checkpoint no longer declares")
-        }
-    }
+    // never restates the schema. Fail loudly here if the writer's schema drifts
+    // from what this reader indexes -- see Checkpoint.requireColumns for why a
+    // drift is otherwise silent (splitCsv creates keys only for columns the FILE
+    // declares, so a lost column reads as an empty path).
+    Checkpoint.requireColumns(Layout.REGISTERED,
+        ['patient_id', 'registered_image', 'is_reference', 'channels'])
     ch_prior_ref = Channel
         .fromPath(Layout.checkpointCsv(params.prior_outdir, Layout.REGISTERED), checkIfExists: true)
         .splitCsv(header: true)
@@ -113,17 +109,10 @@ workflow ADD_CYCLE {
 
     // Columns come from lib/Checkpoint.groovy, the writer's owner: this reader
     // never restates the schema. Only `merged_csv`, `cell_mask` and `pyramid` are
-    // used here — the masks are re-extracted from the pyramid's Image:1 series by
+    // used here -- the masks are re-extracted from the pyramid's Image:1 series by
     // EXTRACT_MASK_SERIES below, so the cell_mask column is read and discarded.
-    //
-    // Fail loudly here if the writer's schema drifts from what this reader indexes.
-    ['patient_id', 'merged_csv', 'cell_mask', 'pyramid'].each { col ->
-        if (!(col in Checkpoint.columns(Layout.POSTPROCESSED))) {
-            throw new IllegalStateException(
-                "add_cycle reads '${col}' from ${Layout.checkpointCsvRelative(Layout.POSTPROCESSED)}, " +
-                "which Checkpoint no longer declares")
-        }
-    }
+    Checkpoint.requireColumns(Layout.POSTPROCESSED,
+        ['patient_id', 'merged_csv', 'cell_mask', 'pyramid'])
     ch_prior_rows = Channel
         .fromPath(Layout.checkpointCsv(params.prior_outdir, Layout.POSTPROCESSED), checkIfExists: true)
         .splitCsv(header: true)
