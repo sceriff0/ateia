@@ -852,6 +852,107 @@ nextflow_pipeline {
         }
     }
 
+    test("Should run preprocessing+registration+segmentation when stop=segmentation - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        // `segmentation` was carved out of `postprocessing` as its own step
+        // (lib/ParamUtils.groovy's STEPS), and --stop segmentation was set
+        // NOWHERE in this repository until this case: of the ten legal
+        // --start/--stop pairs, the three ending at segmentation had no coverage
+        // at all, so the step's own gate was never exercised as a STOP.
+        when {
+            params {
+                input = "$projectDir/tests/testdata/test_input.csv"
+                outdir = "$outputDir"
+                start = "preprocessing"
+                stop = "segmentation"
+
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert path("$outputDir/csv/preprocessed.csv").exists() },
+                { assert path("$outputDir/csv/registered.csv").exists() },
+                { assert path("$outputDir/csv/segmented.csv").exists() },
+                // Postprocessing must NOT have run
+                { assert !path("$outputDir/csv/postprocessed.csv").exists() }
+            )
+        }
+    }
+
+    test("Should run registration+segmentation when start=registration stop=segmentation - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        when {
+            params {
+                input = "$projectDir/tests/testdata/valid_checkpoint_registration.csv"
+                outdir = "$outputDir"
+                start = "registration"
+                stop = "segmentation"
+
+                max_cpus = 2
+                max_memory = '6.GB'
+                skip_registration_qc = true
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert path("$outputDir/csv/registered.csv").exists() },
+                { assert path("$outputDir/csv/segmented.csv").exists() },
+                // Preprocessing and postprocessing must NOT have run
+                { assert !path("$outputDir/csv/preprocessed.csv").exists() },
+                { assert !path("$outputDir/csv/postprocessed.csv").exists() }
+            )
+        }
+    }
+
+    test("Should run only segmentation when start=segmentation stop=segmentation - stub") {
+
+        tag "stub"
+        options "-stub"
+
+        // valid_checkpoint_postprocessing.csv is a patient_id/registered_image/
+        // is_reference/channels sheet -- precisely the shape a completed
+        // registration run's csv/registered.csv has, and the entry column
+        // `segmentation` reads (lib/ParamUtils.groovy's STEPS). The same fixture
+        // is what tests/checkpoint_manifest.nf.test uses for --start segmentation;
+        // its name predates the step existing.
+        when {
+            params {
+                input = "$projectDir/tests/testdata/valid_checkpoint_postprocessing.csv"
+                outdir = "$outputDir"
+                start = "segmentation"
+                stop = "segmentation"
+
+                max_cpus = 2
+                max_memory = '6.GB'
+                seg_gpu = false
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert path("$outputDir/csv/segmented.csv").exists() },
+                // Nothing before or after it may have run
+                { assert !path("$outputDir/csv/preprocessed.csv").exists() },
+                { assert !path("$outputDir/csv/registered.csv").exists() },
+                { assert !path("$outputDir/csv/postprocessed.csv").exists() }
+            )
+        }
+    }
+
     test("Should complete dry_run with stop parameter") {
         tag "stub"
 
