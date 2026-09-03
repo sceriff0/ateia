@@ -103,7 +103,11 @@ RETIRED = {
         "bare word, so a figure may still say plainly that no such dataset backs "
         "any measure here -- narrowed 2026-09-03 after the bare pattern forced "
         "accuracy-schematic.html's honest-limits panel to cite this very test file "
-        "as evidence instead of stating the fact directly.",
+        "as evidence instead of stating the fact directly. INTERACTION: ANHIR and "
+        "ACROBAT are themselves trigger words here, so a negation that puts either "
+        "name immediately before 'landmark' ('no ACROBAT landmark TRE was measured') "
+        "still fires -- write 'no landmark TRE against ANHIR or ACROBAT ...' instead. "
+        "Word order between the two patterns matters; measured 2026-09-03.",
     ),
     # ashlar ONLY where it reads as a selectable backend. See the module docstring.
     r"registration_method[^<\n]{0,40}ashlar": (
