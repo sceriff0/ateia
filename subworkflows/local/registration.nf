@@ -188,7 +188,7 @@ workflow REGISTRATION {
     // For each registered image, create QC comparing it to its reference
     // This is now decoupled from the registration method
 
-    // Prepare input for QC: [meta, registered_file, reference_file]
+    // Prepare input for QC: [meta, registered_file, native_file, reference_file]
     ch_qc_input = ch_registered
         .branch {
             reference: it[0].is_reference
@@ -199,12 +199,30 @@ workflow REGISTRATION {
     ch_references_for_qc = ch_qc_input.reference
         .map { meta, file -> [meta.patient_id, file] }
 
-    // Combine moving images with their patient's reference (1 reference to N moving images)
+    // The NATIVE (pre-registration) image of every slide, keyed by meta.id.
+    // REGISTER_PATIENT.out.images_multi is the multi-slide patients' input stream --
+    // exactly what entered registration -- so the "before" panel needs no new process
+    // and no second read of the samplesheet.
+    //
+    // Keyed on meta.id, not on the meta MAP. Both channels do carry the same meta
+    // object for a given slide today, but a map key is one `meta + [k: v]` on either
+    // branch away from never matching again, and join() drops an unmatched pair
+    // silently with the run still exiting 0. meta.id is a plain String, set once at
+    // samplesheet-read time, unique per slide -- which is also what join() requires.
+    ch_natives_for_qc = ch_images_multi
+        .map { meta, file -> [meta.id, file] }
+
+    // Combine moving images with their patient's reference (1 reference to N moving
+    // images) and with their own native counterpart (1:1 on meta.id).
     ch_for_qc = ch_qc_input.moving
-        .map { meta, file -> [meta.patient_id, meta, file] }
+        .map { meta, file -> [meta.id, meta, file] }
+        .join(ch_natives_for_qc, by: 0)
+        .map { _id, meta, registered_file, native_file ->
+            [meta.patient_id, meta, registered_file, native_file]
+        }
         .combine(ch_references_for_qc, by: 0)
-        .map { patient_id, meta, registered_file, reference_file ->
-            [meta, registered_file, reference_file]
+        .map { _patient_id, meta, registered_file, native_file, reference_file ->
+            [meta, registered_file, native_file, reference_file]
         }
 
     // Level >= 1: DAPI overlay image QC for all non-reference images
