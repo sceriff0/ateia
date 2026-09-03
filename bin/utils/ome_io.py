@@ -767,8 +767,12 @@ def _open_bioio(path: Path, reader: str):
     ``bin/utils/valis_config.py::init_jvm`` already guards: scyjava derives its jgo
     ``cache_dir``/``m2_repo`` from ``Path.home()`` at import time and never consults
     ``JGO_CACHE_DIR``/``M2_REPO``, so nothing short of this call points it at the image's
-    baked ``/root/.jgo`` + ``/root/.m2`` cache before the first Maven-triggering import.
-    Plain ``bioio`` (OME-TIFF/TIFF/ND2/CZI/LIF) starts no JVM, so the call is skipped there.
+    baked ``/root/.jgo`` + ``/root/.m2`` cache before the first Maven-triggering CALL --
+    ``BioImage(str(path))`` below. Ordering versus the *import* of ``bioio``/``scyjava`` is
+    immaterial: ``scyjava.config``'s setters rebind module globals that are only read when
+    Maven actually resolves a dependency, which happens on the first JVM-touching call, not
+    on import. Plain ``bioio`` (OME-TIFF/TIFF/ND2/CZI/LIF) starts no JVM, so the call is
+    skipped there.
     """
     require_reader(reader)
     if reader == "bioio-bioformats":

@@ -1,9 +1,11 @@
 # The container build context is the REPOSITORY ROOT (.github/workflows/containers.yml
 # passes `context: .`), because ten of the eleven Dockerfiles COPY their pins from
 # requirements/ — the same files the workflows install — and all eleven COPY their own
-# containers/<dir>/smoke.sh. That is 21 COPY lines in total: 11 smoke scripts and 10
-# requirements files, and nothing else. A per-directory context cannot reach outside
-# itself, so the context had to widen; this file keeps the upload small.
+# containers/<dir>/smoke.sh. That is 22 COPY lines in total: 11 smoke scripts, 10
+# requirements-file COPYs, and one bin/utils script (bin/utils/jvm_cache.py, into
+# containers/convert, for the JVM-cache redirect on the bioio-bioformats route) — and
+# nothing else. A per-directory context cannot reach outside itself, so the context had
+# to widen; this file keeps the upload small.
 #
 # THE TRACKED TREE IS ~10 MB. A DEVELOPER'S WORKING TREE IS NOT. Everything under
 # "Gitignored scratch" below is untracked local scratch — measured 2026-09-02 on one
