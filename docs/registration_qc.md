@@ -28,9 +28,10 @@ Below the staged metrics sits the cheaper answer, on at every level from
 `reg_qc = 1` up: one image per moving slide showing what registration
 corrected.
 
-`GENERATE_REGISTRATION_QC` receives three images — the registered moving slide,
-its **native** (pre-registration) counterpart, and the patient's reference — and
-renders **two composites side by side**, separated by a blue band:
+`GENERATE_REGISTRATION_QC` takes the tuple `[meta, registered, native, reference]` —
+the registered moving slide, its **native** (pre-registration) counterpart, and
+the patient's reference — and renders **two composites side by side**, separated
+by a blue band:
 
 | Panel | Green | Red |
 |---|---|---|
@@ -57,6 +58,13 @@ which is what a reader of the figure is entitled to assume they are seeing.
 resolved from `nuclear_markers` (`metadata.pick_nuclear_index`); if no configured
 marker matches a slide's OME channel names, `create_registration_qc` raises rather
 than silently falling back to channel 0.
+
+**A missing native image is a hard failure, not a silent one-panel figure.**
+`native_image` is a required path in the process's own input tuple, and
+`create_registration_qc` raises `FileNotFoundError` if the path it is given does
+not resolve. There is no code path left that renders only the "after" composite
+because a native image was unavailable — that was the single-panel figure this
+replaced.
 
 The published names are unchanged —
 `<outdir>/<patient>/qc/registration/<slide>_QC_RGB.png`, `_QC_RGB.tif` and
