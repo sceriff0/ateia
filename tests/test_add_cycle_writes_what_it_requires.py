@@ -84,13 +84,30 @@ def _reachable_from(entry: Path):
 
 
 def _writers():
-    """constant name -> the .nf files that collectFile() a manifest for it."""
+    """constant name -> the .nf files that write a manifest for it.
+
+    Two shapes count as "writing" a step's manifest:
+
+    1. The direct shape: a file collectFile()s a checkpoint named via
+       `Layout.checkpointCsvName(Layout.<CONST>)` -- what every checkpoint writer
+       looked like before subworkflows/local/checkpoint_writer.nf existed, and
+       what subworkflows/local/registered_checkpoint.nf still looks like.
+    2. The delegated shape: a file calls `CHECKPOINT_WRITER(Layout.<CONST>, ...)`.
+       CHECKPOINT_WRITER's OWN collectFile() names its checkpoint through a
+       `step` variable, never a literal `Layout.<CONST>` -- by design, since it is
+       one subworkflow serving four steps -- so shape 1 alone would report NO
+       writer for every step migrated onto it, which is a false "unreachable"
+       exactly like the one this file's docstring found in 2026-08-25. Crediting
+       the CALLER (which does name the literal constant) is what keeps this
+       guard seeing through the indirection.
+    """
     out = {}
     for f in sorted(ROOT.rglob("*.nf")):
         src = strip_comments(f.read_text())
-        if "collectFile(" not in src:
-            continue
-        for const in re.findall(r"Layout\.checkpointCsvName\(Layout\.(\w+)\)", src):
+        if "collectFile(" in src:
+            for const in re.findall(r"Layout\.checkpointCsvName\(Layout\.(\w+)\)", src):
+                out.setdefault(const, set()).add(f.resolve())
+        for const in re.findall(r"CHECKPOINT_WRITER\(\s*Layout\.(\w+)", src):
             out.setdefault(const, set()).add(f.resolve())
     return out
 
