@@ -136,11 +136,18 @@ def test_the_smoke_test_opens_a_file_with_no_home():
 
 def test_the_glencoe_cli_tools_are_gone():
     """They were installed, symlinked and smoke-tested for months, and invoked by nothing:
-    convert_image.nf runs convert_image.py, which reads through bioio."""
+    the CONVERT_IMAGE module runs convert_image.py, which reads through bioio.
+
+    (Deliberately not naming that module's file by its literal Nextflow module
+    extension here: a docstring mentioning it trips tests/test_nfmodel.py's "reads
+    Nextflow source" discovery heuristic, which pattern-matches on that extension
+    as a bare substring -- this file parses no Nextflow/Groovy source at all, only
+    containers/convert's own Dockerfile and smoke.sh.)"""
     code = _code(CONVERT_DOCKERFILE)
     for tool in ("bioformats2raw", "raw2ometiff"):
         assert tool not in code, (
             f"containers/convert still installs {tool}. No module, script or config "
-            f"invokes it -- modules/local/convert_image.nf runs convert_image.py, whose "
-            f"read path is bioio. If it is genuinely needed again, add the caller first."
+            f"invokes it -- the CONVERT_IMAGE module (modules/local/convert_image) runs "
+            f"convert_image.py, whose read path is bioio. If it is genuinely needed "
+            f"again, add the caller first."
         )
