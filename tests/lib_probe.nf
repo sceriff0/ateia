@@ -382,6 +382,100 @@ def checkCheckpoint() {
     assert emptyCols : 'Checkpoint.requireColumns must reject an empty column list'
 }
 
+/**
+ * RegBackends — the registration backend's identity, in one table.
+ *
+ * Lives outside `workflow { ... }` deliberately: see "THE WORKFLOW BLOCK HAS A HARD
+ * SIZE CEILING" above. Called once from the workflow block, before the final println.
+ *
+ * The method name was re-decided in five places: nextflow_schema.json's
+ * registration_method enum, workflows/mirage.nf's add_cycle allowlist,
+ * register_patient.nf's three-arm dispatch, seg_qc.nf's join-shape branch, and
+ * lib/WarpBackends.groovy's own two-key map. Adding a backend meant finding all
+ * five; missing one was silent, and the silence had a direction -- the
+ * register_patient dispatch used to read `if (tiled) ... else VALIS`, so a method
+ * the schema gained but that file did not know about registered with VALIS and
+ * REPORTED SUCCESS. A whole benchmark arm would have measured VALIS twice under
+ * two labels.
+ */
+def checkRegBackends() {
+    assert RegBackends.methods() == ['valis', 'tiled'] :
+        'RegBackends.methods() must be the BACKENDS keys in declaration order'
+
+    // The adapter each method dispatches to. A String, not a workflow reference: a
+    // Nextflow workflow cannot be invoked by name out of a map, so register_patient.nf
+    // keeps a two-arm `if` -- what this replaces is the DECISION, not the call.
+    assert RegBackends.of('valis').adapter == 'VALIS_ADAPTER'
+    assert RegBackends.of('tiled').adapter == 'TILED_ADAPTER'
+
+    // The seg-QC join shape. VALIS produces ONE registrar pickle per patient; the
+    // tiled backend produces one transform manifest per moving SLIDE. seg_qc.nf branches
+    // on this rather than on the method name, so a third backend has to DECLARE which of
+    // the two shapes it has instead of silently inheriting one by falling through.
+    assert RegBackends.segQcJoin('valis') == 'per_patient'
+    assert RegBackends.segQcJoin('tiled') == 'per_slide'
+
+    // The optional emits, as a null-object contract: an adapter for a method that
+    // produces no TRE, or no pre-micro checkpoint, emits Channel.empty() and consumers
+    // tolerate zero artifacts. Recorded here so a third backend answers both questions
+    // in the table rather than in a consumer's if-chain.
+    assert RegBackends.of('valis').hasStageCheckpoint
+    assert !RegBackends.of('valis').hasIntrinsicTre
+    assert !RegBackends.of('tiled').hasStageCheckpoint
+    assert RegBackends.of('tiled').hasIntrinsicTre
+
+    // Which run modes each backend supports. add_cycle re-registers the new cycle
+    // through the classic VALIS adapter only.
+    assert RegBackends.supportsMode('valis', 'linear')
+    assert RegBackends.supportsMode('valis', 'add_cycle')
+    assert RegBackends.supportsMode('tiled', 'linear')
+    assert !RegBackends.supportsMode('tiled', 'add_cycle')
+
+    // An unknown method throws, and the message names the valid ones. This is the
+    // property that makes the dispatch's fall-through loud instead of a silent VALIS.
+    def badRegMethod = false
+    def badRegMsg = ''
+    try { RegBackends.of('ashlar') }
+    catch (IllegalArgumentException e) { badRegMethod = true; badRegMsg = e.message }
+    assert badRegMethod : 'RegBackends.of must reject an unknown method'
+    assert badRegMsg.contains('ashlar') : 'the message must name what was asked for'
+    assert badRegMsg.contains('valis') && badRegMsg.contains('tiled') :
+        'the message must list the valid methods'
+
+    // supportsMode and segQcJoin go through of(), so they reject the same way rather
+    // than answering false/null for a name that does not exist -- a false here reads as
+    // "that backend does not support add_cycle", which is a different statement.
+    def badModeLookup = false
+    try { RegBackends.supportsMode('ashlar', 'linear') }
+    catch (IllegalArgumentException ignored) { badModeLookup = true }
+    assert badModeLookup : 'RegBackends.supportsMode must reject an unknown method'
+
+    def badJoinLookup = false
+    try { RegBackends.segQcJoin('ashlar') }
+    catch (IllegalArgumentException ignored) { badJoinLookup = true }
+    assert badJoinLookup : 'RegBackends.segQcJoin must reject an unknown method'
+
+    // The two backend tables must agree on WHICH backends exist. WarpBackends keys the
+    // reg_qc=2 warp; RegBackends keys the registration itself. A method in one and not
+    // the other is a run that registers and then cannot be scored, or vice versa.
+    assert RegBackends.methods().toSorted() == WarpBackends.methods().toSorted() :
+        'RegBackends and WarpBackends declare different backend sets'
+
+    // ... and on which WARP each method uses, which is the one field they share.
+    RegBackends.methods().each { m ->
+        assert RegBackends.of(m).warp == m :
+            "RegBackends.of('${m}').warp must name the WarpBackends key for that method"
+        assert WarpBackends.of(RegBackends.of(m).warp) != null
+    }
+
+    // The table is immutable: a caller mutating it would silently rewrite every later
+    // lookup in the run.
+    def regTableImmutable = false
+    try { RegBackends.BACKENDS.put('ashlar', [:]) }
+    catch (UnsupportedOperationException ignored) { regTableImmutable = true }
+    assert regTableImmutable : 'RegBackends.BACKENDS must be immutable'
+}
+
 workflow {
 
     // ------------------------------------------------------------------ //
@@ -1406,6 +1500,10 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     // Checkpoint.requireColumns — the drift guard three readers copied.
     // See checkCheckpoint() above the workflow block.
     checkCheckpoint()
+
+    // RegBackends — the registration backend's identity, in one table.
+    // See checkRegBackends() above the workflow block.
+    checkRegBackends()
 
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info

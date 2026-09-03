@@ -97,8 +97,9 @@ class WarpBackends {
      * The registration methods WARP_SEG_QC can score, in BACKENDS order.
      *
      * Must equal the set of methods nextflow_schema.json's `registration_method`
-     * enum accepts (currently 'valis' and 'tiled'): a method that registers but
-     * cannot be warp-scored would fail only at reg_qc=2, on a real run.
+     * enum accepts (currently 'valis' and 'tiled') and lib/RegBackends.groovy's
+     * `methods()`: a method that registers but cannot be warp-scored would fail
+     * only at reg_qc=2, on a real run.
      */
     static List<String> methods() {
         return BACKENDS.keySet() as List
