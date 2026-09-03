@@ -501,4 +501,18 @@
 # 1571 + 13 = 1584. The prior 1565 was within FLOOR_DRIFT (50) of this number, so
 # the suite did not fail on the floor; re-ratcheted anyway per instruction, to keep
 # the floor a tight measurement rather than a stale one riding inside the drift band.
-1584
+#
+# RE-MEASURED 2026-09-02 after the DAPI before/after overlay (release plan 08):
+# tests/test_registration_qc_before_after.py (17 cases) and
+# tests/test_registration_qc_wiring.py (4 cases) are new; nothing was removed.
+# Counted directly rather than trusting that estimate:
+# test_registration_qc_before_after.py in fact carries 21 `def test_` functions,
+# not 17, and a third file touched in the same range,
+# tests/test_container_harmonisation.py, gained one more case
+# (test_qc_reader_dispatch_stays_tifffile_only, from Task 8's ome_io
+# reader-dispatch guard update) that was not called out at all. 21 + 4 + 1 = 26.
+# Measured after generating the fixtures, with the suite's standard exclusions:
+# `pytest --collect-only -q` reports "1610 tests collected", and a full run
+# (also re-checked with MIRAGE_STRICT_SKIPS=1) gives 1597 passed, 13 skipped,
+# 0 failed -- 1597 + 13 = 1610, matching exactly. 1584 + 26 = 1610.
+1610
