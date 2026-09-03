@@ -32,8 +32,9 @@ SCAN = [
     REPO / "README.md",
     *sorted((REPO / "docs").glob("*.md")),
     *sorted((REPO / "docs" / "figures").glob("*.html")),
-    *sorted((REPO / "tests").glob("*.md")),
-    *sorted((REPO / "tests").glob("*.sh")),
+    # rglob, not glob: tests/cluster/README.md is the file an operator copy-pastes from.
+    *sorted((REPO / "tests").rglob("*.md")),
+    *sorted((REPO / "tests").rglob("*.sh")),
 ]
 
 # Files that quote the broken form ON PURPOSE, with the reason. Each is verified below to still

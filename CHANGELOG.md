@@ -213,6 +213,18 @@ after that doc and is detailed inline below:
   produced, and once a real run lands it must name the commit, the probe
   container, and carry at least one successful row for one of the five vendor
   formats.
+- **Three corrected `ome_io` return values, found by the synthesised fixtures.**
+  `read_info` on an interleaved-RGB plain TIFF (`YXS`) now reports
+  `shape_cyx=(3, Y, X)` with `channels_are_samples=True` on the tifffile path too
+  (it reported `(Y, X, S)` -- a channel count that was the image height);
+  `read_info` on an `.ndpi` now carries the pixel size from its
+  `XResolution`/`ResolutionUnit` tags (it reported `None`); and `read_plane`'s
+  tifffile branch selects a SAMPLE when `channels_are_samples`, on both the lazy
+  and eager paths, deriving the axis from `series.axes` (`read_plane(rgb, 1)`
+  returned a `(Y, S)` slice). No shipped behaviour changes: the pipeline's only
+  `read_info`/`read_plane` consumer reads planar OME-TIFFs that `CONVERT_IMAGE`
+  has already normalised -- but `ome_io` is a frozen shared interface, so its
+  corrected contract is recorded here.
 
 ### Changed
 - **The resource report is plots, not tables.** The per-process rollup,

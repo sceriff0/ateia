@@ -13,8 +13,12 @@ Everything the fixture generator *can* produce is exercised by
 every push: pyramidal OME-TIFF, BigTIFF, interleaved RGB, 8-bit, float32,
 HDF5, a single Hamamatsu-shaped slide plus its multi-file manifest, and the
 seven end-to-end `CONVERT_IMAGE` conversions and the truncated-input refusal.
-No cluster run is needed for any of these, and none of them appear in the table
-below — that table exists only for the formats CI cannot generate.
+No cluster run is needed for any of these. One format appears in BOTH lists:
+the synthesised `.ndpi` is a renamed classic TIFF, which exercises tifffile's
+extension dispatch and the resolution-tag pixel size but not real Hamamatsu
+JPEG-in-TIFF bytes — so `.ndpi` is synthesised-tested here and still needs the
+kit for scanner output. The table below otherwise exists only for the formats
+CI cannot generate.
 
 ## Vendor formats — kit-validated: pending
 
@@ -28,7 +32,7 @@ No cluster run has been recorded yet.
 | `.czi` | kit-validated: pending — see `tests/cluster/README.md` |
 | `.nd2` | kit-validated: pending — see `tests/cluster/README.md` |
 | `.lif` | kit-validated: pending — see `tests/cluster/README.md` |
-| `.ndpi` | kit-validated: pending — see `tests/cluster/README.md` |
+| `.ndpi` | synthesised-tested; real-scanner bytes kit-validated: pending — see `tests/cluster/README.md` |
 | `.svs` | kit-validated: pending — see `tests/cluster/README.md` |
 
 `tests/cluster/README.md` has the three commands an operator with access to
