@@ -270,8 +270,9 @@
         <h3><span>REGISTRATION</span><span>2</span></h3>
         <div class="body">
           <div class="mod"><div class="n">GENERATE_REGISTRATION_QC <span class="tag tag-on">reg_qc ≥ 1</span></div>
-            <div class="x">Nuclear-channel RGB overlay, registered against reference — full-resolution TIFF plus a
-              downsampled PNG.</div>
+            <div class="x">Nuclear-channel RGB before/after: reference+native and reference+registered, two panels
+              side by side — full-resolution TIFF plus a downsampled PNG/TIFF pair, pixel size stamped on both
+              QC TIFFs.</div>
             <div class="pp"><span>qc_scale_factor <b>0.25</b></span></div></div>
           <div class="mod"><div class="n">SEG_QC <span class="tag tag-on">reg_qc = 2 · default</span></div>
             <div class="x">Three processes — panel <b>e</b>. Scores IoU and centroid residual per cell pair at
@@ -347,9 +348,13 @@
           &nbsp;&nbsp;+ UNIVERSAL_QC_KINDS<br>
           <span class="cm">&nbsp;&nbsp;→ 8 kinds, a fresh List every call; see panel c for the split</span></div>
         <div class="callout"><b>The vocabulary is derived, not restated.</b> The two <code>FINAL_QC</code> call
-          sites hand-write <b>21</b> tag literals between them — <b>16</b> on the standard path (across four
+          sites hand-write <b>25</b> <code>['kind', file]</code> tag literals between them, counted on one
+          basis — every literal in each site's channel-mix chain, unconditional pair included: <b>18</b> on
+          the standard path (the unconditional <code>INPUT_CHECK</code> pair, plus <b>16</b> across four
           <code>if</code> blocks, in which <code>versions</code> and <code>size_log</code> each appear five
-          times) and <b>5</b> in add_cycle — and nothing else checks that the two agree. <code>ParamUtils.knownArtifactKinds()</code> is that check, and it is
+          times) and <b>7</b> in add_cycle (<code>versions</code>×2, <code>size_log</code>×2, plus one each of
+          <code>registration_qc</code>, <code>seg_qc</code>, <code>seg_residuals</code> — 5 <i>distinct</i>
+          kinds, not 7 literals) — and nothing else checks that the two agree. <code>ParamUtils.knownArtifactKinds()</code> is that check, and it is
           computed from the same step table that fixes each step's required samplesheet columns and the values
           <code>--start</code>/<code>--stop</code> accept. It is a pure static accessor rather than file-level
           state on purpose — Nextflow 26's strict parser rejects a bare top-level <code>KNOWN_ARTIFACT_KINDS = ...</code>
@@ -376,8 +381,9 @@
               state (a static mutable Set in <code>lib/</code> would be shared across every run in the JVM), so it is
               threaded as a mandatory third argument into all eight <code>artifactsOf()</code> call sites and checked
               against the full vocabulary at the end of the workflow, and only when both outputs are enabled, because
-              <code>--skip_final_qc_report</code> or <code>--enable_trace false</code> legitimately leaves half
-              the vocabulary unconsumed.</div></div>
+              setting <code>skip_final_qc_report</code> — with the final report skipped — or setting
+              <code>enable_trace</code> off, via a profile or <code>-params-file</code>, legitimately leaves
+              half the vocabulary unconsumed.</div></div>
         </div>
       </div>
     </div>
@@ -436,7 +442,7 @@
           slide's own channel list.</p>
         <dl>
           <dt>container</dt><dd>…mirage-preprocess:1.0.0</dd>
-          <dt>resources</dt><dd>label process_medium — 4 cpu · 200 GB · 4 h × attempt</dd>
+          <dt>resources</dt><dd>label process_medium — 4 cpu · 100 + 100 GB × attempt · 4 h × attempt</dd>
           <dt>publishes</dt><dd>&lt;pid&gt;/qc/preprocess/qc/*.png</dd>
           <dt>kind</dt><dd>preprocess_qc</dd>
         </dl>
@@ -469,7 +475,7 @@
           quantification overlays. Needing both is why this belongs to postprocessing and not to segmentation.</p>
         <dl>
           <dt>container</dt><dd>…mirage-quantify:1.0.0</dd>
-          <dt>resources</dt><dd>label process_medium — 4 cpu · 200 GB · 4 h × attempt</dd>
+          <dt>resources</dt><dd>label process_medium — 4 cpu · 100 + 100 GB × attempt · 4 h × attempt</dd>
           <dt>publishes</dt><dd>&lt;pid&gt;/qc/postprocessing/qc/*.png</dd>
           <dt>kind</dt><dd>postprocess_qc</dd>
         </dl>
@@ -543,6 +549,14 @@
           <td><i>none</i> — passed as <code>[]</code>, the null object</td></tr>
       </tbody>
     </table></div>
+    <p class="outnote"><b>The container cell above names the readable tag, not what actually runs.</b>
+      <code>cdgatenbee/valis-wsi:1.0.0</code> is the third-party base image; at runtime
+      <code>lib/WarpBackends.groovy</code> and <code>modules/local/register.nf</code> both pin it to a digest of
+      that same build (<code>@sha256:eac27cc5…</code>, resolved 2026-09-02) rather than the mutable tag — a
+      supply-chain hardening (R6). This cell keeps the human-readable tag because a bare digest is unreadable in
+      a supplement. <code>bolt3x/mirage-tiled:1.0.0</code>, and every <code>bolt3x/mirage-*</code> image named
+      elsewhere in this figure, are the pipeline's own published, content-descriptive tags and are not
+      digest-pinned — R6 pins only the externally-sourced base image.</p>
     <p class="outnote"><b>The per-cell residual CSV is never published.</b> <code>WARP_SEG_QC</code>'s
       <code>publishDir</code> carries <code>pattern: "*_seg_qc.json"</code> and replaces the process-level
       default, so <code>*_reg_residuals.csv</code> — an optional <code>output:</code> emit — reaches
@@ -721,6 +735,8 @@
           <tr><td class="k">seg_method</td><td class="v">instantseg</td><td class="d">SEG_QC_SEGMENT is SEGMENT aliased</td></tr>
           <tr><td class="k">simplify_tolerance</td><td class="v">1.0</td><td class="d">SEG_QC_GEOJSON <code>--tolerance</code>; must equal EXTRACT_CELL_PROPERTIES'</td></tr>
           <tr><td class="k">reg_micro_reg</td><td class="v">1</td><td class="d">WARP_SEG_QC <code>--micro-reg</code>: whether 'rigid' includes micro-rigid</td></tr>
+          <tr><td class="k">seg_qc_pairing</td><td class="v">lsa</td><td class="d">WARP_SEG_QC <code>--pairing</code>; backend-independent, a tunable in <code>ext.args</code></td></tr>
+          <tr><td class="k">seg_qc_match_radius_factor</td><td class="v">1.5</td><td class="d">WARP_SEG_QC <code>--match-radius-factor</code>; same <code>ext.args</code> line</td></tr>
           <tr><td class="k">registration_method</td><td class="v">valis</td><td class="d">read once, in registration.nf; reaches SEG_QC as an argument</td></tr>
         </table>
         <h4>Where the QC leaves the QC tree</h4>

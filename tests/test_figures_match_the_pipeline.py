@@ -82,6 +82,11 @@ NON_PARAM_FLAGS = {
     "nv": "Singularity's flag, the --gpus equivalent",
     "method": "bin/warp_seg_qc.py's CLI flag, not a pipeline parameter",
     "tolerance": "bin/seg_qc_geojson.py's CLI flag, not a pipeline parameter",
+    "pairing": "bin/warp_seg_qc.py's CLI flag; the pipeline parameter is seg_qc_pairing",
+    # NOT "match-radius-factor": _FLAG (`--([a-z][a-z0-9_]*)(?![A-Za-z0-9_-])`) cannot
+    # match a hyphenated flag name at all -- the lookahead rejects the very next
+    # character it would need to consume -- so `--match-radius-factor` is invisible to
+    # both this checker and the exists-check above. Nothing to exempt.
 }
 
 # ``UPPER_SNAKE_CASE`` tokens that name something real but are not Nextflow

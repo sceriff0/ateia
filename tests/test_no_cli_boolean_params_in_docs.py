@@ -31,6 +31,7 @@ REPO = Path(__file__).resolve().parent.parent
 SCAN = [
     REPO / "README.md",
     *sorted((REPO / "docs").glob("*.md")),
+    *sorted((REPO / "docs" / "figures").glob("*.html")),
     *sorted((REPO / "tests").glob("*.md")),
     *sorted((REPO / "tests").glob("*.sh")),
 ]
