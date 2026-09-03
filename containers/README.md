@@ -88,7 +88,7 @@ gh workflow run containers.yml --ref <branch> -f version=<tag> -f only=segeval
 
 | Build context (`containers/<name>/`) | Docker Hub image:tag | Pipeline process(es) that use it | Source / base image |
 | --- | --- | --- | --- |
-| `convert` | `bolt3x/mirage-convert:1.0.0` | `CONVERT_IMAGE` | `eclipse-temurin:21-jre-jammy` + Glencoe `bioformats2raw` 0.12.0 / `raw2ometiff` 0.10.0 + `tifffile`/`numpy` |
+| `convert` | `bolt3x/mirage-convert:1.0.0` | `CONVERT_IMAGE` | `eclipse-temurin:21-jre-jammy` + bioio 3.5.0 and its reader plugins incl. bioio-bioformats; Bio-Formats jars baked under `/root/.m2` + `/root/.jgo` |
 | `preprocess` | `bolt3x/mirage-preprocess:1.0.0` | `TILE_FOR_BASIC`, `APPLY_PROFILES`, `SPLIT_CHANNELS`, `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT`, `PREFLIGHT_SCALE`, `AGGREGATE_SIZE_LOGS` (7 modules) | `ubuntu:22.04` + Python 3.11 + BaSiCPy/JAX(cpu)/scikit-image illumination-correction stack |
 | `quantify` | `bolt3x/mirage-quantify:1.0.0` | `QUANTIFY`, `EXTRACT_CELL_PROPERTIES`, `EXTRACT_NUCLEI_PROPERTIES`, `EXPORT_GEOJSON`, `GENERATE_POSTPROCESSING_QC` (+ `quantify.nf` second container directive) (6 modules) | `nvidia/cuda:12.2.2-devel-ubuntu22.04` + numpy/scipy/scikit-image quantification stack |
 | `stardist` | `bolt3x/mirage-stardist:1.0.0` | `SEGMENT` (default backend, `params.seg_method` = stardist) | `tensorflow/tensorflow:2.15.0-gpu-jupyter` + StarDist 0.9.1 |

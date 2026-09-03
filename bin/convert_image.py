@@ -8,6 +8,8 @@ Supports:
 - TIFF/OME-TIFF via bioio-tifffile/bioio-ome-tiff
 - NDPI/NDPIS (Hamamatsu) via tifffile
 - HDF5 (.h5, .hdf5) via h5py
+- SVS/QPTIFF/VSI/SCN/MRXS/BIF/IMS (Aperio/Vectra/Olympus/Leica/3DHistech/Ventana/Imaris)
+  via bioio-bioformats -- ruling R2's "any Bio-Formats-compatible format" route
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ import numpy as np
 import tifffile
 
 sys.path.insert(0, str(Path(__file__).parent / "utils"))
+from jvm_cache import point_jvm_cache_off_readonly_home
 from logger import configure_logging, get_logger
 from metadata import DEFAULT_NUCLEAR_MARKERS, pick_nuclear_index
 from ome_io import (
@@ -351,6 +354,14 @@ def read_image(file_path: Path) -> Tuple[Any, dict]:
     BioImage, with one more plugin installed. ``require_reader`` is called first so a run
     in an image that lacks the plugin says which distribution is missing and which image
     carries it, rather than dying on a bare ModuleNotFoundError.
+
+    For ``bioio-bioformats`` specifically, ``point_jvm_cache_off_readonly_home()`` runs
+    BEFORE ``read_image_bioio`` constructs ``BioImage`` -- this is the actual CONVERT_IMAGE
+    read path (``ome_io._open_bioio`` is a separate opener used by ``read_info``/
+    ``read_plane``, and carries the same call for its own callers). Without it, the first
+    Bio-Formats-triggering ``BioImage()`` call starts jgo's Maven resolve against
+    ``Path.home()``, which is the cluster's read-only ``$HOME`` -- see
+    ``bin/utils/jvm_cache.py``'s docstring for the exact crash.
     """
     reader = detect_reader(file_path)
     logger.info(f"Detected reader: {reader}")
@@ -360,6 +371,8 @@ def read_image(file_path: Path) -> Tuple[Any, dict]:
         return read_image_tifffile(file_path)
     if reader == "hdf5":
         return read_image_h5(file_path)
+    if reader == "bioio-bioformats":
+        point_jvm_cache_off_readonly_home()
     return read_image_bioio(file_path)
 
 

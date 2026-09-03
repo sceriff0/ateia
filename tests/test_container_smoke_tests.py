@@ -64,10 +64,12 @@ IN_IMAGE_PATH = "/usr/local/bin/mirage-smoke.sh"
 # for numpy, scipy, pandas, tifffile, zarr, numcodecs, imagecodecs, torch, kornia,
 # csbdeep, stardist, spatialdata, anndata, geopandas, shapely, xmltodict and matplotlib.
 # `bioio_bioformats` underscores where its distribution hyphenates, and `scyjava` arrives
-# transitively through bioio-bioformats -> bffile. The smoke script imports scyjava.config
-# directly (it is the timing-immune lever for the jgo cache), so containers/convert names
-# it in its own pip line rather than relying on the transitive install -- an install
-# nothing in the Dockerfile names is invisible to test_container_harmonisation.py too.
+# transitively through bioio-bioformats -> bffile. bin/utils/jvm_cache.py (which
+# containers/convert/smoke.sh imports -- see LOCALLY_COPIED_MODULES below) imports
+# scyjava.config directly (it is the timing-immune lever for the jgo cache), so
+# containers/convert names scyjava in its own pip line rather than relying on the
+# transitive install -- an install nothing in the Dockerfile names is invisible to
+# test_container_harmonisation.py too.
 IMPORT_TO_DISTRIBUTION = {
     "skimage": "scikit-image",
     "sklearn": "scikit-learn",
@@ -76,6 +78,21 @@ IMPORT_TO_DISTRIBUTION = {
     "PIL": "pillow",
     "bioio_bioformats": "bioio-bioformats",
     "scyjava": "scyjava",
+}
+
+# {container: {import name}} for a module a smoke script imports that is NOT a pip
+# distribution at all -- it is a first-party bin/utils/*.py file the Dockerfile COPYs
+# into the image directly, so `declared_distributions` (a pip-install scan) can never
+# find it. containers/convert is the one case today: smoke.sh calls the PRODUCTION
+# `bin/utils/jvm_cache.py::point_jvm_cache_off_readonly_home()` (Task 7 review round 1)
+# rather than hand-rolling its own scyjava.config calls, and the Dockerfile COPYs that
+# one file onto its own PYTHONPATH entry for exactly that reason -- see
+# containers/convert/Dockerfile's "COPY bin/utils/jvm_cache.py" comment.
+# `test_locally_copied_modules_are_actually_copied_by_name` below is what keeps this
+# honest: an entry here that the Dockerfile does not literally COPY is a hard failure,
+# not a silent permanent exemption.
+LOCALLY_COPIED_MODULES = {
+    "convert": {"jvm_cache"},
 }
 
 
@@ -330,8 +347,11 @@ def test_every_module_the_smoke_script_imports_is_installed_by_the_image(name):
         "the comparison below is against an empty set. The scan, not the image, is what "
         "changed."
     )
+    locally_copied = LOCALLY_COPIED_MODULES.get(name, set())
     missing = []
     for module in sorted(imported_modules(smoke_path(name).read_text())):
+        if module in locally_copied:
+            continue
         distribution = IMPORT_TO_DISTRIBUTION.get(module, module)
         if distribution.lower() not in declared:
             missing.append(f"{module} (would come from {distribution!r})")
@@ -344,6 +364,34 @@ def test_every_module_the_smoke_script_imports_is_installed_by_the_image(name):
         "because an install nothing in that file names is invisible to "
         "tests/test_container_harmonisation.py's 'installs what it imports' guard too.\n"
         f"Declared distributions: {sorted(declared)}"
+    )
+
+
+@pytest.mark.parametrize(
+    "name,module",
+    sorted(
+        (name, module)
+        for name, modules in LOCALLY_COPIED_MODULES.items()
+        for module in modules
+    ),
+)
+def test_locally_copied_modules_are_actually_copied_by_name(name, module):
+    """Every LOCALLY_COPIED_MODULES entry must be a real COPY, by name, in that
+    container's own Dockerfile -- otherwise the entry is a silent permanent exemption
+    from test_every_module_the_smoke_script_imports_is_installed_by_the_image rather
+    than a documented, verified special case."""
+    text = _strip_hash_comments(dockerfile(name).read_text())
+    assert re.search(rf"COPY\s+\S*/{re.escape(module)}\.py\s+\S+", text), (
+        f"LOCALLY_COPIED_MODULES[{name!r}] names {module!r}, but "
+        f"containers/{name}/Dockerfile has no `COPY .../{module}.py <dest>` line -- "
+        "either the exemption is stale (the smoke script no longer imports it, or the "
+        "Dockerfile install changed shape) or the COPY was removed without removing "
+        "this entry."
+    )
+    assert module in imported_modules(smoke_path(name).read_text()), (
+        f"LOCALLY_COPIED_MODULES[{name!r}] names {module!r}, but "
+        f"containers/{name}/smoke.sh does not actually import it -- the entry has "
+        "outlived its reason and should be removed."
     )
 
 

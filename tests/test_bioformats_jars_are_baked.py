@@ -101,7 +101,7 @@ def test_the_build_asserts_the_jars_landed():
         "the build does not assert that the formats-gpl artifact directory exists under "
         "/root/.m2/repository after the bake."
     )
-    assert "/root/.m2/repository/ome/formats-gpl" in code and "-n " in code, (
+    assert 'test -n "$(ls -A /root/.m2/repository/ome/formats-gpl)"' in code, (
         "the build checks the directory exists but not that it is NON-EMPTY. jgo creates "
         "the path before it populates it, so an existence check alone can pass over a "
         "failed download."
@@ -131,6 +131,52 @@ def test_the_smoke_test_opens_a_file_with_no_home():
     assert "bioio_bioformats" in code, (
         "containers/convert/smoke.sh does not import bioio_bioformats. A plugin that is "
         "installed and does not import is a format the pipeline silently cannot read."
+    )
+
+
+def test_the_smoke_test_calls_the_production_redirect_not_a_hand_rolled_copy():
+    """Review round 1 on Task 7: the smoke test used to call
+    `scyjava.config.set_cache_dir`/`set_m2_repo` directly -- two calls production never
+    made, since nothing on the CONVERT_IMAGE run path called
+    `jvm_cache.point_jvm_cache_off_readonly_home()` at the time. That let the smoke test
+    pass while proving nothing about the real run path. It must now call the SAME
+    function `bin/utils/ome_io.py::_open_bioio` and `bin/convert_image.py::read_image`
+    call, via the copy the Dockerfile COPYs in."""
+    dockerfile_code = _code(CONVERT_DOCKERFILE)
+    assert "COPY bin/utils/jvm_cache.py" in dockerfile_code, (
+        "containers/convert/Dockerfile does not COPY bin/utils/jvm_cache.py into the "
+        "image, so smoke.sh has no way to call the real production redirect function."
+    )
+    smoke_code = _code(CONVERT_SMOKE)
+    assert "from jvm_cache import point_jvm_cache_off_readonly_home" in smoke_code, (
+        "containers/convert/smoke.sh does not import the production "
+        "point_jvm_cache_off_readonly_home function."
+    )
+    assert "point_jvm_cache_off_readonly_home()" in smoke_code, (
+        "containers/convert/smoke.sh imports the production redirect but never calls it."
+    )
+    assert "sjconf.set_cache_dir" not in smoke_code, (
+        "containers/convert/smoke.sh still hand-rolls scyjava.config.set_cache_dir -- "
+        "that proves a DIFFERENT mechanism works, not the one CONVERT_IMAGE actually "
+        "uses. Call point_jvm_cache_off_readonly_home() instead."
+    )
+
+
+def test_the_smoke_test_proves_the_redirect_is_load_bearing_with_a_negative_leg():
+    """A positive-only smoke test run as root cannot tell "the redirect worked" apart
+    from "root can write anywhere anyway" (CAP_DAC_OVERRIDE). The negative leg drops to
+    an unprivileged UID and skips the guard, so the read must FAIL -- if it does not,
+    either the redirect stopped being load-bearing or this leg stopped exercising the
+    failure it claims to."""
+    code = _code(CONVERT_SMOKE)
+    assert "os.setuid(65534)" in code, (
+        "containers/convert/smoke.sh's negative leg does not drop privileges to an "
+        "unprivileged UID (65534/nobody) -- run as root, HOME=/nonexistent alone proves "
+        "nothing, since root can os.makedirs() anywhere via CAP_DAC_OVERRIDE."
+    )
+    assert "noguard_status" in code and "-eq 0" in code, (
+        "containers/convert/smoke.sh's negative leg does not check that the no-guard "
+        "read actually failed (non-zero exit)."
     )
 
 

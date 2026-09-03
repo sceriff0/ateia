@@ -27,6 +27,11 @@ vendor-format reader imports its backend INSIDE the function that needs it.
 IMPORT CONVENTION. Flat (`from ome_io import ...`) by scripts that
 `sys.path.insert(0, .../bin/utils)` first, matching `pixel_size.py`, `tiled_io.py` and
 `segment_io.py`.
+
+`jvm_cache` is a third module-scope sibling import, alongside `pixel_size` and `tiled_io`:
+it is stdlib-only at import time (its own `scyjava` import is lazy, inside the function
+body), so importing it here does not violate the lazy-heavy-dependency rule above. It is
+called by `_open_bioio` for the `bioio-bioformats` route -- see that function's docstring.
 """
 
 from __future__ import annotations
@@ -41,6 +46,7 @@ from typing import Any, Iterator, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import tifffile
+from jvm_cache import point_jvm_cache_off_readonly_home
 from pixel_size import read_ome_pixel_size
 from tiled_io import open_lazy
 
@@ -753,8 +759,20 @@ def _open_bioio(path: Path, reader: str):
     WHOLE bioio round trip, not just the ``BioImage(...)`` construction, which is what
     makes the S->C remap (see ``ImageInfo.channels_are_samples``) testable without bioio
     installed anywhere in this environment.
+
+    For the ``bioio-bioformats`` route ONLY, this calls
+    ``jvm_cache.point_jvm_cache_off_readonly_home()`` BEFORE constructing ``BioImage`` --
+    that is the only call in the repository that starts the Bio-Formats JVM through bioio
+    rather than through valis, and it is the same read-only-``$HOME`` trap
+    ``bin/utils/valis_config.py::init_jvm`` already guards: scyjava derives its jgo
+    ``cache_dir``/``m2_repo`` from ``Path.home()`` at import time and never consults
+    ``JGO_CACHE_DIR``/``M2_REPO``, so nothing short of this call points it at the image's
+    baked ``/root/.jgo`` + ``/root/.m2`` cache before the first Maven-triggering import.
+    Plain ``bioio`` (OME-TIFF/TIFF/ND2/CZI/LIF) starts no JVM, so the call is skipped there.
     """
     require_reader(reader)
+    if reader == "bioio-bioformats":
+        point_jvm_cache_off_readonly_home()
     from bioio import BioImage
 
     return BioImage(str(path))

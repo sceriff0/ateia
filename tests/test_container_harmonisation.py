@@ -625,6 +625,15 @@ REQUIRED_RUNTIME_IMPORTS = {
             "import runs on every .czi/.nd2/.lif/... slide."
         ),
         "h5py": "ome_io.read_info's HDF5 branch; CONVERT_IMAGE accepts .h5/.hdf5 inputs.",
+        "scyjava": (
+            "Task 7 review round 1: bin/utils/ome_io.py::_open_bioio and "
+            "bin/convert_image.py::read_image both call "
+            "jvm_cache.point_jvm_cache_off_readonly_home() (bin/utils/jvm_cache.py, now "
+            "reachable via ome_io.py's and convert_image.py's own module-scope import of "
+            "it) for the bioio-bioformats route -- that function's own lazy "
+            "`from scyjava import config as sjconf` runs unconditionally every time it "
+            "is called, on every .svs/.qptiff/.vsi/.scn/.mrxs/.bif/.ims read."
+        ),
     },
     "tiled": {
         "torch": (

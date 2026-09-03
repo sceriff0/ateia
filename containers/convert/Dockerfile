@@ -72,10 +72,13 @@ RUN pip3 install --no-cache-dir --upgrade pip
 # `-c /tmp/requirements/constraints.txt` here would not "let the constraint win" -- pip
 # would report ResolutionImpossible on numpy and tifffile and the image would not build.
 #
-# scyjava is named explicitly even though bffile pulls it in: containers/convert/
-# smoke.sh imports scyjava.config directly (set_cache_dir/set_m2_repo is the only
-# timing-immune way to redirect the jgo cache), and an install nothing in this
-# Dockerfile names is invisible to test_container_harmonisation.py's
+# scyjava is named explicitly even though bffile pulls it in: it is what
+# bin/utils/jvm_cache.py's point_jvm_cache_off_readonly_home() imports
+# (scyjava.config.set_cache_dir/set_m2_repo -- the only timing-immune way to redirect
+# the jgo cache), which both bin/utils/ome_io.py::_open_bioio and
+# bin/convert_image.py::read_image call for the bioio-bioformats route, and which
+# smoke.sh below also calls via the same production function. An install nothing in
+# this Dockerfile names is invisible to test_container_harmonisation.py's
 # "installs what it imports" guard.
 RUN pip3 install --no-cache-dir \
         tifffile==2024.12.12 \
@@ -101,18 +104,27 @@ RUN pip3 install --no-cache-dir \
 ENV BIOFORMATS_VERSION=ome:formats-gpl:8.1.1
 
 # BAKE THE BIO-FORMATS JARS AND THE JVM CACHE. bffile fetches ome:formats-gpl through
-# scyjava/jgo at FIRST USE into ~/.jgo + ~/.m2, and scyjava may fetch a Java runtime
-# through cjdk into ~/.cache/cjdk. The cluster has a READ-ONLY $HOME and docs/usage.md
-# documents air-gapped execution, so a first run there dies exactly the way
-# bin/utils/jvm_cache.py's docstring records: jgo's os.makedirs($HOME/.jgo) raising
+# scyjava/jgo at FIRST USE into ~/.jgo + ~/.m2. The cluster has a READ-ONLY $HOME and
+# docs/usage.md documents air-gapped execution, so a first run there dies exactly the
+# way bin/utils/jvm_cache.py's docstring records: jgo's os.makedirs($HOME/.jgo) raising
 # OSError [Errno 30] Read-only file system.
+#
+# NO CJDK REDIRECT IS NEEDED HERE. scyjava can fetch its own Java runtime through cjdk
+# into ~/.cache/cjdk when no usable JVM is found, but this base already IS a JRE with
+# JAVA_HOME=/opt/java/openjdk set (see the header above), which scyjava's JVM discovery
+# finds and uses directly -- cjdk's fetch path is not expected to run in this image at
+# all, so there is nothing to point at a writable/world-readable location and no
+# `test -d /root/.cache/cjdk` assertion below. If scyjava's discovery order ever changes
+# and cjdk does fire anyway, its cache still lands under $HOME (this bake's HOME=/root)
+# and is still covered by the `chmod -R a+rX /root` below -- just unverified by name,
+# the way /root/.jgo and /root/.m2 are.
 #
 # HOME=/root is the whole mechanism, and it needs no configuration API: scyjava computes
 # its jgo cache_dir and m2_repo from pathlib.Path.home() at import time, so running the
-# reader once as root populates /root/.jgo, /root/.m2 and /root/.cache/cjdk. That is
-# precisely where bin/utils/jvm_cache.point_jvm_cache_off_readonly_home() looks first --
-# "prefer a warm baked cache (/root/.jgo + /root/.m2): jgo short-circuits on an existing
-# buildSuccess workspace, so pointing scyjava here needs no writes and no network".
+# reader once as root populates /root/.jgo and /root/.m2. That is precisely where
+# bin/utils/jvm_cache.point_jvm_cache_off_readonly_home() looks first -- "prefer a warm
+# baked cache (/root/.jgo + /root/.m2): jgo short-circuits on an existing buildSuccess
+# workspace, so pointing scyjava here needs no writes and no network".
 #
 # chmod -R a+rX is not optional: /root is mode 700 and nextflow.config's docker profile
 # runs tasks with `-u $(id -u):$(id -g)`.
@@ -130,6 +142,18 @@ print('baked Bio-Formats reader:', r.dims)" \
     && test -n "$(ls -A /root/.m2/repository/ome/formats-gpl)" \
     && test -d /root/.jgo \
     && chmod -R a+rX /root
+
+# COPY the PRODUCTION jvm-cache redirect so smoke.sh calls the exact same function the
+# real pipeline calls, instead of hand-rolling its own scyjava.config.set_cache_dir/
+# set_m2_repo pair. A hand-rolled pair only proves scyjava CAN be redirected -- it does
+# not prove anything on the CONVERT_IMAGE run path actually redirects it, which is what
+# review round 1 on Task 7 found missing (bin/utils/ome_io.py::_open_bioio and
+# bin/convert_image.py::read_image now both call
+# jvm_cache.point_jvm_cache_off_readonly_home() for the bioio-bioformats route). Placed
+# on its own PYTHONPATH entry, not merged into the image's site-packages, so it is
+# obviously a smoke-test-only copy and never shadows the real bin/utils/jvm_cache.py the
+# pipeline stages fresh from the git checkout on every run.
+COPY bin/utils/jvm_cache.py /usr/local/lib/mirage_jvm/jvm_cache.py
 
 # Fail the BUILD rather than a cluster run. containers/<dir>/smoke.sh imports exactly
 # the third-party modules this image's bin/ scripts import at run time, so a stack that
