@@ -214,6 +214,74 @@ run_test \
 
 echo ""
 echo "=========================================="
+echo "Test Suite: Samplesheet shapes"
+echo "=========================================="
+echo ""
+
+# Test 3.1: paths RELATIVE to the launch directory.
+#
+# This case can only live here. CsvUtils.validateInputSemantics resolves a
+# relative path with `new File(p).exists()`, i.e. against the JVM's working
+# directory -- the LAUNCH directory. run_test cd's to $PROJECT_ROOT before every
+# `nextflow run`, so a sheet holding repo-root-relative paths resolves. Under
+# nf-test the launch directory is a per-test .nf-test/tests/<hash>/ path that is
+# not knowable when the fixture is generated, so the same assertion cannot be
+# made from an nf-test file.
+run_test \
+    "Valid - paths relative to the launch directory" \
+    "pass" \
+    "$TESTDATA_DIR/relative_paths_input.csv" \
+    "" \
+    --start preprocessing
+
+# Test 3.2: CRLF line endings (Excel on Windows). Nextflow's splitCsv leaves the
+# \r on the last field of every row -- which is `channels` -- so an untrimmed
+# reader yields a marker literally named "CD8<CR>".
+run_test \
+    "Valid - CRLF line endings" \
+    "pass" \
+    "$TESTDATA_DIR/crlf_input.csv" \
+    "" \
+    --start preprocessing
+
+# Test 3.3: UTF-8 BOM on the header. Without CsvUtils.readCsvLines' strip the
+# first column reads as "<BOM>patient_id" and every lookup returns -1 -- which
+# is a hang in the sized groupTuples, not an error.
+run_test \
+    "Valid - UTF-8 BOM on the header row" \
+    "pass" \
+    "$TESTDATA_DIR/bom_input.csv" \
+    "" \
+    --start preprocessing
+
+# Test 3.4: a quoted path containing a space.
+run_test \
+    "Valid - quoted path containing a space" \
+    "pass" \
+    "$TESTDATA_DIR/space_path_input.csv" \
+    "" \
+    --start preprocessing
+
+# Test 3.5: a non-ASCII filename.
+run_test \
+    "Valid - non-ASCII filename" \
+    "pass" \
+    "$TESTDATA_DIR/unicode_input.csv" \
+    "" \
+    --start preprocessing
+
+# Test 3.6: extra, unknown columns are ACCEPTED. Rejecting them would be wrong:
+# a checkpoint CSV legitimately carries columns the entry step does not read.
+# The run must still warn -- that half is asserted in Test 3.7.
+run_test \
+    "Valid - unknown extra columns are ignored" \
+    "pass" \
+    "$TESTDATA_DIR/extra_column_input.csv" \
+    "" \
+    --start preprocessing
+
+echo ""
+echo "=========================================="
 echo "Test Suite: Checkpoint CSV Validation"
 echo "=========================================="
 echo ""

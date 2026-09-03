@@ -200,6 +200,16 @@ tests/testdata/fmt_image.h5
 tests/testdata/fmt_cy5.ndpi
 tests/testdata/fmt_tritc.ndpi
 tests/testdata/fmt_set.ndpis
+
+# Samplesheet-shape fixtures (generate_complete_testdata.py section 10i).
+tests/testdata/crlf_input.csv
+tests/testdata/bom_input.csv
+tests/testdata/space_path_input.csv
+tests/testdata/unicode_input.csv
+tests/testdata/extra_column_input.csv
+tests/testdata/relative_paths_input.csv
+tests/testdata/P001_ünïcode.ome.tiff
+tests/testdata/with space/
 .superpowers/
 
 # Internal architecture/audit reviews published as Claude Artifacts, not repo docs.

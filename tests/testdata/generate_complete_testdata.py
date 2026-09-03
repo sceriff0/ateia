@@ -1547,6 +1547,106 @@ with open(OUT_DIR / "fmt_set.ndpis", "w") as f:
     f.write("Image1=fmt_tritc.ndpi\n")
 print("  Created fmt_set.ndpis (2-channel manifest)")
 
+# =============================================================================
+# 10i. SAMPLESHEET-SHAPE FIXTURES
+# =============================================================================
+# Six shapes a real operator's CSV arrives in that nothing here had ever read.
+# All but the last carry ABSOLUTE paths (TESTDATA_ABS), so they work from any
+# launch directory; relative_paths_input.csv is the deliberate exception and is
+# asserted only by tests/run_validation_tests.sh, which cd's to the repo root
+# first -- see that script, and note that an nf-test cannot host this case
+# because its launch directory is a per-test .nf-test/tests/<hash>/ path that is
+# not knowable when this file runs.
+#
+# Numbered 10i (conceptually a continuation of section 10, the SEGMENTATION
+# fixture) but physically appended here, after section 11: section 11's own
+# _fmt_rng stream is reused below rather than opening a fresh one, and section
+# 10 ends well before _fmt_rng exists. Appending here is append-only -- it does
+# not reorder any earlier draw, so no previously-generated fixture's bytes move.
+print("\n10i. Creating samplesheet-shape fixtures...")
+
+REPO_ROOT = OUT_DIR.resolve().parent.parent
+TESTDATA_REL = OUT_DIR.resolve().relative_to(REPO_ROOT).as_posix()
+
+_SHEET_HEADER = "patient_id,path_to_file,is_reference,channels"
+_SHEET_ROWS = [
+    f"P001,{TESTDATA_ABS}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA",
+    f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8",
+]
+
+# CRLF. Excel on Windows writes \r\n, and Groovy's readLines() strips it while
+# Nextflow's splitCsv leaves the \r on the LAST field of every row -- which is
+# `channels`, so an untrimmed reader produces a marker literally named "CD8\r".
+# CsvUtils.parseCsvLine trims and input_check.nf's .map trims, but nothing
+# asserted either, so a future reader that stopped trimming would be invisible.
+with open(OUT_DIR / "crlf_input.csv", "wb") as f:
+    f.write(("\r\n".join([_SHEET_HEADER] + _SHEET_ROWS) + "\r\n").encode("utf-8"))
+print("  Created crlf_input.csv (CRLF line endings)")
+
+# UTF-8 BOM. CsvUtils.readCsvLines strips U+FEFF from the header (lib/CsvUtils.
+# groovy) because otherwise the first column reads as "﻿patient_id" and
+# every lookup returns -1 -- a silent hang in the sized groupTuples rather than
+# an error. That strip had no test.
+with open(OUT_DIR / "bom_input.csv", "w", encoding="utf-8-sig") as f:
+    f.write("\n".join([_SHEET_HEADER] + _SHEET_ROWS) + "\n")
+print("  Created bom_input.csv (UTF-8 BOM on the header)")
+
+# A path containing a SPACE, quoted. Shared microscopy drives are full of
+# "Patient 001/scan 3.ome.tiff". The quoting exercises CsvUtils.parseCsvLine's
+# quote handling on a PATH (only a quoted --outdir was covered before, in
+# tests/checkpoint_manifest.nf.test), and the space exercises every place the
+# path is later interpolated into a shell command.
+_SPACE_DIR = OUT_DIR / "with space"
+_SPACE_DIR.mkdir(exist_ok=True)
+create_multichannel_image(
+    _SPACE_DIR / "P001 ref.ome.tiff",
+    p001_anatomy,
+    channel_names=["DAPI", "PANCK", "SMA"],
+    shift=(0, 0),
+    rng=_fmt_rng,
+)
+with open(OUT_DIR / "space_path_input.csv", "w") as f:
+    f.write(_SHEET_HEADER + "\n")
+    f.write(f'P001,"{TESTDATA_ABS}/with space/P001 ref.ome.tiff",true,DAPI|PANCK|SMA\n')
+print("  Created space_path_input.csv (quoted path containing a space)")
+
+# A NON-ASCII filename. Patient exports out of European institutes carry
+# umlauts and accents routinely, and nothing in this repo had ever named such a
+# file -- so any place that encodes a path as bytes, or builds a regex from it,
+# was untested.
+create_multichannel_image(
+    OUT_DIR / "P001_ünïcode.ome.tiff",
+    p001_anatomy,
+    channel_names=["DAPI", "PANCK", "SMA"],
+    shift=(0, 0),
+    rng=_fmt_rng,
+)
+with open(OUT_DIR / "unicode_input.csv", "w", encoding="utf-8") as f:
+    f.write(_SHEET_HEADER + "\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_ünïcode.ome.tiff,true,DAPI|PANCK|SMA\n")
+print("  Created unicode_input.csv (non-ASCII filename)")
+
+# EXTRA, UNKNOWN COLUMNS. Nothing validated these: CsvUtils.validateInputCSV
+# checks that the REQUIRED columns are present and ignores everything else, so a
+# typo'd `channles` column sat silently beside a missing `channels` -- and a
+# checkpoint CSV legitimately carries extra columns, so rejecting unknown ones
+# outright is wrong. The rule this fixture pins is WARN AND IGNORE (Task 8).
+with open(OUT_DIR / "extra_column_input.csv", "w") as f:
+    f.write(_SHEET_HEADER + ",operator,scan_date\n")
+    for _row in _SHEET_ROWS:
+        f.write(_row + ",AB,2026-01-31\n")
+print("  Created extra_column_input.csv (two unknown columns)")
+
+# RELATIVE paths, resolved against the LAUNCH DIRECTORY. Every other fixture in
+# this file uses TESTDATA_ABS, so CsvUtils' documented relative-path behaviour
+# ("resolved against the launch directory") was never executed. Asserted only by
+# tests/run_validation_tests.sh, which cd's to the repo root first.
+with open(OUT_DIR / "relative_paths_input.csv", "w") as f:
+    f.write(_SHEET_HEADER + "\n")
+    f.write(f"P001,{TESTDATA_REL}/P001_ref.ome.tiff,true,DAPI|PANCK|SMA\n")
+    f.write(f"P001,{TESTDATA_REL}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n")
+print("  Created relative_paths_input.csv (paths relative to the repo root)")
+
 
 print("\n" + "=" * 70)
 print("All test data generation complete!")
