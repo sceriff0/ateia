@@ -406,7 +406,7 @@ is far lower, so raising `queue_size` alone has no effect — raise `max_forks` 
 | Parameter | Default | Description |
 |---|---|---|
 | `enable_trace` | `true` | Write Nextflow `trace.txt`, `report.html`, `timeline.html`, and per-task size logs. |
-| `trace_dir` | `.trace` | Directory for trace outputs (independent of `--outdir`). |
+| `trace_dir` | `.trace` | Directory for Nextflow's `trace.txt` / `report.html` / `timeline.html` and the computational-resource report. Resolved against the **launch directory**, not `--outdir` — a relative value therefore follows where you ran `nextflow`, not where results go. |
 
 ## Output cleanup
 

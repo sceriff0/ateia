@@ -290,6 +290,47 @@ Written to `--trace_dir` (default `.trace`, **independent of `--outdir`**) when
 
 ---
 
+## Provenance: what a run records about itself
+
+Every process emits a `versions.yml`, and every process emits one row into a
+`*.size.csv` (`process,sample_id,filename,bytes` —
+`lib/ProcessEnvelope.groovy`'s `SIZE_LOG_COLUMNS`). Both are aggregated at the
+end of the run.
+
+```yaml
+"MIRAGE:PREPROCESSING:CONVERT_IMAGE":
+    python: 3.10.14
+    container: bolt3x/mirage-convert:1.0.0
+    tifffile: 2024.12.12
+    bioio: 1.1.0
+    h5py: 3.11.0
+```
+
+The `container:` line is `task.container` as Nextflow resolved it, so it records
+the image that *actually ran* — not just the one a config file names. Every
+`FROM` in `containers/*/Dockerfile` is digest-pinned, so this field plus the
+Dockerfile identifies the exact base bytes a result came from (a first-party
+`bolt3x/mirage-*` image is itself tag-pinned rather than digest-pinned until a
+release publishes it — see
+[Installation → Pre-pulling container images](installation.md#pre-pulling-container-images-optional)).
+In a stub run every value reads `stub`, which is how a stubbed tree is told
+apart from a real one.
+
+| Artifact | Where | What it is |
+|---|---|---|
+| `versions.yml` | per task, aggregated into `qc/mirage_qc_data_<timestamp>/collated_versions.yml` | tool versions + the resolved container, per process |
+| `*.size.csv` | per task, aggregated into `size_logs/input_sizes.csv` | one row per task: `process,sample_id,filename,bytes` — the byte total of that task's inputs |
+| `qc/` (run level) | `<outdir>/qc/` | the aggregated HTML QC report + its data folder |
+| `<trace_dir>/` | resolved against the **launch directory**, not `--outdir` | `trace.txt`, `report.html`, `timeline.html`, and `mirage_resource_report.html` |
+
+!!! note "`trace_dir` is relative to where you launched, not to `--outdir`"
+    `--trace_dir` defaults to `.trace` and is resolved against the launch
+    directory, matching where Nextflow itself resolves `trace.file`. A run
+    launched from a different directory writes its traces somewhere else, and
+    the resource report names the exact path it looked in when it finds nothing
+    there — see [Resources → When no report appears](resources.md#when-no-report-appears)
+    — rather than silently producing an empty report.
+
 ## The measurement-key contract
 
 `quantify.py` produces, and `export_geojson.py` / `export_spatialdata.py`
