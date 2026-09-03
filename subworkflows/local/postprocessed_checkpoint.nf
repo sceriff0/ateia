@@ -44,6 +44,14 @@
     instead of being restated at each call site. That matters most for
     `ch_cell_mask`: see the publishedOrAsIs note on it below.
 
+    WHAT THIS FILE OWNS, AND WHAT IT NO LONGER DOES. It owns the five-way join and
+    the per-column publish decisions -- which Layout `kind` each artifact lands
+    under, and the one case (`cell_mask`) where the file may already be an absolute
+    published path from an earlier run. It does NOT own the WRITE any more:
+    whether a manifest is written at this cleanup level, where it goes, in what
+    order and under what header is subworkflows/local/checkpoint_writer.nf's, which
+    four call sites used to answer identically and separately.
+
     Input:
         ch_cell_csv      [meta, file]  per-cell measurement CSV (EXPORT_GEOJSON)
         ch_cell_geojson  [meta, file]  cells.geojson              (EXPORT_GEOJSON)
@@ -55,6 +63,8 @@
         csv: the collected postprocessing checkpoint manifest
 ========================================================================================
 */
+
+include { CHECKPOINT_WRITER } from './checkpoint_writer'
 
 workflow POSTPROCESSED_CHECKPOINT {
     take:
@@ -110,15 +120,9 @@ workflow POSTPROCESSED_CHECKPOINT {
             [meta.patient_id, published_path]
         })
 
-    ch_checkpoint_csv = ch_base_checkpoint
-        // Not written at a cleaning level either, which is the non-obvious one:
-        // cell_csv, cell_geojson, merged_csv and pyramid are all final artifacts,
-        // but `cell_mask` names the segmentation mask, and segmentation is an
-        // intermediate. One dangling column is enough. Checkpoint.writesAtLevel
-        // carries the full reasoning and the observed failure.
-        .filter { Checkpoint.writesAtLevel(Layout.POSTPROCESSED, params.cleanup_level) }
+    ch_checkpoint_rows = ch_base_checkpoint
         .map { patient_id, cell_csv, pixel_size, cell_geojson, merged_csv, cell_mask, pyramid ->
-            Checkpoint.row(Layout.POSTPROCESSED, [
+            [
                 patient_id  : patient_id,
                 // RULING R17: 'postprocessed' rows are per-PATIENT, not per-slide --
                 // there is no single slide a pyramid/merged table belongs to -- so id
@@ -132,22 +136,16 @@ workflow POSTPROCESSED_CHECKPOINT {
                 cell_mask   : cell_mask,
                 pyramid     : pyramid,
                 pixel_size  : pixel_size,
-            ])
+            ]
         }
-        .collectFile(
-            name: Layout.checkpointCsvName(Layout.POSTPROCESSED),
-            newLine: true,
-            sort: true,
-            // sort: true makes the manifest REPRODUCIBLE. Without it collectFile
-            // writes rows in completion order, so two runs of the same commit
-            // produced different files (found while capturing this branch's golden
-            // baseline; a rerun of the UNMODIFIED branch differed from itself). The
-            // rows begin with patient_id followed by the published path, so natural
-            // string order IS "patient id, then file" — and the `seed:` header is
-            // written first regardless of sorting.
-            storeDir: Layout.checkpointDir(params.outdir),
-            seed: Checkpoint.header(Layout.POSTPROCESSED)
-        )
+
+    // Not written at a cleaning level either, which is the non-obvious one: cell_csv,
+    // cell_geojson, merged_csv and pyramid are all final artifacts, but `cell_mask`
+    // names the segmentation mask, and segmentation is an intermediate. One dangling
+    // column is enough. The gate is CHECKPOINT_WRITER's; Checkpoint.writesAtLevel
+    // carries the full reasoning and the observed failure.
+    CHECKPOINT_WRITER(Layout.POSTPROCESSED, ch_checkpoint_rows)
+    ch_checkpoint_csv = CHECKPOINT_WRITER.out.csv
 
     emit:
     csv = ch_checkpoint_csv
