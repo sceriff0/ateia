@@ -107,15 +107,15 @@ SWEEP ?=
 SWEEP_PLAN ?= $(SWEEP)_plan.csv
 HANDOFF ?= benchmarks/_handoff
 
-# The landmark-TRE CSV from benchmarks/registration_eval/aggregate_eval.py -- the
-# benchmark's only GROUND-TRUTH registration accuracy number. make_figures now
-# requires it: it used to sit unread in that function's signature, so the number
-# reached no table and no figure at all.
+# An OPTIONAL EXTERNALLY produced landmark-TRE CSV (see load.GROUND_TRUTH_COLS).
+# This repo ships no producer for one -- see benchmarks/README.md section B.
+# make_figures requires --reg-eval: it used to sit unread in that function's
+# signature, so the number reached no table and no figure at all.
 #
 # The default is the explicit opt-out. That is not the same as omitting it: it
 # writes NO_GROUND_TRUTH.txt into the output directory, so a cost-only result
 # says so in the deliverable rather than reading like a complete one. Set
-# REG_EVAL=<path> once the evaluation has been run.
+# REG_EVAL=<path to an external landmark-TRE csv> if you have one.
 REG_EVAL ?= none
 
 arm-plan:

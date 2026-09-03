@@ -158,7 +158,7 @@ def _bin_module_path(name: str) -> Path | None:
 # THE SUBPROCESS LEG IS GONE, AND MUST NOT BE RE-ADDED IN THIS SHAPE.
 #
 # It scanned bin/tiled_{coarse,reg_tile,solve}.py -- the pipeline entry points
-# benchmarks/stare_bench/run_unit.py shelled out to -- at EVERY import level, because
+# stare_bench/run_unit.py (since deleted) shelled out to -- at EVERY import level, because
 # those scripts were EXECUTED BARE IN CI and bin/utils/tiled_io.py imports zarr inside a
 # function. That premise died with the stare_bench rung: nothing under benchmarks/ runs a
 # pipeline entry point in CI any more.

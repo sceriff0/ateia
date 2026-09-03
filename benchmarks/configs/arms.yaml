@@ -224,7 +224,7 @@ compute_profile:
 # JVM-free. Scored any other way it would produce numbers in a different metric family that
 # share no column with this table -- which is exactly what the earlier out-of-band ashlar
 # harness did, and why that harness was deleted rather than maintained. The synthetic
-# ground-truth rung (benchmarks/stare_bench) that used to score it was deleted for the same
+# ground-truth rung (stare_bench) that used to score it was deleted for the same
 # reason: exact EPE against an injected field cannot be ranked against tissue Dice.
 #
 # TILE SIZE IS A FAIRNESS KNOB, NOT A COST KNOB, which is why it is a LIST. ashlar computes

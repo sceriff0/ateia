@@ -16,5 +16,5 @@ benchmarks/run_ashlar_arm.sh is the driver that chains the three steps (retile -
 
 Scored any other way it would produce numbers in a different metric family sharing no
 column with the arm table -- exactly what the earlier out-of-band ashlar harness did, and
-what the synthetic ground-truth rung (benchmarks/stare_bench, since deleted) did after it.
+what the synthetic ground-truth rung (stare_bench, since deleted) did after it.
 """
