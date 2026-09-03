@@ -351,6 +351,7 @@ def create_registration_qc(
     save_tiff: bool = True,
     nuclear_markers=None,
     native_path: str | Path | None = None,
+    pixel_size_um: float | None = None,
 ) -> None:
     """Create QC visualizations for registration assessment.
 
@@ -388,6 +389,16 @@ def create_registration_qc(
         both on the reference canvas. When omitted, only the "after" panel is
         rendered, which is what this function produced before the before/after
         change and keeps it usable by hand on a plain pair.
+    pixel_size_um : float, optional
+        The reference/registered images' pixel size in micrometers, i.e.
+        ``pixel_size.read_ome_pixel_size``'s answer for this patient. When given,
+        it is stamped as the ``XResolution``/``ResolutionUnit`` TIFF tags on BOTH
+        ``*_QC_RGB.tif`` and ``*_QC_RGB_fullres.tif`` -- ``resolution`` is
+        pixels-per-unit, so the tag is ``1 / pixel_size_um`` at full resolution
+        and scaled by ``scale_factor`` for the downsampled preview, which covers
+        the same tissue in fewer, larger pixels. When omitted (the default), no
+        resolution tag is written and the output is unchanged from before this
+        parameter existed.
 
     Returns
     -------
@@ -571,6 +582,28 @@ def create_registration_qc(
             native_nuc_idx = 0
         native_nuc = read_plane(native_path, native_nuc_idx, lazy=True)
 
+    # Resolution tags for both QC TIFFs, only when a pixel size was given (the default
+    # `None` writes no tag, leaving output byte-for-byte unchanged from before this
+    # parameter existed). tifffile's `resolution` is PIXELS PER UNIT, i.e. the inverse of
+    # a µm-per-pixel size. The full-res write is always at scale_factor=1.0 (see above), so
+    # its pixel size is exactly `pixel_size_um`; the downsampled preview covers the same
+    # tissue in `scale_factor` as many pixels per side, so each of its pixels spans
+    # `pixel_size_um / scale_factor` -- a DIFFERENT physical size from the full-res write,
+    # not the same tag copied twice.
+    def _resolution_kwargs(px_um):
+        if px_um is None:
+            return {}
+        return {
+            "resolution": (1.0 / px_um, 1.0 / px_um),
+            "resolutionunit": "MICROMETER",
+        }
+
+    fullres_resolution_kwargs = _resolution_kwargs(pixel_size_um)
+    preview_pixel_size_um = (
+        pixel_size_um / scale_factor if pixel_size_um is not None else None
+    )
+    preview_resolution_kwargs = _resolution_kwargs(preview_pixel_size_um)
+
     # Save full-resolution QC (compressed). scale_factor=1.0 means no rescale.
     if save_fullres:
         rgb_stack_full = render_before_after(
@@ -583,6 +616,7 @@ def create_registration_qc(
             imagej=True,
             metadata={"axes": "CYX", "mode": "composite"},
             compression="zlib",
+            **fullres_resolution_kwargs,
         )
         logger.info(f"  Saved full-res QC TIFF: {fullres_output_path}")
         del rgb_stack_full
@@ -607,6 +641,7 @@ def create_registration_qc(
             ome=True,
             bigtiff=True,
             metadata={"axes": "CYX", "mode": "composite"},
+            **preview_resolution_kwargs,
         )
         logger.info(f"  Saved QC TIFF: {tiff_output_path}")
 

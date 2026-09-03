@@ -264,3 +264,236 @@ def test_create_registration_qc_rejects_a_missing_native(tmp_path):
             output_path=tmp_path / "x_QC_RGB.tif",
             native_path=tmp_path / "does_not_exist.ome.tiff",
         )
+
+
+import subprocess  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+REPO = Path(__file__).resolve().parents[1]
+CLI = REPO / "bin" / "generate_registration_qc.py"
+
+
+def test_cli_with_native_writes_a_two_panel_figure(tmp_path):
+    p = _write_triplet(tmp_path)
+    outdir = tmp_path / "qc"
+
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(CLI),
+            "--reference",
+            str(p["reference"]),
+            "--registered",
+            str(p["registered"]),
+            "--native",
+            str(p["native"]),
+            "--output",
+            str(outdir),
+            "--scale-factor",
+            "1.0",
+            "--nuclear-markers",
+            "DAPI",
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": UTILS_DIR},
+    )
+
+    assert r.returncode == 0, r.stderr
+    preview = tifffile.imread(str(outdir / "registered_QC_RGB.tif"))
+    assert preview.shape == (3, 48, 88)
+
+
+def test_cli_without_native_stays_single_panel(tmp_path):
+    p = _write_triplet(tmp_path)
+    outdir = tmp_path / "qc"
+
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(CLI),
+            "--reference",
+            str(p["reference"]),
+            "--registered",
+            str(p["registered"]),
+            "--output",
+            str(outdir),
+            "--scale-factor",
+            "1.0",
+            "--nuclear-markers",
+            "DAPI",
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": UTILS_DIR},
+    )
+
+    assert r.returncode == 0, r.stderr
+    assert tifffile.imread(str(outdir / "registered_QC_RGB.tif")).shape == (3, 48, 40)
+
+
+def test_cli_rejects_a_native_list_of_the_wrong_length(tmp_path):
+    p = _write_triplet(tmp_path)
+
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(CLI),
+            "--reference",
+            str(p["reference"]),
+            "--registered",
+            str(p["registered"]),
+            str(p["native"]),
+            "--native",
+            str(p["native"]),
+            "--output",
+            str(tmp_path / "qc"),
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": UTILS_DIR},
+    )
+
+    assert r.returncode == 1
+    assert "--native" in (r.stdout + r.stderr)
+
+
+def test_cli_pixel_size_um_stamps_both_qc_tiffs(tmp_path):
+    p = _write_triplet(tmp_path)
+    outdir = tmp_path / "qc"
+
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(CLI),
+            "--reference",
+            str(p["reference"]),
+            "--registered",
+            str(p["registered"]),
+            "--output",
+            str(outdir),
+            "--scale-factor",
+            "0.5",
+            "--nuclear-markers",
+            "DAPI",
+            "--pixel-size-um",
+            "0.325",
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": UTILS_DIR},
+    )
+
+    assert r.returncode == 0, r.stderr
+
+    with tifffile.TiffFile(str(outdir / "registered_QC_RGB.tif")) as tf:
+        assert "XResolution" in tf.pages[0].tags
+
+    with tifffile.TiffFile(str(outdir / "registered_QC_RGB_fullres.tif")) as tf:
+        assert "XResolution" in tf.pages[0].tags
+
+
+def test_cli_without_pixel_size_um_leaves_output_unstamped(tmp_path):
+    p = _write_triplet(tmp_path)
+    outdir = tmp_path / "qc"
+
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(CLI),
+            "--reference",
+            str(p["reference"]),
+            "--registered",
+            str(p["registered"]),
+            "--output",
+            str(outdir),
+            "--nuclear-markers",
+            "DAPI",
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": UTILS_DIR},
+    )
+
+    assert r.returncode == 0, r.stderr
+
+    # tifffile always writes an XResolution tag (it defaults to (1, 1) /
+    # RESUNIT.NONE when no resolution is given); the thing pixel_size_um
+    # controls is whether that tag is STAMPED WITH A MICROMETER SCALE, so the
+    # "unstamped" assertion is on the unit, not on the tag's mere presence.
+    with tifffile.TiffFile(str(outdir / "registered_QC_RGB.tif")) as tf:
+        assert (
+            tf.pages[0].tags["ResolutionUnit"].value != tifffile.TIFF.RESUNIT.MICROMETER
+        )
+
+
+def test_create_registration_qc_stamps_resolution_on_both_tiffs_when_given(tmp_path):
+    """Folded requirement: pixel_size_um stamps XResolution/ResolutionUnit on BOTH
+    the fullres and the downsampled composite, and the two differ by exactly the
+    scale_factor -- the downsampled preview covers the same tissue in fewer, larger
+    pixels, so its pixel size in microns is larger and its resolution (pixels/um)
+    is smaller."""
+    p = _write_triplet(tmp_path)
+    out = tmp_path / "P001_mov1_QC_RGB.tif"
+    scale_factor = 0.5
+    pixel_size_um = 0.325
+
+    qc.create_registration_qc(
+        reference_path=p["reference"],
+        registered_path=p["registered"],
+        output_path=out,
+        scale_factor=scale_factor,
+        save_fullres=True,
+        save_png=False,
+        save_tiff=True,
+        pixel_size_um=pixel_size_um,
+    )
+
+    with tifffile.TiffFile(str(out)) as tf:
+        tags = tf.pages[0].tags
+        x_num, x_den = tags["XResolution"].value
+        preview_resolution = x_num / x_den
+        assert tags["ResolutionUnit"].value == tifffile.TIFF.RESUNIT.MICROMETER
+
+    with tifffile.TiffFile(str(tmp_path / "P001_mov1_QC_RGB_fullres.tif")) as tf:
+        tags = tf.pages[0].tags
+        x_num, x_den = tags["XResolution"].value
+        fullres_resolution = x_num / x_den
+        assert tags["ResolutionUnit"].value == tifffile.TIFF.RESUNIT.MICROMETER
+
+    assert fullres_resolution == pytest.approx(1.0 / pixel_size_um, rel=1e-3)
+    # The downsampled preview's pixel is 1/scale_factor times bigger in microns,
+    # so its resolution (pixels/um) is scale_factor times smaller.
+    assert preview_resolution == pytest.approx(
+        fullres_resolution * scale_factor, rel=1e-3
+    )
+
+
+def test_create_registration_qc_without_pixel_size_um_leaves_output_unstamped(tmp_path):
+    """``pixel_size_um=None`` (the default) must write exactly what this function
+    wrote before the parameter existed. tifffile always writes SOME XResolution
+    tag (defaulting to (1, 1) / RESUNIT.NONE), so "unstamped" means no explicit
+    resolution kwargs reached write_tiff, not that the tag is absent."""
+    p = _write_triplet(tmp_path)
+    out = tmp_path / "P001_mov1_QC_RGB.tif"
+
+    qc.create_registration_qc(
+        reference_path=p["reference"],
+        registered_path=p["registered"],
+        output_path=out,
+        scale_factor=1.0,
+        save_fullres=True,
+        save_png=False,
+        save_tiff=True,
+        pixel_size_um=None,
+    )
+
+    with tifffile.TiffFile(str(out)) as tf:
+        tags = tf.pages[0].tags
+        assert tags["ResolutionUnit"].value != tifffile.TIFF.RESUNIT.MICROMETER
+        assert tags["XResolution"].value == (1, 1)
+
+    with tifffile.TiffFile(str(tmp_path / "P001_mov1_QC_RGB_fullres.tif")) as tf:
+        tags = tf.pages[0].tags
+        assert tags["ResolutionUnit"].value != tifffile.TIFF.RESUNIT.MICROMETER
+        assert tags["XResolution"].value == (1, 1)
