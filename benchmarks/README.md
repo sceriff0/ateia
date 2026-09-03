@@ -6,7 +6,10 @@ QC the pipeline already emits (the benchmark invents no metrics):
 
 1. **Resource scaling** — peak RAM & wall-time vs input size / channels / rounds (Nextflow trace).
 2. **Registration accuracy** — `dice_matched` + centroid **displacement (µm)** from the staged
-   DAPI-nuclei QC (`reg_qc=2`; `bin/warp_seg_qc.py`). Landmark-free.
+   DAPI-nuclei QC (`reg_qc=2`; `bin/warp_seg_qc.py`). Landmark-free — and *only* landmark-free:
+   this benchmark carries no ground truth of any kind, so its accuracy numbers rank
+   configurations against each other and cannot say any of them is correct. See section B, and
+   Supplementary Figure S6 (`docs/figures/accuracy-schematic.html`).
 
 The heavy step (the sweep) runs on a **cluster** with the pipeline containers;
 matrix generation and the DATA emit run **locally**.
@@ -231,7 +234,12 @@ Verify the whole harness with no data at all:
 
 ---
 
-## B. Ground-truth registration validation — REMOVED (twice)
+## B. Ground-truth registration validation — REMOVED (twice). Nothing here is runnable.
+
+> **Historical record.** Neither harness exists on any branch. `benchmarks/registration_eval/`
+> and `benchmarks/stare_bench/` return zero paths from `git ls-tree -r benchmarking benchmarks`.
+> Nothing in this section can be run; it is kept because what was LOST is a property of the
+> current benchmark.
 
 Two harnesses have occupied this slot and both are gone. The section is kept because
 what was LOST is a property of the current benchmark, not history.
@@ -274,7 +282,8 @@ each other; they cannot say any of them is *correct*. Two specific consequences:
   produced by that harness and is not reproducible by anything remaining.
 
 Recoverable from history if either is wanted again: the landmark primitives
-(`landmarks.py`, `tre.py`) and the whole generator went with the deletion.
+(`landmarks.py`, `tre.py`) and the whole generator went with the deletion --
+`benchmarks/registration_eval/` at `61e26ec`, `benchmarks/stare_bench/` at `cacc850`.
 
 
 ## Inputs -> outputs at a glance
