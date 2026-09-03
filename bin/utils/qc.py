@@ -491,25 +491,34 @@ def create_registration_qc(
     ref_channels = extract_channel_names_from_ome(reference_path)
     reg_channels = extract_channel_names_from_ome(registered_path)
 
+    # A silent fallback to channel 0 here used to work ONLY by accident: channel 0 is
+    # CONVERT_IMAGE's reserved nuclear-channel slot, so the fallback happened to
+    # reproduce the correct overlay on every slide that followed that convention, and
+    # emitted a spurious warning on every slide that did not. The moment a panel is
+    # nuclear-marker-only under a NON-default --nuclear-markers list that fails to
+    # match (e.g. a CELLTOX-only panel queried with the DAPI-only default), the
+    # fallback silently builds the overlay from a marker channel instead -- a
+    # misregistration would then be masked by a QC image that looks aligned only
+    # because it was never looking at the nuclear signal. Raise instead: a QC failure
+    # under retry-then-fail is the correct outcome for "this panel does not have any
+    # of the configured nuclear/fiducial markers", not a mis-rendered PNG that still
+    # exits 0. See tests/test_generate_registration_qc.py::
+    # test_a_marker_list_that_matches_nothing_fails_loudly.
     ref_nuc_idx = pick_nuclear_index(ref_channels, nuclear_markers)
     if ref_nuc_idx is None:
-        logger.warning(
+        raise ValueError(
             f"No nuclear/fiducial channel found in reference image "
             f"{reference_path.name} (channels: {ref_channels}, markers: "
-            f"{list(nuclear_markers) if nuclear_markers else 'default'}). "
-            f"Falling back to channel 0."
+            f"{list(nuclear_markers) if nuclear_markers else 'default'})."
         )
-        ref_nuc_idx = 0
 
     reg_nuc_idx = pick_nuclear_index(reg_channels, nuclear_markers)
     if reg_nuc_idx is None:
-        logger.warning(
+        raise ValueError(
             f"No nuclear/fiducial channel found in registered image "
             f"{registered_path.name} (channels: {reg_channels}, markers: "
-            f"{list(nuclear_markers) if nuclear_markers else 'default'}). "
-            f"Falling back to channel 0."
+            f"{list(nuclear_markers) if nuclear_markers else 'default'})."
         )
-        reg_nuc_idx = 0
 
     if ref_channels:
         logger.debug(
@@ -590,15 +599,17 @@ def create_registration_qc(
     if native_path is not None:
         native_info = read_info(native_path)
         native_channels = list(native_info.channels or [])
+        # Same rule as the reference/registered channel resolution above: raise rather
+        # than silently fall back to channel 0, for the same reason (a fallback that
+        # happens to be right only when a panel follows the channel-0-is-nuclear
+        # convention, and silently wrong otherwise).
         native_nuc_idx = pick_nuclear_index(native_channels, nuclear_markers)
         if native_nuc_idx is None:
-            logger.warning(
+            raise ValueError(
                 f"No nuclear/fiducial channel found in native image "
                 f"{native_path.name} (channels: {native_channels}, markers: "
-                f"{list(nuclear_markers) if nuclear_markers else 'default'}). "
-                f"Falling back to channel 0."
+                f"{list(nuclear_markers) if nuclear_markers else 'default'})."
             )
-            native_nuc_idx = 0
         # read_plane returns the source's native dtype (uint16 for this pipeline's
         # slides), while ref_nuc/reg_nuc above are always float32 (read_decimated has no
         # dtype= parameter -- see the comment above that read for why that is load-bearing:
