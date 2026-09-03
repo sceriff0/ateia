@@ -453,9 +453,9 @@
           <div class="mod"><div class="n">EXPORT_GEOJSON</div>
             <div class="x">QuPath/FlowPath <code>cells.geojson</code> with raw per-marker measurements, plus a
               lighter whole-cell-only variant. Its µm measurements — centroids, areas, perimeters, axis lengths —
-              are the FlowPath contract, and it is the one consumer that stages no image, so it needs an explicit
-              number and rejects <code>auto</code>.</div>
-            <div class="pp"><span>pixel_size <b>required</b></span></div></div>
+              are the FlowPath contract. It stages no image, so it cannot resolve <code>auto</code>
+              itself — INPUT_CHECK resolves it up front and passes the number in meta.</div>
+            <div class="pp"><span>pixel_size <b>auto</b></span></div></div>
           <div class="mod"><div class="n">MERGE_AND_PYRAMID</div>
             <div class="x">Pyramidal OME-TIFF preserving channel metadata; masks optionally embedded as a second series.</div>
             <div class="pp"><span>tilex <b>512</b></span><span>levels <b>8</b></span><span>zstd</span></div></div>

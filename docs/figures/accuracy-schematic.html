@@ -291,7 +291,9 @@
         expects them to describe one thing. They describe four different things, and they
         disagree with each other by design — not by bug.</p></div>
     <div class="tbl-scroll"><table class="rc">
-      <caption>one slide-stage, four numbers — mixing a documented worked example with one illustrative value</caption>
+      <caption>one slide-stage, four numbers — three read verbatim from the worked example in
+        <code>docs/registration_qc.md</code> (lines 174-177); the fourth has no documented worked
+        example and is left blank</caption>
       <thead><tr><th>measure</th><th class="v">value</th></tr></thead>
       <tbody>
         <tr><td class="k">intrinsic TRE (rigid stage)</td><td class="v"><span class="em">no worked example is documented — illustrative only</span></td></tr>
@@ -374,7 +376,7 @@
             decide which control points enter the mesh <i>and</i> as the only quality signal
             about how well that tile matched. Measured, not hypothetical: a tile that is roughly
             <b>40–90% off-tissue is ACCEPTED with a WRONG recovered shift</b>, in every one of
-            <b>12</b> swept blank-fraction/geometry/seed configurations, injecting a bogus
+            <b>12</b> swept geometry/seed configurations, injecting a bogus
             displacement of up to <b>131&nbsp;px</b> — and the range gate cannot catch it, because
             131&nbsp;px is well inside the default <code>max_disp</code> of <b>256&nbsp;px</b>
             (<code>reg_tiled_halo</code>).</div></div>
@@ -480,11 +482,12 @@
       signals is evidence, not proof — none of the four can say a configuration is correct, only
       that it is more or less internally consistent than another.</div>
     <div class="warnbox" style="margin-top:10px"><span class="wl">2 — nothing in this repository
-      or its sibling branches closes that gap today</span> A guard in this very tree
-      (<code>tests/test_figures_have_no_retired_names.py</code>) records that an
-      externally-verified-correspondence accuracy harness once existed in this project and was
-      deleted outright, with its own removal note kept as the record of why. No branch this
-      worktree can see ships a working replacement.</div>
+      or its sibling branches closes that gap today</span> No landmark TRE against a public
+      challenge-dataset correspondence was ever measured for this pipeline. The harness that once
+      produced one (<code>benchmarks/registration_eval/</code>) exists on no branch —
+      benchmarks/README.md §B, on the <code>benchmarking</code> branch, records its
+      removal, and a synthetic-ground-truth successor's removal after it, as history the
+      repository keeps, not a resource it can still call on.</div>
     <div class="warnbox" style="margin-top:10px"><span class="wl">3 — the question a reviewer is
       most likely to ask has no answer here</span> "What is the absolute registration error, in
       physical units, against independently and externally verified correspondences?" This
@@ -517,7 +520,7 @@
     Figure <b>S5</b>'s account of how the STARE front-end that produces one of these four numbers
     actually works.
     <span class="footnote">All algorithm details and parameter defaults are read verbatim from the
-    pipeline source at the commit stamped at the top of this figure
+    pipeline source
     (<code>bin/warp_seg_qc.py</code>, <code>bin/utils/cell_pairs.py</code>,
     <code>bin/utils/tre_report.py</code>, <code>bin/utils/tile_residual.py</code>,
     <code>bin/tiled_solve.py</code>, <code>bin/register.py</code>,

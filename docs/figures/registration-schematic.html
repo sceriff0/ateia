@@ -282,7 +282,7 @@
     per-slide star. Both solve the same problem in the same <b>two steps</b> — a global pose fit, then a local
     residual field — and panels&nbsp;b–d take those two steps apart in full. The nuclear/fiducial channel
     (channel&nbsp;0) is what drives the alignment in both.</p>
-  <div class="railnote" style="margin:10px 0 0;justify-content:flex-start"><span><b>source of truth:</b> the pipeline source tree · verified 2026-08-10</span><span><b>method default:</b> <code>registration_method = valis</code></span><span><b>QC default:</b> <code>reg_qc = 2</code></span></div>
+  <div class="railnote" style="margin:10px 0 0;justify-content:flex-start"><span><b>source of truth:</b> the pipeline source tree</span><span><b>method default:</b> <code>registration_method = valis</code></span><span><b>QC default:</b> <code>reg_qc = 2</code></span></div>
 
   <!-- a — THE METHOD-AGNOSTIC FRAME -->
   <section class="panel">
@@ -301,7 +301,7 @@
       <div class="r"><div class="t">step 3 · dispatch</div><div class="v">registration_method</div>
         <div class="d"><code>'valis'</code> (default) → VALIS_ADAPTER · <code>'tiled'</code> → TILED_ADAPTER. Read <b>once</b>, in <code>registration.nf</code>, and passed down as an argument.</div></div>
       <div class="r"><div class="t">step 3b–4 · QC + checkpoint</div><div class="v">method-blind</div>
-        <div class="d">DAPI-overlay QC, segmentation-overlap QC, then <code>csv/registered.csv</code> via the shared checkpoint writer.</div></div>
+        <div class="d">DAPI-overlay QC (two-panel before/after: reference+native | reference+registered), segmentation-overlap QC, then <code>csv/registered.csv</code> via the shared checkpoint writer.</div></div>
     </div>
     <div class="railnote">
       <span><b>reference frame:</b> moving slides warp <i>into</i> the reference; the reference is never moved.</span>
@@ -873,9 +873,9 @@
         <div class="x">No QC images and no metrics. Registration still emits its own <code>intrinsic_tre</code>.</div>
         <div class="proc">— no processes —</div></div>
       <div class="lv"><div class="h"><span>DAPI overlay</span><span class="n">1</span></div>
-        <div class="x">Per moving slide, a nuclear-channel overlay of registered vs reference — full-res TIFF plus a
-          <code>qc_scale_factor</code>-downsampled PNG for eyeballing. Qualitative, but it is what catches a
-          catastrophically wrong <code>M0</code> at a glance.</div>
+        <div class="x">Per moving slide, a nuclear-channel RGB before/after: two panels side by side, reference+native
+          and reference+registered — full-res TIFF plus a <code>qc_scale_factor</code>-downsampled PNG for
+          eyeballing. Qualitative, but it is what catches a catastrophically wrong <code>M0</code> at a glance.</div>
         <div class="proc">GENERATE_REGISTRATION_QC</div></div>
       <div class="lv"><div class="h"><span>+ cell-overlap</span><span class="n">2 · default</span></div>
         <div class="x">Segment each slide on its <b>native</b> image with the run's own segmenter, trace the mask
@@ -904,9 +904,10 @@
                 pairing is reliable; and because the rigid transform is the one every later stage builds on, the
                 pairing stays valid for all of them. Re-deriving it per stage would let a score move because
                 <i>different cells got paired</i> — not a registration effect.</li>
-              <li><b>Two metrics per stage:</b> per-pair <b>IoU</b> and <b>centroid residual</b>. Residual in pixels is
-                the one that reads directly — "1.4 µm after non-rigid" is a sentence a pathologist can act on, and it
-                degrades gracefully where a thresholded IoU falls off a cliff.</li>
+              <li><b>Two metrics per stage:</b> per-pair <b>IoU</b> and <b>centroid residual</b>, reported in px and,
+                where the slide metadata carries a pixel size, in µm. The µm form is the one that reads directly —
+                "1.4 µm after non-rigid" is a sentence a pathologist can act on, and it degrades gracefully where a
+                thresholded IoU falls off a cliff.</li>
               <li><b>Deltas are reported against the rigid anchor</b>, so
                 <code>delta_vs_anchor.micro.displacement_px_p50</code> literally reads as "what the non-rigid and micro
                 stages bought over rigid alone" — and, with the wrong sign, as a warning that a stage made things
@@ -969,7 +970,7 @@
         </table>
         <h4>VALIS backend</h4>
         <table class="pr">
-          <tr><td class="k">memory_mode</td><td class="val">high</td><td class="d">high | medium | low preset</td></tr>
+          <tr><td class="k">memory_mode</td><td class="val">high</td><td class="d">high | medium | low | custom preset</td></tr>
           <tr><td class="k">reg_max_image_dim</td><td class="val">4000</td><td class="d">max_image_dim_px — cached image cap</td></tr>
           <tr><td class="k">reg_micro_reg</td><td class="val">1</td><td class="d">0 none · 1 micro-rigid (default) · 2 +micro non-rigid</td></tr>
           <tr><td class="k">reg_micro_reg_fraction</td><td class="val">0.125</td><td class="d">micro non-rigid crop fraction</td></tr>
@@ -1029,8 +1030,8 @@
     The <code>reg_qc</code> ladder in <b>(f)</b> is one arm of the pipeline-wide QC architecture, which
     Supplementary Figure <b>S3</b> takes apart in full; Supplementary Figure <b>S1</b> places registration in
     the whole workflow.
-    <span class="footnote">All algorithm details and parameter defaults are read verbatim from the pipeline source at
-    the commit stamped at the top of this figure (<code>subworkflows/local/registration.nf</code>,
+    <span class="footnote">All algorithm details and parameter defaults are read verbatim from the pipeline source
+    (<code>subworkflows/local/registration.nf</code>,
     <code>subworkflows/local/register_patient.nf</code>, <code>subworkflows/local/adapters/*.nf</code>,
     <code>modules/local/register.nf</code>, <code>modules/local/tiled_*.nf</code>, <code>bin/register.py</code>,
     <code>bin/tiled_{coarse,reg_tile,solve,stitch}.py</code>,
