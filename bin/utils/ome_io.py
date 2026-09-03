@@ -618,6 +618,29 @@ def _is_tifffile_readable(path) -> bool:
     return any(name.endswith(suffix) for suffix in _TIFFFILE_READABLE)
 
 
+def _samples_axis_index(path) -> Optional[int]:
+    """Where the SAMPLES axis sits in the array ``tifffile`` hands back, or ``None``.
+
+    ``read_info`` reports THAT a file is interleaved (``channels_are_samples``) but not
+    WHERE the samples axis is, and the two are not the same question: ``photometric="rgb"``
+    writes ``YXS`` (S last) while ``planarconfig="separate"`` writes ``SYX`` (S first).
+    ``read_plane`` needs the position, so it re-derives it from ``series.axes`` -- the
+    same string ``_info_via_tifffile`` reads -- rather than assuming ``-1``.
+
+    Deliberately NOT a field on ``ImageInfo``: it is meaningful only for the tifffile
+    branch (bioio answers the same question through ``get_image_data("YX", S=...)``, which
+    needs no index), and ``ImageInfo``'s shape is part of the published contract in
+    ``docs/superpowers/plans/2026-09-02-release-1.0.0/00-master.md``.
+    """
+    with tifffile.TiffFile(str(path)) as tf:
+        series = tf.series[0] if tf.series else tf.pages[0]
+        axes = getattr(series, "axes", None) or ""
+        shape = tuple(series.shape)
+    if "S" not in axes or len(axes) != len(shape) or len(shape) != 3:
+        return None
+    return axes.index("S")
+
+
 def parse_ndpis(ndpis_path) -> List[Path]:
     """The ``.ndpi`` files a Hamamatsu ``.ndpis`` manifest names, in declared order.
 
@@ -968,19 +991,24 @@ def read_plane(path, channel: int, *, lazy: bool = True):
     formats behind bioio) and for a caller that wants the plane materialised anyway.
 
     On a file where ``read_info`` found ``channels_are_samples`` True (an interleaved
-    RGB-like file), ``channel`` is INTENDED to index the SAMPLE axis, not C -- the same
-    remap ``read_info`` applies, so a caller never has to know which axis it actually
-    came from. **That promise is only kept for the bioio branch below.** The
-    ``_is_tifffile_readable`` branch above it -- ``open_lazy``'s ``(C, H, W)`` zarr view,
-    and the ``tifffile.imread(...)[channel]`` eager fallback -- both still assume the
-    channel axis is axis 0 of the array tifffile hands back, which for an interleaved
-    ``YXS`` file (``fmt_rgb.tiff``) is Y, not the samples axis: measured,
-    ``read_plane("fmt_rgb.tiff", 1)`` returns shape ``(64, 3)`` (one ROW and all three
-    samples) instead of the ``(64, 64)`` single-sample plane the contract above promises.
-    Fixing it is scheduled for plan 07 Tasks 5-6, which give ``open_lazy`` its own S-axis
-    awareness; until then this is a KNOWN GAP, pinned red-when-fixed by
-    ``tests/integration/formats/test_ome_io_read_info.py::test_read_plane_on_an_interleaved_rgb_tiff``
-    (``xfail(strict=True)``) rather than silently left unasserted.
+    RGB-like file), ``channel`` indexes the SAMPLE axis, not C -- the same remap
+    ``read_info`` applies, so a caller never has to know which axis it actually came
+    from. **All three branches honour it**, which they did not before plan 07: the
+    ``_is_tifffile_readable`` branches assumed the channel axis was axis 0 of the array
+    tifffile hands back, which for an interleaved ``YXS`` file (``fmt_rgb.tiff``) is Y,
+    so ``read_plane("fmt_rgb.tiff", 1)`` returned shape ``(64, 3)`` -- one ROW and all
+    three samples -- instead of the ``(64, 64)`` single-sample plane promised above. A
+    wrong-shaped array, not an error: the caller most likely to hit it is a QC or
+    thumbnail path that would have gone on to write it out.
+
+    The remap is applied HERE rather than inside ``tiled_io.open_lazy`` deliberately.
+    ``open_lazy`` is shared by ``tiled_stitch``, ``merge_channels_pyramid``,
+    ``registration`` and ``qc.py``, none of which ever sees interleaved bytes -- the main
+    path runs through ``CONVERT_IMAGE``, which normalises to planar ``(C, Y, X)`` first --
+    so changing what ``open_lazy`` presents would alter a view four callers depend on in
+    order to fix a case none of them reach. ``_samples_axis_index`` re-derives the axis
+    position from ``series.axes`` instead, which costs one header read and leaves
+    ``open_lazy``'s contract untouched.
     """
     path = Path(path)
     info = read_info(path)
@@ -990,18 +1018,26 @@ def read_plane(path, channel: int, *, lazy: bool = True):
             f"{path.name}: channel {channel} out of range for C={n_channels}"
         )
 
-    if lazy and _is_tifffile_readable(path):
-        view, _dtype, close = open_lazy(str(path))
-        try:
-            return np.array(view[channel, :, :], copy=True)
-        finally:
-            close()
-
     if _is_tifffile_readable(path):
+        # `None` for the ordinary planar case, so `key` stays (channel, :, :) and this
+        # is byte-for-byte the pre-plan-07 index for every non-interleaved file.
+        s_idx = _samples_axis_index(path) if info.channels_are_samples else None
+        if s_idx is None:
+            key = (channel, slice(None), slice(None))
+        else:
+            key = tuple(channel if axis == s_idx else slice(None) for axis in range(3))
+
+        if lazy:
+            view, _dtype, close = open_lazy(str(path))
+            try:
+                return np.array(view[key], copy=True)
+            finally:
+                close()
+
         stack = np.asarray(tifffile.imread(str(path)))
         if stack.ndim == 2:
             return stack
-        return np.asarray(stack[channel])
+        return np.asarray(stack[key])
 
     if info.reader == "hdf5":
         require_reader("hdf5")

@@ -23,6 +23,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import tifffile
 
 # parents[0]=formats, [1]=integration, [2]=tests, [3]=repo root.
 ROOT = Path(__file__).resolve().parents[3]
@@ -88,24 +89,29 @@ def test_an_interleaved_rgb_tiff_presents_three_channels():
     assert info.channels_are_samples is True
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "KNOWN GAP, not yet fixed (scheduled for plan 07 Tasks 5-6): read_plane's "
-        "tifffile branch (open_lazy's (C,H,W) view and the tifffile.imread(...)"
-        "[channel] fallback) does not apply the S-as-C remap read_info already "
-        "performs. Measured: read_plane('fmt_rgb.tiff', 1) currently returns shape "
-        "(64, 3) -- axis 0 of the raw YXS array (a single ROW, all three samples) -- "
-        "instead of the (64, 64) single-sample plane the contract promises. "
-        "strict=True: the moment open_lazy gains S-axis awareness this must start "
-        "failing (unexpectedly passing), which is the signal to delete the xfail "
-        "and turn this into a real assertion."
-    ),
-)
-def test_read_plane_on_an_interleaved_rgb_tiff():
-    plane = ome_io.read_plane(_fixture("tests/testdata/fmt_rgb.tiff"), 1)
+@pytest.mark.parametrize("lazy", [True, False])
+def test_read_plane_on_an_interleaved_rgb_tiff(lazy):
+    """read_plane's S-as-C remap, which until plan 07 Task 5 was kept on the
+    bioio branch ONLY. This was an `xfail(strict=True)` recording the gap:
+    `read_plane('fmt_rgb.tiff', 1)` returned (64, 3) -- axis 0 of the raw YXS
+    array, i.e. one ROW and all three samples -- rather than the (64, 64)
+    single-sample plane read_info's contract promises. A wrong SHAPE, never an
+    error, so nothing downstream would have raised on it.
+
+    Both branches are parametrised because they index differently and only one
+    is the default: `lazy=True` goes through tiled_io.open_lazy's zarr view,
+    `lazy=False` through `tifffile.imread(...)`. The pre-fix code was wrong in
+    both, and a test of the default alone would have left the eager one open."""
+    rgb = _fixture("tests/testdata/fmt_rgb.tiff")
+    plane = ome_io.read_plane(rgb, 1, lazy=lazy)
     assert plane.ndim == 2
     assert plane.shape == (64, 64)
+
+    # Shape alone would be satisfied by the WRONG sample on a square fixture, so
+    # pin the pixels: plane 1 must be the G sample of the raw (Y, X, S) array.
+    raw = tifffile.imread(str(rgb))
+    assert np.array_equal(plane, raw[:, :, 1])
+    assert not np.array_equal(plane, raw[:, :, 0])
 
 
 def test_an_eight_bit_single_channel_tiff_keeps_its_dtype():
