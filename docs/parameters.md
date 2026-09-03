@@ -512,11 +512,13 @@ Ready-made `-params-file` JSON presets in `params/`:
 
 | Preset | Purpose |
 |---|---|
-| `params/full_pipeline.json` | All stages from preprocessing |
+| `params/full_pipeline.json` | All stages from preprocessing, on the InstanSeg backend (see the file's `_comment_seg_method` for the StarDist switch) |
 | `params/preprocessing_only.json` | Preprocessing only |
 | `params/registration_only.json` | Registration from a checkpoint |
 | `params/postprocessing_only.json` | Postprocessing from a checkpoint |
-| `params/test.json` | Minimal test run |
+| `params/test.json` | Minimal self-contained test run (carries its own small ceilings) |
+| `params/dry_run.json` | `dry_run` alone — combine with any other flags |
+| `params/seg_quality_eval.json` | Turns the opt-in CSE segmentation-quality scorer on |
 
 ```bash
 nextflow run . -profile slurm,singularity \
@@ -524,6 +526,17 @@ nextflow run . -profile slurm,singularity \
   --input samplesheet.csv --outdir results \
   --seg_method cellsam            # override any preset value on the CLI
 ```
+
+!!! warning "The four production presets ship IEO's cluster sizing"
+    `full_pipeline.json`, `preprocessing_only.json`, `registration_only.json` and
+    `postprocessing_only.json` each set `max_cpus`/`max_memory` to IEO's own
+    values (`128` / `700.GB`) — they are examples from a real cluster, not
+    placeholders. A `-params-file` value **overrides a `-c` config file**
+    (Nextflow's own precedence order), so copying one of these presets onto a
+    different cluster and layering `-c site.config` will **not** resize it: the
+    preset's `max_cpus`/`max_memory` win. Either edit the preset's own
+    `_comment_resources` block, or override `--max_cpus`/`--max_memory` on the
+    CLI, which outranks both.
 
 ## See also
 
