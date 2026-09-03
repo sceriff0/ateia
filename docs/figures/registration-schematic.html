@@ -632,7 +632,7 @@
     <div class="panel-head"><h2>Backend 2 — STARE tiled: the same two steps, JVM-free and fanned out</h2>
       <p>Selected with <code>--registration_method tiled</code>. No batch graph: every moving slide registers
         <i>directly and independently</i> to the fixed reference — a star topology, which is where the name comes from.
-        Pure NumPy&nbsp;+&nbsp;scikit-image&nbsp;+&nbsp;tifffile: no JVM, no Bio-Formats, no deep-learning weights.
+        NumPy&nbsp;+&nbsp;scikit-image&nbsp;+&nbsp;tifffile for the geometry and I/O, torch&nbsp;+&nbsp;kornia only for the step&nbsp;1 matcher: no JVM, no Bio-Formats.
         The two steps map onto <b>four Nextflow processes</b>, and step&nbsp;2 fans out to <b>one task per tile</b>.</p></div>
 
     <div class="bkhead">
@@ -679,7 +679,7 @@
           <table class="qa">
             <tr><td class="q">estimates</td><td>One 3×3 matrix <b><code>M0</code></b> per moving slide, mapping moving pixels → reference pixels. Default model <b><code>euclidean</code></b>: rotation + translation only, 3 DOF. (<code>similarity</code> and <code>affine</code> are available; euclidean is right when both sections come off the same microscope at the same magnification, and refusing the extra DOF is what stops RANSAC fitting a bogus scale to a weak match.)</td></tr>
             <tr><td class="q">sees</td><td>Both slides' nuclear/fiducial plane (<code>reg_tiled_nuclear_index</code>; <code>null</code> = resolved from channel metadata against <code>nuclear_markers</code>), read <b>lazily in row bands</b> and decimated by <b>one shared integer factor</b> chosen so the longer side is ≤ <code>reg_tiled_coarse_max_dim</code> (2048&nbsp;px, the shipped <code>high</code> tier). Peak memory is a band plus the thumbnail — not the plane.</td></tr>
-            <tr><td class="q">how</td><td>Each thumbnail is normalised to <b>[0,1]</b>, because <b>DISK was trained on images in that range</b>, then padded to a multiple of 16 (its U-Net downsamples by that factor and raises on a thumbnail that is not), and passed through DISK's <code>from_pretrained("depth")</code> weights for up to <b>2048 keypoints</b>. <b>LightGlue("disk")</b> matches the two keypoint sets, and the surviving correspondences are fitted by <b>RANSAC</b> — 1000 trials, 3&nbsp;px inlier threshold — discarding correspondences that disagree with the consensus. The fit and its residual are then lifted from thumbnail pixels to full resolution.</td></tr>
+            <tr><td class="q">how</td><td>Each thumbnail is normalised to <b>[0,1] over a p1&ndash;p99.9 window</b>, because <b>DISK was trained on images in that range</b>, then padded to a multiple of 16 (its U-Net downsamples by that factor and raises on a thumbnail that is not), and passed through DISK's <code>from_pretrained("depth")</code> weights for up to <b>2048 keypoints</b>. <b>LightGlue("disk")</b> matches the two keypoint sets, and the surviving correspondences are fitted by <b>RANSAC</b> — 1000 trials, 3&nbsp;px inlier threshold — discarding correspondences that disagree with the consensus. The fit and its residual are then lifted from thumbnail pixels to full resolution.</td></tr>
             <tr><td class="q">then</td><td>It writes the <b>tile plan</b>: <b>cores</b> that partition the reference frame exactly — every pixel belongs to one core, no gaps, no overlaps — each paired with a <b>read box</b> = core expanded by <code>halo</code> and clamped to the image. Each core's centre is one control point of the future mesh. The row count of this CSV <i>is</i> the fan-out width.</td></tr>
           </table>
 
@@ -829,10 +829,10 @@
         <tr><td class="k">step 1 · model</td><td class="v">rigid / affine, graph-consistent</td><td class="v">euclidean — rotation + translation (3 DOF)</td></tr>
         <tr><td class="k">step 1 · resolution</td><td class="v">2048 px working image (<code>high</code>)</td><td class="v">2048 px shared thumbnail (<code>high</code>)</td></tr>
         <tr><td class="k">step 2 · model</td><td class="v">dense per-pixel optical-flow field + up to 2 micro passes</td><td class="v">TRE-gated control grid, bilinearly interpolated</td></tr>
-        <tr><td class="k">step 2 · capture radius</td><td class="v">implicit (optical-flow pyramid)</td><td class="v"><span class="em">explicit</span> — <code>reg_tiled_halo</code>, 256 px</td></tr>
+        <tr><td class="k">step 2 · capture radius</td><td class="v">implicit (optical-flow pyramid)</td><td class="v"><span class="em">explicit</span> — <code>reg_tiled_halo</code>, 256 px (<code>high</code>)</td></tr>
         <tr><td class="k">estimation channel</td><td class="v">channel 0 — the resolved nuclear marker</td><td class="v">resolved nuclear marker — <code>reg_tiled_nuclear_index</code></td></tr>
         <tr><td class="k">resampler</td><td class="v">VALIS / pyvips internals</td><td class="v">bilinear, non-negativity preserved by construction</td></tr>
-        <tr><td class="k">JVM / Bio-Formats</td><td class="v">required (heap climbs with the retry ramp)</td><td class="v"><span class="em">none</span> — NumPy / scikit-image / tifffile</td></tr>
+        <tr><td class="k">JVM / Bio-Formats</td><td class="v">required (heap climbs with the retry ramp)</td><td class="v"><span class="em">none</span> — NumPy / scikit-image / tifffile (+ torch + kornia at step 1)</td></tr>
         <tr><td class="k">container</td><td class="v"><code>cdgatenbee/valis-wsi:1.0.0</code></td><td class="v"><code>bolt3x/mirage-tiled:1.0.0</code></td></tr>
         <tr><td class="k">memory request</td><td class="v"><span class="em">300 GB</span> × attempt, 8 CPU, 24 h</td><td class="v"><span class="em">48 / 4 / 1 / 4 GB</span> across the four processes</td></tr>
         <tr><td class="k">memory scales with</td><td class="v">the slides (heap sized from inputs / task memory)</td><td class="v"><span class="em">parameters only</span> — thumbnail, tile+halo, out_tile</td></tr>
@@ -977,9 +977,11 @@
         <h4>STARE tiled backend</h4>
         <p style="margin:0 0 8px;font-size:.72rem;color:var(--ink-3)">Five knobs are <b>tier-owned</b>:
           <code>nextflow.config</code> declares them <code>null</code>, and the value comes from
-          <code>reg_tiled_mode</code>'s row in <code>lib/RegPresets.groovy</code>. Setting one explicitly pins
-          <code>reg_tiled_mode</code> to <code>custom</code>.</p>
+          <code>reg_tiled_mode</code>'s row in <code>lib/RegPresets.groovy</code>. Setting one requires
+          <code>reg_tiled_mode = custom</code> (set via <code>-params-file</code> or a profile);
+          <code>ParamUtils.validateRegPresets</code> rejects an override under any other tier at launch.</p>
         <table class="pr">
+          <tr><td class="k">reg_tiled_mode</td><td class="val">high</td><td class="d">cost/accuracy tier: high | medium | low | custom (the tier vocabulary in <code>RegPresets</code>)</td></tr>
           <tr><td class="k">reg_tiled_nuclear_index</td><td class="val nul">null</td><td class="d">channel the transform is estimated on; null = resolve from channel metadata</td></tr>
           <tr><td class="k">reg_tiled_coarse_max_dim</td><td class="val nul">null</td><td class="d">M₀ thumbnail longest side (px). null → the <code>reg_tiled_mode</code> row in <code>RegPresets</code>'s STARE table (high: 2048)</td></tr>
           <tr><td class="k">reg_tiled_tile</td><td class="val nul">null</td><td class="d">tile core = mesh grid resolution (px). null → the <code>reg_tiled_mode</code> row in <code>RegPresets</code>'s STARE table (high: 2048)</td></tr>
@@ -1014,8 +1016,9 @@
     registrar pickle. Because the micro pass composes destructively, a pre-micro checkpoint is the only way to score
     the <code>non_rigid</code> stage separately. <b>(d)</b> The <b>STARE tiled</b> backend registers each moving slide
     independently to the reference with a DISK + LightGlue + RANSAC euclidean fit on a shared thumbnail (step 1), then one
-    phase-correlation per tile assembled into a TRE-gated bilinear mesh (step 2), all in pure NumPy/scikit-image across
-    four Nextflow processes whose peak memory is a function of parameters rather than slide size. <b>(e)</b> The two
+    phase-correlation per tile assembled into a TRE-gated bilinear mesh (step 2), in NumPy/scikit-image, with torch +
+    kornia only for the step-1 matcher, across four Nextflow processes whose peak memory is a function of parameters
+    rather than slide size. <b>(e)</b> The two
     backends trade accuracy and cross-slide consistency against memory footprint, parallelism and transform
     inspectability. <b>(f)</b> A shared three-level QC ladder checks alignment; at level 2 native-slide cell polygons
     are warped through each stage and scored against a correspondence fixed at the rigid anchor, with the two backends'
