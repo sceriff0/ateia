@@ -130,7 +130,7 @@ Scored two ways, neither needing ground truth:
   (cell-count ratio, instance F1). Already built; answers *do the backends agree,
   and where not?*
 - **CSE** — the reference-free `QualityScore`, which can **rank** rather than only
-  compare. Opt-in; see [Parameters](parameters.md#reference-free-segmentation-quality-cse--opt-in).
+  compare. Opt-in; see [Parameters](parameters.md#cse-opt-in).
 
 ### 4. Compute profile — *what does a real slide actually cost?*
 
