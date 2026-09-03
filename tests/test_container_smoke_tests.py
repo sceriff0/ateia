@@ -63,12 +63,19 @@ IN_IMAGE_PATH = "/usr/local/bin/mirage-smoke.sh"
 # need an entry; anything absent is assumed to be its own distribution, which is true
 # for numpy, scipy, pandas, tifffile, zarr, numcodecs, imagecodecs, torch, kornia,
 # csbdeep, stardist, spatialdata, anndata, geopandas, shapely, xmltodict and matplotlib.
+# `bioio_bioformats` underscores where its distribution hyphenates, and `scyjava` arrives
+# transitively through bioio-bioformats -> bffile. The smoke script imports scyjava.config
+# directly (it is the timing-immune lever for the jgo cache), so containers/convert names
+# it in its own pip line rather than relying on the transitive install -- an install
+# nothing in the Dockerfile names is invisible to test_container_harmonisation.py too.
 IMPORT_TO_DISTRIBUTION = {
     "skimage": "scikit-image",
     "sklearn": "scikit-learn",
     "cv2": "opencv-python",
     "instanseg": "instanseg-torch",
     "PIL": "pillow",
+    "bioio_bioformats": "bioio-bioformats",
+    "scyjava": "scyjava",
 }
 
 
