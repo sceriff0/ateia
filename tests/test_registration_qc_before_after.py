@@ -16,7 +16,10 @@ pins the two properties that make the added "before" panel honest:
 from __future__ import annotations
 
 import os
+import re
+import subprocess
 import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -33,6 +36,9 @@ tifffile = pytest.importorskip("tifffile")
 cv2 = pytest.importorskip("cv2")
 
 import qc  # noqa: E402
+
+REPO = Path(__file__).resolve().parents[1]
+CLI = REPO / "bin" / "generate_registration_qc.py"
 
 
 def test_smaller_moving_image_is_zero_padded_at_the_origin():
@@ -266,13 +272,6 @@ def test_create_registration_qc_rejects_a_missing_native(tmp_path):
         )
 
 
-import subprocess  # noqa: E402
-from pathlib import Path  # noqa: E402
-
-REPO = Path(__file__).resolve().parents[1]
-CLI = REPO / "bin" / "generate_registration_qc.py"
-
-
 def test_cli_with_native_writes_a_two_panel_figure(tmp_path):
     p = _write_triplet(tmp_path)
     outdir = tmp_path / "qc"
@@ -386,11 +385,39 @@ def test_cli_pixel_size_um_stamps_both_qc_tiffs(tmp_path):
 
     assert r.returncode == 0, r.stderr
 
+    scale_factor = 0.5
+    pixel_size_um = 0.325
+
     with tifffile.TiffFile(str(outdir / "registered_QC_RGB.tif")) as tf:
-        assert "XResolution" in tf.pages[0].tags
+        tags = tf.pages[0].tags
+        assert tags["ResolutionUnit"].value == tifffile.TIFF.RESUNIT.MICROMETER
+        x_num, x_den = tags["XResolution"].value
+        preview_resolution = x_num / x_den
 
     with tifffile.TiffFile(str(outdir / "registered_QC_RGB_fullres.tif")) as tf:
-        assert "XResolution" in tf.pages[0].tags
+        tags = tf.pages[0].tags
+        assert tags["ResolutionUnit"].value == tifffile.TIFF.RESUNIT.MICROMETER
+        x_num, x_den = tags["XResolution"].value
+        fullres_resolution = x_num / x_den
+
+    assert fullres_resolution == pytest.approx(1.0 / pixel_size_um, rel=1e-3)
+    assert preview_resolution == pytest.approx(scale_factor / pixel_size_um, rel=1e-3)
+
+    # A resolution TAG alone is not a usable scale bar in the tools this figure is opened
+    # in: ImageJ reads its scale off the ImageDescription's `unit=` line, and an OME-XML
+    # reader reads PhysicalSizeX/Y, neither of which is the XResolution/ResolutionUnit tag
+    # checked above.
+    with tifffile.TiffFile(str(outdir / "registered_QC_RGB_fullres.tif")) as tf:
+        description = tf.pages[0].tags["ImageDescription"].value
+    assert "unit=um" in description
+
+    with tifffile.TiffFile(str(outdir / "registered_QC_RGB.tif")) as tf:
+        ome_xml = tf.ome_metadata
+    match = re.search(r'PhysicalSizeX="([\d.]+)"', ome_xml)
+    assert match, f"no PhysicalSizeX in OME-XML: {ome_xml}"
+    assert float(match.group(1)) == pytest.approx(
+        pixel_size_um / scale_factor, rel=1e-3
+    )
 
 
 def test_cli_without_pixel_size_um_leaves_output_unstamped(tmp_path):
@@ -425,6 +452,10 @@ def test_cli_without_pixel_size_um_leaves_output_unstamped(tmp_path):
         assert (
             tf.pages[0].tags["ResolutionUnit"].value != tifffile.TIFF.RESUNIT.MICROMETER
         )
+        assert "PhysicalSizeX" not in tf.ome_metadata
+
+    with tifffile.TiffFile(str(outdir / "registered_QC_RGB_fullres.tif")) as tf:
+        assert "unit=um" not in tf.pages[0].tags["ImageDescription"].value
 
 
 def test_create_registration_qc_stamps_resolution_on_both_tiffs_when_given(tmp_path):
@@ -468,6 +499,17 @@ def test_create_registration_qc_stamps_resolution_on_both_tiffs_when_given(tmp_p
         fullres_resolution * scale_factor, rel=1e-3
     )
 
+    with tifffile.TiffFile(str(tmp_path / "P001_mov1_QC_RGB_fullres.tif")) as tf:
+        assert "unit=um" in tf.pages[0].tags["ImageDescription"].value
+
+    with tifffile.TiffFile(str(out)) as tf:
+        ome_xml = tf.ome_metadata
+    match = re.search(r'PhysicalSizeX="([\d.]+)"', ome_xml)
+    assert match, f"no PhysicalSizeX in OME-XML: {ome_xml}"
+    assert float(match.group(1)) == pytest.approx(
+        pixel_size_um / scale_factor, rel=1e-3
+    )
+
 
 def test_create_registration_qc_without_pixel_size_um_leaves_output_unstamped(tmp_path):
     """``pixel_size_um=None`` (the default) must write exactly what this function
@@ -492,8 +534,10 @@ def test_create_registration_qc_without_pixel_size_um_leaves_output_unstamped(tm
         tags = tf.pages[0].tags
         assert tags["ResolutionUnit"].value != tifffile.TIFF.RESUNIT.MICROMETER
         assert tags["XResolution"].value == (1, 1)
+        assert "PhysicalSizeX" not in tf.ome_metadata
 
     with tifffile.TiffFile(str(tmp_path / "P001_mov1_QC_RGB_fullres.tif")) as tf:
         tags = tf.pages[0].tags
         assert tags["ResolutionUnit"].value != tifffile.TIFF.RESUNIT.MICROMETER
         assert tags["XResolution"].value == (1, 1)
+        assert "unit=um" not in tags["ImageDescription"].value

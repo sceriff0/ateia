@@ -34,6 +34,8 @@ from pathlib import Path
 import pytest
 from packaging.requirements import InvalidRequirement, Requirement
 
+from tests.nfmodel import processes, strip_comments
+
 REPO = Path(__file__).resolve().parent.parent
 CONTAINERS = REPO / "containers"
 REQUIREMENTS = REPO / "requirements"
@@ -677,32 +679,43 @@ def test_qc_reader_dispatch_stays_tifffile_only():
     those two functions only reach _open_bioio (the lazy `import bioio`) for a path outside
     ome_io._TIFFFILE_READABLE, and every path qc.py ever calls them with is one of this
     pipeline's own .ome.tif/.ome.tiff intermediates. This test pins both halves of that claim
-    so a change to either -- qc.py calling a riskier dispatch name, or the pipeline's own
-    producers drifting off the .ome.tif convention -- fails here rather than silently
-    invalidating the exemption.
+    so a change to either -- qc.py OR generate_registration_qc.py calling a riskier dispatch
+    name, or the pipeline's own producers drifting off the .ome.tif convention -- fails here
+    rather than silently invalidating the exemption.
+
+    The dispatch-name scan covers BOTH bin/utils/qc.py and bin/generate_registration_qc.py:
+    the latter was dropped from test_ome_io_reader_dispatch_is_unreachable_from_the_writer_
+    only_scripts's writer_only_scripts tuple alongside qc.py (it imports qc.py, so the same
+    premise no longer holds for it either), but nothing else was scanning it for a dispatch
+    call added directly to the CLI script itself.
     """
-    qc_path = REPO / "bin" / "utils" / "qc.py"
-    called = set()
-    for lineno, line in enumerate(qc_path.read_text().splitlines(), 1):
-        code = line.split("#", 1)[0]
-        for fn in ("detect_reader", "require_reader", "read_info", "read_plane"):
-            if f"{fn}(" in code:
-                called.add(fn)
-    assert called, (
+    called = {}
+    for rel in ("utils/qc.py", "generate_registration_qc.py"):
+        path = REPO / "bin" / rel
+        found = set()
+        for line in path.read_text().splitlines():
+            code = line.split("#", 1)[0]
+            for fn in ("detect_reader", "require_reader", "read_info", "read_plane"):
+                if f"{fn}(" in code:
+                    found.add(fn)
+        called[rel] = found
+    assert called["utils/qc.py"], (
         "qc.py no longer calls any ome_io reader-dispatch function -- the (regqc, bioio) "
         "exemption should go back to _OME_IO_READER_DISPATCH_UNREACHABLE (the same claim as "
         "the other seven containers), and this test (now vacuous) should be removed."
     )
     # detect_reader is pure extension-sniffing (no import); require_reader is what a NEW,
     # riskier read path would call to force a specific backend. Neither is what
-    # create_registration_qc calls -- if one appears, the "always tifffile" branch reasoning
-    # below no longer applies and the exemption needs re-deriving, not just re-reading.
-    assert called <= {"read_info", "read_plane"}, (
-        f"bin/utils/qc.py now calls {called - {'read_info', 'read_plane'}}, not just "
-        "read_info/read_plane -- the (regqc, bioio) exemption's reasoning (read_info/"
-        "read_plane only reach _open_bioio for a non-_TIFFFILE_READABLE suffix) does not "
-        "cover detect_reader/require_reader and must be re-derived."
-    )
+    # create_registration_qc calls -- if one appears (in EITHER file), the "always tifffile"
+    # branch reasoning below no longer applies and the exemption needs re-deriving, not just
+    # re-reading.
+    for rel, found in called.items():
+        assert found <= {"read_info", "read_plane"}, (
+            f"bin/{rel} now calls {found - {'read_info', 'read_plane'}}, not just "
+            "read_info/read_plane -- the (regqc, bioio) exemption's reasoning (read_info/"
+            "read_plane only reach _open_bioio for a non-_TIFFFILE_READABLE suffix) does not "
+            "cover detect_reader/require_reader and must be re-derived."
+        )
 
     ome_io_src = (REPO / "bin" / "utils" / "ome_io.py").read_text()
     tifffile_readable_match = re.search(
@@ -721,18 +734,29 @@ def test_qc_reader_dispatch_stays_tifffile_only():
 
     # The pipeline-level half of the claim: reference_path/registered_path/native_path are
     # always CONVERT_IMAGE's or REGISTER's own output, never an arbitrary user-supplied
-    # format. Pinned against the actual .nf source rather than assumed.
-    convert_image_nf = (REPO / "modules" / "local" / "convert_image.nf").read_text()
-    assert '"*.ome.tif"' in convert_image_nf, (
-        "modules/local/convert_image.nf no longer emits '*.ome.tif' -- the (regqc, bioio) "
-        "exemption assumed CONVERT_IMAGE's output is always tifffile-readable, and that "
-        "assumption needs re-checking against whatever it emits now."
+    # format. Read through tests.nfmodel rather than a raw .read_text() needle: a raw needle
+    # is satisfied by a COMMENT that merely mentions the pattern -- measured here, a
+    # `// historical: emitted path("*.ome.tif")` comment kept a raw check green while the
+    # real declaration changed to something else entirely. strip_comments(process.raw_body)
+    # removes exactly that comment while keeping the real string literal verbatim (CLAUDE.md's
+    # "Verification reality" #5: the blanked `.body`/`.outputs` view is for LOCATING
+    # structure and identifiers; a literal inside a quoted string needs the string-preserving
+    # view instead).
+    nf_processes = processes()
+    convert_image = nf_processes["CONVERT_IMAGE"]
+    assert '"*.ome.tif"' in strip_comments(convert_image.raw_body), (
+        "CONVERT_IMAGE (modules/local/convert_image.nf) no longer emits '*.ome.tif' in real "
+        "(non-comment) code -- the (regqc, bioio) exemption assumed CONVERT_IMAGE's output "
+        "is always tifffile-readable, and that assumption needs re-checking against "
+        "whatever it emits now."
     )
-    register_nf = (REPO / "modules" / "local" / "register.nf").read_text()
-    assert '"*.ome.tif"' in register_nf and '"*.ome.tiff"' in register_nf, (
-        "modules/local/register.nf no longer stages '*.ome.tif'/'*.ome.tiff' -- the "
-        "(regqc, bioio) exemption assumed REGISTER's output is always tifffile-readable, "
-        "and that assumption needs re-checking against whatever it stages now."
+    register = nf_processes["REGISTER"]
+    register_clean = strip_comments(register.raw_body)
+    assert '"*.ome.tif"' in register_clean and '"*.ome.tiff"' in register_clean, (
+        "REGISTER (modules/local/register.nf) no longer stages '*.ome.tif'/'*.ome.tiff' in "
+        "real (non-comment) code -- the (regqc, bioio) exemption assumed REGISTER's output "
+        "is always tifffile-readable, and that assumption needs re-checking against "
+        "whatever it stages now."
     )
 
 

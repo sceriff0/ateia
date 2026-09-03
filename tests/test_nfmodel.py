@@ -538,7 +538,6 @@ UNREPOINTED_NF_SOURCE_READERS = {
     "tests/test_basicpy_module_is_vendored_unmodified.py": _UNREPOINTED_REASON,
     "tests/test_compartment_mode_routing.py": _UNREPOINTED_REASON,
     "tests/test_concurrency_params.py": _UNREPOINTED_REASON,
-    "tests/test_container_harmonisation.py": _UNREPOINTED_REASON,
     "tests/test_group_key_unwrapped.py": _UNREPOINTED_REASON,
     "tests/test_merge_pyramid_streaming.py": _UNREPOINTED_REASON,
     "tests/test_module_conventions.py": _UNREPOINTED_REASON,

@@ -40,7 +40,7 @@ import numpy as np
 from logger import get_logger
 from metadata import extract_channel_names_from_ome, pick_nuclear_index
 from numpy.typing import NDArray
-from ome_io import read_info, read_plane, write_tiff
+from ome_io import ome_metadata, read_info, read_plane, write_tiff
 from registration_utils import autoscale
 from skimage.transform import rescale
 from tiled_io import decimation_factor, open_lazy, read_decimated
@@ -580,7 +580,17 @@ def create_registration_qc(
                 f"Falling back to channel 0."
             )
             native_nuc_idx = 0
-        native_nuc = read_plane(native_path, native_nuc_idx, lazy=True)
+        # read_plane returns the source's native dtype (uint16 for this pipeline's
+        # slides), while ref_nuc/reg_nuc above are always float32 (read_decimated has no
+        # dtype= parameter -- see the comment above that read for why that is load-bearing:
+        # autoscale_for_display's min-max stretch rounds a uint16 input and a float32 input
+        # to different uint8 values at some real (min, max, value) triples, a ±1 LSB
+        # difference in the SAME pixel depending only on which dtype it arrived as). Widen
+        # here so the native panel goes through create_nuclear_overlay with the same
+        # arithmetic precision the reference/registered panels already use.
+        native_nuc = np.asarray(
+            read_plane(native_path, native_nuc_idx, lazy=True), dtype=np.float32
+        )
 
     # Resolution tags for both QC TIFFs, only when a pixel size was given (the default
     # `None` writes no tag, leaving output byte-for-byte unchanged from before this
@@ -604,6 +614,24 @@ def create_registration_qc(
     )
     preview_resolution_kwargs = _resolution_kwargs(preview_pixel_size_um)
 
+    # The XResolution/ResolutionUnit TIFF tags above are not, on their own, a usable scale
+    # bar in the tools this figure is actually opened in: ImageJ reads its scale off the
+    # ImageDescription's `unit=` line (present only when `metadata={"unit": ...}` is passed
+    # alongside `imagej=True`), and an OME-XML reader reads PhysicalSizeX/Y, not the TIFF
+    # tags. Both dicts below are built from the SAME `pixel_size_um`/`preview_pixel_size_um`
+    # `_resolution_kwargs` already used, so the tag and the description/XML can never drift
+    # apart, and both stay absent (byte-for-byte the old dict) when pixel_size_um is None.
+    fullres_metadata = {"axes": "CYX", "mode": "composite"}
+    if pixel_size_um is not None:
+        fullres_metadata["unit"] = "um"
+
+    # ome_metadata is ome_io.py's one builder of the PhysicalSizeX/Y(+Unit) dict (see its
+    # own docstring for why a second hand-built copy is exactly the drift this module
+    # exists to prevent). channels=None: this composite is an RGB display overlay, not a
+    # labelled multi-marker stack, so there is no Channel/Name list to carry.
+    preview_metadata = ome_metadata(None, preview_pixel_size_um, axes="CYX")
+    preview_metadata["mode"] = "composite"
+
     # Save full-resolution QC (compressed). scale_factor=1.0 means no rescale.
     if save_fullres:
         rgb_stack_full = render_before_after(
@@ -614,7 +642,7 @@ def create_registration_qc(
             str(fullres_output_path),
             rgb_stack_full,
             imagej=True,
-            metadata={"axes": "CYX", "mode": "composite"},
+            metadata=fullres_metadata,
             compression="zlib",
             **fullres_resolution_kwargs,
         )
@@ -640,7 +668,7 @@ def create_registration_qc(
             preview_cyx,
             ome=True,
             bigtiff=True,
-            metadata={"axes": "CYX", "mode": "composite"},
+            metadata=preview_metadata,
             **preview_resolution_kwargs,
         )
         logger.info(f"  Saved QC TIFF: {tiff_output_path}")
