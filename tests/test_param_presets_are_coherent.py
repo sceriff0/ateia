@@ -1,6 +1,6 @@
 """A `params/*.json` preset must be a preset that can actually run.
 
-Two failure modes, both found in this repository:
+Three failure modes, all found in this repository:
 
 1. **A key the schema does not know.** `-params-file` values go through
    nf-schema's validator, and an unknown key is either rejected or silently
@@ -16,8 +16,21 @@ Two failure modes, both found in this repository:
    block with NO seg_method at all, which read as a configuration choice and was
    inert. Ruling R5 for 1.0.0 switches full_pipeline.json to `instantseg`.
 
-The rule: if a preset sets any parameter whose name is owned by one segmentation
-backend, it must also set `seg_method` to that backend.
+3. **Site sizing baked into a preset.** `full_pipeline.json`,
+   `preprocessing_only.json`, `registration_only.json` and
+   `postprocessing_only.json` all hardcoded IEO's `max_cpus`/`max_memory`/
+   `max_time` (`128`/`700.GB`/`240.h`). `-params-file` overrides `-c`
+   (Nextflow's own precedence), so copying one of these presets onto another
+   cluster and layering `-c site.config` never resizes it -- the preset's
+   ceiling silently wins. Ruling R4 for 1.0.0 makes `conf/site.config.template`
+   the one owner of per-site sizing; a production preset must leave
+   `max_cpus`/`max_memory`/`max_time` for the site config to supply.
+
+The rule for (2): if a preset sets any parameter whose name is owned by one
+segmentation backend, it must also set `seg_method` to that backend.
+
+The rule for (3): no preset may set `max_cpus`, `max_memory` or `max_time`,
+except an explicitly exempted self-contained test preset.
 """
 
 import json
@@ -42,6 +55,23 @@ BACKEND_PREFIXES = {
     ),
     "instantseg": ("seg_instantseg_", "instanseg_model_dir"),
     "cellsam": ("seg_cellsam_", "cellsam_model_path"),
+}
+
+# R4: conf/site.config.template is THE owner of per-site sizing. A preset that
+# sets any of these bakes one site's numbers into a file `-params-file` loads
+# ahead of `-c site.config`, silently defeating whatever ceiling the site config
+# supplies.
+SITE_SIZING_KEYS = ("max_cpus", "max_memory", "max_time")
+
+# Presets exempt from the site-sizing rule, with why. Each is verified below to
+# still set at least one site-sizing key, so a stale entry cannot quietly cover
+# a real production preset that started hardcoding a ceiling again.
+SITE_SIZING_EXEMPT = {
+    "test.json": (
+        "a self-contained CI/test preset that intentionally pins tiny ceilings "
+        "(2 cpus / 6.GB / 6.h) so the suite does not depend on -c site.config; "
+        "not one of the four production presets R4 targets"
+    ),
 }
 
 
@@ -102,6 +132,33 @@ def test_a_preset_that_configures_a_backend_selects_it(preset):
         f"seg_method is {selected!r}. Those values are silently discarded: the "
         "backend that reads them is never selected."
     )
+
+
+@pytest.mark.parametrize("preset", PRESETS, ids=[p.name for p in PRESETS])
+def test_a_preset_does_not_bake_in_site_sizing(preset):
+    if preset.name in SITE_SIZING_EXEMPT:
+        pytest.skip(SITE_SIZING_EXEMPT[preset.name])
+    data = json.loads(preset.read_text())
+    baked = sorted(k for k in SITE_SIZING_KEYS if k in data)
+    assert not baked, (
+        f"params/{preset.name} sets {baked}, which R4 reserves for "
+        "conf/site.config.template. A -params-file value overrides -c, so these "
+        "would silently defeat any site.config layered on top of this preset."
+    )
+
+
+def test_the_site_sizing_exemption_is_not_stale():
+    """An exemption for a preset that no longer sets any site-sizing key is a
+    licence nobody is using and the next reader will trust."""
+    for name, reason in SITE_SIZING_EXEMPT.items():
+        assert reason.strip(), f"{name} has an empty reason"
+        preset = REPO / "params" / name
+        assert preset.exists(), f"SITE_SIZING_EXEMPT names {name}, which does not exist"
+        data = json.loads(preset.read_text())
+        assert any(k in data for k in SITE_SIZING_KEYS), (
+            f"SITE_SIZING_EXEMPT names {name}, which no longer sets any of "
+            f"{SITE_SIZING_KEYS} -- the exemption is dead"
+        )
 
 
 def test_the_owner_map_recognises_the_names_it_is_written_for():

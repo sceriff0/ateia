@@ -525,22 +525,27 @@ Ready-made `-params-file` JSON presets in `params/`:
 | `params/seg_quality_eval.json` | Turns the opt-in CSE segmentation-quality scorer on |
 
 ```bash
-nextflow run . -profile slurm,singularity \
+nextflow run . -profile slurm,singularity -c site.config \
   -params-file params/full_pipeline.json \
   --input samplesheet.csv --outdir results \
   --seg_method cellsam            # override any preset value on the CLI
 ```
 
-!!! warning "The four production presets ship IEO's cluster sizing"
+!!! warning "Presets never carry site sizing — that's `-c site.config`'s job (R4)"
     `full_pipeline.json`, `preprocessing_only.json`, `registration_only.json` and
-    `postprocessing_only.json` each set `max_cpus`/`max_memory` to IEO's own
-    values (`128` / `700.GB`) — they are examples from a real cluster, not
-    placeholders. A `-params-file` value **overrides a `-c` config file**
-    (Nextflow's own precedence order), so copying one of these presets onto a
-    different cluster and layering `-c site.config` will **not** resize it: the
-    preset's `max_cpus`/`max_memory` win. Either edit the preset's own
-    `_comment_resources` block, or override `--max_cpus`/`--max_memory` on the
-    CLI, which outranks both.
+    `postprocessing_only.json` deliberately do **not** set `max_cpus`/`max_memory`/
+    `max_time` (their `_comment_resources` entry says so). A `-params-file` value
+    **overrides a `-c` config file** (Nextflow's own precedence order), so a
+    preset that baked in one cluster's ceiling would silently defeat any
+    `site.config` layered on top of it on a different cluster — that mistake
+    shipped in these four presets before ruling R4. `max_cpus`/`max_memory` have
+    no default and are `required` in `nextflow_schema.json`, so every command
+    that loads one of these presets needs `-c site.config`
+    (`cp conf/site.config.template site.config`, then edit the ceiling) or the
+    run is refused at launch with `Missing required parameter(s)`.
+    `tests/test_param_presets_are_coherent.py` enforces this for every preset
+    except `test.json`, which intentionally pins tiny self-contained values for
+    the test suite.
 
 ## See also
 
