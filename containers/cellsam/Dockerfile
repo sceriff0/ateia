@@ -30,9 +30,13 @@ RUN python -m pip install --upgrade pip
 # (`import dask.array as da`, `from skimage import segmentation`), and an install nothing
 # in this Dockerfile names is invisible to
 # tests/test_container_harmonisation.py's "installs what it imports" guard.
+#
+# pandas was removed 2026-09-02: bin/segment_cellsam.py does not import it. Every install
+# in this file passes `-c constraints.txt`, so if cellSAM's own chain pulls pandas it is
+# still held at the harmonised 2.3.3 -- an explicit line only claimed a dependency this
+# image's script does not have.
 RUN pip install -c /tmp/requirements/constraints.txt \
     numpy==1.26.4 \
-    pandas==2.3.3 \
     tifffile==2025.5.10 \
     zarr==2.18.3 \
     numcodecs==0.13.1 \

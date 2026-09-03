@@ -35,14 +35,20 @@ RUN pip install --no-cache-dir --upgrade pip
 # override a divergent direct requirement, it conflicts with it and fails the build, which
 # is exactly the behaviour wanted.
 COPY requirements/constraints.txt /tmp/requirements/constraints.txt
+
+# tqdm==4.67.1 and psutil==6.1.1 were removed 2026-09-02: no script this image runs
+# imports either. Its six entrypoints (quantify.py, extract_cell_properties.py,
+# export_geojson.py, mask_to_geojson.py, merge_quant_csvs.py, generate_postprocessing_qc.py)
+# import matplotlib, numpy, pandas, scipy, skimage and tifffile. Every install here passes
+# `-c constraints.txt`, so anything that does arrive transitively is still held at the
+# harmonised version -- which is why an explicit line for an unimported package buys
+# nothing but a false dependency claim.
 RUN pip install --no-cache-dir -c /tmp/requirements/constraints.txt \
     numpy==1.26.4 \
     pandas==2.3.3 \
     scikit-image==0.25.2 \
     scipy==1.15.3 \
     matplotlib==3.9.2 \
-    tqdm==4.67.1 \
-    psutil==6.1.1 \
     tifffile==2025.5.10 \
     imagecodecs==2025.3.30 \
     zarr==2.18.3 \

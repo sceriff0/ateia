@@ -45,6 +45,16 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
 # override a divergent direct requirement, it conflicts with it and fails the build, which
 # is exactly the behaviour wanted.
 COPY requirements/constraints.txt /tmp/requirements/constraints.txt
+
+# TWO REMOVALS, 2026-09-02.
+#   nd2         — nothing this image runs imports it. Reading .nd2 is containers/convert's
+#                 job, through the bioio-nd2 plugin. This image's four scripts import
+#                 numpy, skimage, tifffile and zarr and nothing else.
+#   imagecodecs — was listed TWICE, once pinned and once bare. _installed() in
+#                 tests/test_container_harmonisation.py keeps the first specifier it sees,
+#                 so the guard read the pin and passed; pip resolves the LAST requirement,
+#                 so the bare one is what a fresh resolve would have honoured. One pinned
+#                 line, once.
 RUN pip install --no-cache-dir -c /tmp/requirements/constraints.txt \
     numpy==1.26.4 \
     scipy==1.15.3 \
@@ -52,9 +62,7 @@ RUN pip install --no-cache-dir -c /tmp/requirements/constraints.txt \
     imagecodecs==2025.3.30 \
     zarr==2.18.3 \
     numcodecs==0.13.1 \
-    scikit-image==0.25.2 \
-    nd2 \
-    imagecodecs
+    scikit-image==0.25.2
 
 # Fail the BUILD rather than a cluster run. containers/<dir>/smoke.sh imports exactly
 # the third-party modules this image's bin/ scripts import at run time, so a stack that

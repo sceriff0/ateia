@@ -45,11 +45,13 @@ COPY requirements/constraints.txt /tmp/requirements/constraints.txt
 # installed csbdeep too until 2026-09-02, so it lived in requirements/constraints.txt.
 # With one installer left, constraints.txt is the wrong place (it is for SHARED packages)
 # and the pin lives here.
+#
+# pandas was removed 2026-09-02: bin/segment.py does not import it, and every install here
+# passes `-c constraints.txt`, so a transitive pandas is still held at 2.3.3.
 RUN pip install --no-cache-dir -c /tmp/requirements/constraints.txt \
     stardist==0.9.1 \
     csbdeep==0.8.2 \
     dask==2026.7.1 \
-    pandas==2.3.3 \
     numpy==1.26.4 \
     scikit-image==0.25.2 \
     scipy==1.15.3 \
@@ -58,7 +60,16 @@ RUN pip install --no-cache-dir -c /tmp/requirements/constraints.txt \
     zarr==2.18.3 \
     numcodecs==0.13.1
 
-RUN pip install -c /tmp/requirements/constraints.txt gputools edt
+# StarDist's OPTIONAL ACCELERATORS, and the reason they are pinned rather than dropped:
+# stardist imports `edt` for the Euclidean distance transform and `gputools` for
+# OpenCL-accelerated non-maximum suppression when either is importable, so they are
+# reached through the stardist distribution and never by bin/segment.py. The apt block
+# above installs the OpenCL ICD loader and headers for exactly this. Unpinned they made
+# every rebuild a different image; 0.3.1 and 3.1.2 are the current releases (PyPI,
+# 2026-09-02), so this pin changes nothing about today's resolve and everything about
+# tomorrow's. Exempted in tests/test_no_uninstalled_or_unimported_packages.py with that
+# reason.
+RUN pip install -c /tmp/requirements/constraints.txt gputools==0.3.1 edt==3.1.2
 
 # Re-assert the exact pin: gputools/edt above can pull a newer numpy transitively.
 RUN pip install --no-cache-dir -c /tmp/requirements/constraints.txt "numpy==1.26.4"

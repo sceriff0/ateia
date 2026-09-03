@@ -32,9 +32,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # override a divergent direct requirement, it conflicts with it and fails the build, which
 # is exactly the behaviour wanted.
 COPY requirements/constraints.txt /tmp/requirements/constraints.txt
+
+# numba was removed 2026-09-02: neither bin/merge_channels_pyramid.py nor
+# bin/extract_mask_series.py imports it, and this base (cdgatenbee/valis-wsi) already ships
+# numba through VALIS, so the pip line added nothing. The three NUMBA_* env lines in
+# merge_channels_pyramid.py STAY -- a transitive import through the base is still possible
+# and a read-only-$HOME cache redirect costs nothing.
 RUN pip install --no-cache-dir -c /tmp/requirements/constraints.txt \
         numpy==1.26.4 \
-        numba \
         tifffile==2025.5.10 \
         imagecodecs==2025.3.30 \
         opencv-python==4.10.0.82 \
