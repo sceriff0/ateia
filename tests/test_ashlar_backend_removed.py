@@ -69,7 +69,27 @@ def test_ashlar_backend_files_are_deleted():
     assert not still_here, f"ashlar backend file(s) still present: {still_here}"
 
 
-def test_registration_method_enum_is_two_backends():
+def test_registration_method_enum_matches_the_backend_table():
+    """The enum has one owner: lib/RegBackends.groovy's BACKENDS table.
+
+    This used to assert `enum == ["valis", "tiled"]` -- a second, independent
+    statement of a fact the table already owns, which would have gone on passing
+    while the table gained a third backend and the two silently disagreed. It now
+    asks tests/test_reg_backends.py for the same list that file's own schema check
+    uses, so retiring or adding a backend is one edit, in the table.
+
+    The ASHLAR-specific property this file exists for is unchanged and still
+    asserted above: the backend's own files are gone.
+    """
+    from tests.test_reg_backends import reg_backend_methods
+
+    methods = reg_backend_methods()
+    assert "ashlar" not in methods, (
+        f"ashlar is back in lib/RegBackends.groovy's table: {methods}. It was a "
+        "benchmark baseline, and it survives on the `benchmarking` branch, which is "
+        "the only place it was ever used."
+    )
+
     schema = json.loads((REPO / "nextflow_schema.json").read_text())
     found = []
 
@@ -85,7 +105,7 @@ def test_registration_method_enum_is_two_backends():
     walk(schema)
     assert found, "registration_method not found in nextflow_schema.json at all"
     for enum in found:
-        assert enum == ["valis", "tiled"], f"expected two backends, got {enum}"
+        assert enum == methods, f"schema enum {enum} != RegBackends table {methods}"
 
 
 def test_no_reg_ashlar_params_remain():
