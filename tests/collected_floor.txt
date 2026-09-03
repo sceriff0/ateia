@@ -478,4 +478,27 @@
 # 2026-09-03, plan 05 (deepening B) after the rebase onto dev: ome_io's own suite
 # (test_ome_io.py), the repointed seam tests, the only-writer guard and the
 # container-harmonisation premise cases; no deletions, no skips.
-1565
+#
+# RE-MEASURED 2026-09-03, plan 05 Tasks 16-20 plus their fix rounds (measured
+# against the 1565 set two entries above, at 3e9dd73 -- NOT the 1292 an earlier
+# draft of Task 21 assumed; that baseline was already stale by the time this task
+# ran, having been superseded by the ratchet directly above). `git diff
+# --diff-filter=A --name-only 3e9dd73 HEAD -- tests/` names three new pytest files
+# collected here: tests/test_checkpoint_writer_is_the_only_writer.py (Task 17),
+# tests/test_reg_backends.py (Task 20, widened further in its own fix round without
+# adding test functions), and tests/test_segment_io_expand_labels.py -- the last of
+# these was newly added in this range too, despite appearing in Task 21's own
+# sample provenance text as though already counted in the 1565 baseline; that text
+# was written against the pre-ratchet 1292 baseline and is followed here for its
+# CONTENT (which files changed) rather than its assumed STARTING NUMBER. Also
+# touched, no net new/removed test functions expected: tests/test_layout.py,
+# tests/test_add_cycle_writes_what_it_requires.py, tests/test_ashlar_backend_removed.py
+# (one test renamed, not added), tests/test_segment_lazy_dapi_read.py, and
+# tests/lib_probe.nf (a Nextflow script, not pytest-collected). No deletions, no
+# skips added. Measured after generating the fixtures, with the suite's standard
+# exclusions and MIRAGE_STRICT_SKIPS=1: `pytest --collect-only -q` reports "1584
+# tests collected", and a full run gives 1571 passed, 13 skipped, 0 failed --
+# 1571 + 13 = 1584. The prior 1565 was within FLOOR_DRIFT (50) of this number, so
+# the suite did not fail on the floor; re-ratcheted anyway per instruction, to keep
+# the floor a tight measurement rather than a stale one riding inside the drift band.
+1584
