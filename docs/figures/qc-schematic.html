@@ -6,7 +6,7 @@
 <title>MIRAGE Supplementary Figure S3 — Quality control</title>
 <style>
   /* ======================================================================
-     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4 · S5)
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4 · S5 · S6)
      ----------------------------------------------------------------------
      DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
      this set has to survive being detached from the repository — attached to
@@ -14,10 +14,10 @@
      external stylesheet, not even a sibling one. This block is therefore
      repeated verbatim in docs/figures/pipeline-schematic.html,
      docs/figures/registration-schematic.html, docs/figures/qc-schematic.html,
-     docs/figures/zarr-schematic.html and docs/figures/coarse-schematic.html,
-     and is ported (with the slate counterpart the figures deliberately lack)
-     to docs/stylesheets/extra.css.
-     Change one, change all six.
+     docs/figures/zarr-schematic.html, docs/figures/coarse-schematic.html and
+     docs/figures/accuracy-schematic.html, and is ported (with the slate
+     counterpart the figures deliberately lack) to docs/stylesheets/extra.css.
+     Change one, change all seven.
 
      SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
      paper ground.
@@ -231,6 +231,7 @@
     <span class="self">S3 · quality control</span>
     <a href="zarr-schematic.html">S4 · lazy reads</a>
     <a href="coarse-schematic.html">S5 · coarse alignment</a>
+    <a href="accuracy-schematic.html">S6 · accuracy measures</a>
   </nav>
   <p class="standfirst">Every step of the pipeline emits quality-control artifacts, and every one of them reaches
     the end-of-run report through the <i>same</i> one-channel interface: a stream of <code>[kind, file]</code>
@@ -606,7 +607,8 @@
             <code>&lt;outdir&gt;/qc/mirage_qc_data_&lt;ts&gt;/</code>, so cutting the sections loses nothing.
             Where the report used to print a per-slide TRE table, a row-by-row reconciliation table and a
             head-of-CSV row dump, it now renders per-stage error-distribution plots, a feature-TRE vs
-            cell-displacement scatter (log-log, with the divergence ratio drawn as a diagonal band) and a
+            cell-displacement scatter (log-log, with the divergence ratio drawn as a diagonal band — see
+            <a href="accuracy-schematic.html">S6</a>) and a
             per-cell residual histogram. The plots are hand-rolled inline SVG, <b>stdlib-only</b>, following
             this same file's pre-existing <code>_tiled_tre_heatmap_svg()</code> precedent — a report that
             needed matplotlib could not run inside the <code>preprocess</code> image it is published from.

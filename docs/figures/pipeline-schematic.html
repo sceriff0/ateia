@@ -6,7 +6,7 @@
 <title>MIRAGE Supplementary Figure S1 — Pipeline</title>
 <style>
   /* ======================================================================
-     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4 · S5)
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4 · S5 · S6)
      ----------------------------------------------------------------------
      DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
      this set has to survive being detached from the repository — attached to
@@ -14,10 +14,10 @@
      external stylesheet, not even a sibling one. This block is therefore
      repeated verbatim in docs/figures/pipeline-schematic.html,
      docs/figures/registration-schematic.html, docs/figures/qc-schematic.html,
-     docs/figures/zarr-schematic.html and docs/figures/coarse-schematic.html,
-     and is ported (with the slate counterpart the figures deliberately lack)
-     to docs/stylesheets/extra.css.
-     Change one, change all six.
+     docs/figures/zarr-schematic.html, docs/figures/coarse-schematic.html and
+     docs/figures/accuracy-schematic.html, and is ported (with the slate
+     counterpart the figures deliberately lack) to docs/stylesheets/extra.css.
+     Change one, change all seven.
 
      SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
      paper ground.
@@ -262,6 +262,7 @@
     <a href="qc-schematic.html">S3 · quality control</a>
     <a href="zarr-schematic.html">S4 · lazy reads</a>
     <a href="coarse-schematic.html">S5 · coarse alignment</a>
+    <a href="accuracy-schematic.html">S6 · accuracy measures</a>
   </nav>
   <p class="standfirst">A step-gated Nextflow DSL2 workflow that aligns multiplexed immunofluorescence slides,
     segments every cell, quantifies each marker per compartment, and exports QuPath-compatible GeoJSON, a
@@ -746,7 +747,7 @@
       <div class="sig"><h4>Resource scaling</h4><div class="src">← trace.txt + size_logs</div>
         <ul><li>Linear fit per stage: <code>peak_rss ~ input_gb</code>, <code>realtime ~ input_gb</code></li><li>Slope = marginal cost per input GiB</li><li>Intercept = fixed overhead</li></ul></div>
       <div class="sig"><h4>Registration accuracy</h4><div class="src">← reg_qc=2 seg_qc.json · VALIS summary · STARE intrinsic TRE</div>
-        <ul><li>Seg-based Dice + centroid displacement per stage</li><li>Δ-vs-rigid isolates registration from segmentation noise</li><li>VALIS feature rTRE and STARE intrinsic TRE as method-native second signals</li><li><b>No ground truth of any kind.</b> Every number here is a reference-free agreement measure on tissue: it ranks configurations against each other, and cannot say any of them is correct.</li></ul></div>
+        <ul><li>Seg-based Dice + centroid displacement per stage</li><li>Δ-vs-rigid isolates registration from segmentation noise</li><li>VALIS feature rTRE and STARE intrinsic TRE as method-native second signals</li><li><b>No ground truth of any kind.</b> Every number here is a reference-free agreement measure on tissue: it ranks configurations against each other, and cannot say any of them is correct. See <a href="accuracy-schematic.html">S6</a>.</li></ul></div>
       <div class="sig"><h4>Segmentation stability</h4><div class="src">← cross-method agreement</div>
         <ul><li>Instance-F1 between backends on a shared cell population</li><li>Foreground IoU</li><li>instantseg / stardist / cellsam</li></ul></div>
     </div>

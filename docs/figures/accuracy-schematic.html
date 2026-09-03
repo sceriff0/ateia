@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MIRAGE Supplementary Figure S5 — Coarse alignment</title>
+<title>MIRAGE Supplementary Figure S6 — Accuracy measures</title>
 <style>
   /* ======================================================================
      MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4 · S5 · S6)
@@ -264,172 +264,201 @@
 <div class="sheet">
 
   <div class="masthead">
-    <div class="kick">Supplementary Figure S5 · coarse alignment</div>
-    <h1>STARE's coarse anchor: a learned DISK + LightGlue matcher estimates one global pose per moving slide, and its residual — not its speed — is what the per-tile step depends on</h1>
+    <div class="kick">Supplementary Figure S6 · accuracy measures</div>
+    <h1>Four registration-accuracy numbers this pipeline reports — three scored by the transform's own features, one independent, and none of them a ground truth</h1>
   </div>
   <nav class="figset" aria-label="Supplementary figure set">
     <a href="pipeline-schematic.html">S1 · pipeline</a>
     <a href="registration-schematic.html">S2 · registration</a>
     <a href="qc-schematic.html">S3 · quality control</a>
     <a href="zarr-schematic.html">S4 · lazy reads</a>
-    <span class="self">S5 · coarse alignment</span>
-    <a href="accuracy-schematic.html">S6 · accuracy measures</a>
+    <a href="coarse-schematic.html">S5 · coarse alignment</a>
+    <span class="self">S6 · accuracy measures</span>
   </nav>
-  <p class="standfirst">The STARE (tiled) registration backend's first step — <code>TILED_COARSE</code> — estimates a
-    single whole-slide affine <code>M0</code> on a downsampled thumbnail before the per-tile step refines the small
-    residual left over. For v1.0.0 the front-end that produces that estimate changed from three classical,
-    non-learned feature matchers to one learned matcher, DISK + LightGlue, run CPU-only inside the same task. This
-    figure grounds why that swap happened, what the code kept unchanged underneath it, why the memory curve now has a
-    different shape, and what is — and is not — verified about the replacement.</p>
+  <p class="standfirst">Every registration run in this pipeline can emit up to four distinct
+    accuracy-shaped numbers, produced by different processes, in different units, at different
+    QC levels. Nothing in the source states which of them may be read as evidence that a
+    registration is <i>correct</i>. This figure names all four, draws which ones share their
+    input with the transform that produced them, and states plainly that none of them is checked
+    against an externally-verified correspondence.</p>
 
   <!-- a — THE NAIVE EXPECTATION -->
   <section class="panel">
     <span class="plabel">a</span>
-    <div class="panel-head"><h2>The naive expectation — a cheap thumbnail step, any detector would do</h2>
-      <p>Coarse alignment looks like it only has to be fast: a whole-slide anchor computed on a small thumbnail,
-        refined later. What it actually has to deliver is a residual narrow enough to land inside the window the
-        per-tile step reads — that requirement, not runtime, is what selects the matcher.</p></div>
-    <div class="rail">
-      <div class="r"><div class="t">COARSE delivers</div><div class="v">M0 + residual (px)</div>
-        <div class="d">One 3×3 affine mapping moving → reference pixels, plus a residual TRE —
-          <code>estimate_rigid</code>'s return value.</div></div>
-      <div class="r"><div class="t">the constraint</div><div class="v">residual &lt; halo</div>
-        <div class="d">The per-tile step reads a tile core expanded by <code>reg_tiled_halo</code> px and clamped to
-          the image — the capture radius the anchor's residual must land inside. Null by default, resolved from the
-          <code>reg_tiled_mode</code> tier row (256 px at <code>high</code>).</div></div>
-      <div class="r"><div class="t">what enforces it</div><div class="v">nothing</div>
-        <div class="d"><code>TILED_COARSE</code> logs a warning once the residual reaches the halo, but nothing
-          downstream checks it and no task fails on it — a slide can mis-register silently and the run still exits
-          0.</div></div>
-    </div>
-    <div class="callout" style="margin-top:12px"><b>Why this is a correctness requirement, not a speed one.</b> A
-      faster, worse matcher does not merely take a different amount of time — it produces a wider residual, and once
-      that residual reaches the halo the per-tile step is measuring a shift to the wrong structure while the pipeline
-      keeps running. The matcher is chosen for what it can find inside that budget, not for how quickly it runs.</div>
+    <div class="panel-head"><h2>The naive expectation — "the pipeline reports a registration
+      error"</h2>
+      <p>A reviewer reading one QC JSON sees a small, well-labelled set of numbers and reasonably
+        expects them to describe one thing. They describe four different things, and they
+        disagree with each other by design — not by bug.</p></div>
+    <div class="tbl-scroll"><table class="rc">
+      <caption>one slide-stage, four numbers — illustrative, from the documented worked example</caption>
+      <thead><tr><th>measure</th><th class="v">value</th></tr></thead>
+      <tbody>
+        <tr><td class="k">intrinsic TRE (rigid stage, feature-based)</td><td class="v"><span class="em">4.1 px</span></td></tr>
+        <tr><td class="k">cell displacement, centroid p50 (rigid stage)</td><td class="v"><span class="em">1.33 µm</span></td></tr>
+        <tr><td class="k">seg-QC mean IoU (rigid stage)</td><td class="v"><span class="em">0.42</span></td></tr>
+        <tr><td class="k">matched-pair fraction of segmented cells</td><td class="v"><span class="em">0.91</span></td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout" style="margin-top:12px"><b>None of these four is "the" registration
+      error.</b> Two are computed on the registrar's own optimisation target, one is a Dice-like
+      overlap bounded by how well two independent segmentation runs agree in the first place, and
+      one is a diagnostic about the pairing itself, not about the transform. Panel&nbsp;b names
+      what each one is actually computed from; panel&nbsp;c is why that distinction matters.</div>
   </section>
 
-  <!-- b — WHY THE FRONT-END CHANGED -->
+  <!-- b — THE FOUR MEASURES -->
   <section class="panel">
     <span class="plabel">b</span>
-    <div class="panel-head"><h2>Why the front-end changed, and what did not</h2>
-      <p>Three non-learned, classical feature-matching front-ends preceded this one, plus a selector parameter
-        choosing among all four. All four were <b>deleted outright</b> for v1.0.0 — not kept behind a flag — because
-        a dispatch table with one live value is dead config and the deleted three were not the method being
-        replicated. The numerically load-bearing fit underneath every one of them was never touched.</p>
-    </div>
-    <div class="grid2">
-      <div class="branch" style="margin-top:0">
-        <div class="bh">changed — the front-end</div>
-        <div class="opt"><div class="oh"><span>the matcher</span><span class="tag">deleted &amp; replaced</span></div>
-          <div class="ox">What produces point correspondences between the two thumbnails. The module's own docstring
-            now reads "Learned feature matching (DISK + LightGlue) handles the inter-cycle rotation/translation" —
-            it used to name a different, classical technique in the same sentence.</div></div>
-      </div>
-      <div class="branch" style="margin-top:0">
-        <div class="bh">unchanged — the fit</div>
-        <div class="opt"><div class="oh"><span>estimate_transform_from_matches</span><span class="tag-def">untouched</span></div>
-          <div class="ox">RANSAC + model fit over whatever correspondences the front-end hands it, plus
-            <code>scale_transform_to_full_res</code>, the thumbnail-to-full-resolution lift. Same function, same
-            signature, before and after the swap.</div></div>
-      </div>
-    </div>
-    <div class="callout" style="margin-top:12px"><b>Why cross-cycle thumbnails are hard to match, regardless of
-      matcher.</b> Reference and moving planes come from different imaging cycles with different exposures: two views
-      of the same tissue can arrive at wildly different dynamic ranges and match each other far worse than they
-      should, with no error raised. That is a <i>correspondence</i> problem — what a matcher can find in the two
-      images — never a geometry problem in how the fit is solved from what it finds. The front-end swap targets
-      exactly the half of the step that owns correspondences; it could not have targeted the other half, because the
-      other half was never where the difficulty was.</div>
+    <div class="panel-head"><h2>The four measures, and what each is computed from</h2>
+      <p>All four are emitted per moving slide; none of the first two is gated by
+        <code>reg_qc</code> — a registration method always reports its own intrinsic error,
+        regardless of QC level. The last two exist only at <code>reg_qc&nbsp;=&nbsp;2</code>.</p></div>
+    <div class="tbl-scroll"><table class="rc">
+      <thead><tr><th>measure</th><th class="v">computed from</th><th class="v">unit</th><th class="v">produced by</th><th class="v">reg_qc</th></tr></thead>
+      <tbody>
+        <tr><td class="k">intrinsic TRE</td>
+          <td class="v">VALIS: its own keypoint-match residual after the fit
+            (<code>*_summary.csv</code>, the "rTRE" table). STARE: the DISK+LightGlue anchor's
+            RANSAC residual plus the per-tile phase-correlation shift
+            (<code>*_tre.json</code>).</td>
+          <td class="v">px</td>
+          <td class="v"><code>REGISTER</code> / <code>TILED_SOLVE</code></td>
+          <td class="v"><span class="em">always</span> — part of registration itself</td></tr>
+        <tr><td class="k">STARE confidence gate</td>
+          <td class="v">Normalised phase-correlation error, <code>[0,1]</code>, per tile — the
+            same measurement that decides whether a control point enters the mesh. Only the
+            resulting accept/reject flag and <code>tre_rigid</code> land in <code>*_tre.json</code>;
+            the raw confidence number itself is not published.</td>
+          <td class="v">unitless [0,1]</td>
+          <td class="v"><code>TILED_REG_TILE</code> (measures) / <code>TILED_SOLVE</code> (gates)</td>
+          <td class="v"><span class="em">always</span> — STARE method only, not QC-gated</td></tr>
+        <tr><td class="k">cell displacement</td>
+          <td class="v">Median/p90/max centroid distance between the same nuclei, warped through
+            each registration stage, paired once at the rigid anchor.</td>
+          <td class="v">µm when a pixel size resolves (typically VALIS); px otherwise (typically
+            STARE — the pipeline never passes a pixel size to this step on that path)</td>
+          <td class="v"><code>WARP_SEG_QC</code></td>
+          <td class="v">2</td></tr>
+        <tr><td class="k">seg-QC IoU / dice_matched</td>
+          <td class="v">Per-pair IoU over the same warped, fixed-paired nuclei;
+            <code>dice_matched</code> is the areal Dice restricted to those matched pairs
+            only.</td>
+          <td class="v">unitless [0,1]</td>
+          <td class="v"><code>WARP_SEG_QC</code> — same JSON, same process, as cell displacement</td>
+          <td class="v">2</td></tr>
+      </tbody>
+    </table></div>
   </section>
 
-  <!-- c — THE MECHANISM -->
+  <!-- c — CIRCULARITY -->
   <section class="panel">
     <span class="plabel">c</span>
-    <div class="panel-head"><h2>The mechanism — from two raw planes to one lifted transform</h2>
-      <p>Six steps, run once per moving slide. The tensor shapes are the part the code makes hardest to hold in one
-        pass, so they are spelled out at every stage.</p></div>
-    <div class="stack">
-      <div class="stg"><div class="sn"><span class="num">1</span>normalize_intensity</div>
-        <div class="sx">Raw decimated plane, <code>H×W</code> float32 counts (0–65535) → rescaled to <b>[0, 1]</b>
-          over a <b>p1–p99.9</b> percentile window (<code>_NORM_PCT</code>) — the range DISK was trained on, and a
-          correctness fix for the cross-cycle exposure mismatch in panel&nbsp;b, not only a domain-range one.</div></div>
-      <div class="stg"><div class="sn"><span class="num">2</span>reshape for DISK</div>
-        <div class="sx">Normalised plane → a <b>1×3×H×W</b> float32 tensor, the single channel repeated across three
-          (<code>_to_disk_tensor</code>). Reference and moving are each converted independently.</div></div>
-      <div class="stg"><div class="sn"><span class="num">3</span>DISK.from_pretrained("depth")</div>
-        <div class="sx">Two forward passes, one per plane. Internally padded to a multiple of 16
-          (<code>pad_if_not_divisible=True</code> — its U-Net downsamples by 16 and raises on a thumbnail whose
-          dimensions are not multiples of it), up to <b>2048</b> keypoints per plane (<code>n_keypoints</code>, the
-          module default — <code>bin/tiled_coarse.py</code> never overrides it). Each call returns keypoints
-          (<code>N×2</code>) and descriptors, on CPU only.</div></div>
-      <div class="stg"><div class="sn"><span class="num">4</span>LightGlue("disk")</div>
-        <div class="sx">Both keypoint/descriptor sets in → an <code>M×2</code> match-index array out, column 0
-          indexing the reference set and column 1 the moving set.</div></div>
-      <div class="stg"><div class="sn"><span class="num">5</span>RANSAC euclidean fit</div>
-        <div class="sx"><code>estimate_transform_from_matches(src, dst)</code> — default model <b>euclidean</b>
-          (rotation + translation, 3 DOF), <b>1000</b> trials, <b>3&nbsp;px</b> inlier threshold → a 3×3 matrix
-          <code>M0</code> in <i>thumbnail</i> pixels, plus <code>(residual_px, n_inliers)</code>.</div></div>
-      <div class="stg"><div class="sn"><span class="num">6</span>lift to full resolution</div>
-        <div class="sx"><code>scale_transform_to_full_res</code> multiplies the translation column by the decimation
-          factor (rotation is scale-invariant and passes through unchanged); the residual is scaled by the same
-          factor. Both COARSE outputs — <code>M0</code> and the reported <code>coarse_tre</code> — are full-resolution
-          numbers from this point on.</div></div>
-    </div>
-  </section>
-
-  <!-- d — THE MEMORY SHAPE -->
-  <section class="panel">
-    <span class="plabel">d</span>
-    <div class="panel-head"><h2>The memory shape — a U-Net's activations, not a corner detector's</h2>
-      <p>DISK is a U-Net: its activation memory scales with thumbnail <b>area</b>, not with keypoint count or with
-        the slide's own dimensions. That single fact reshaped a resource request and moved a tier column.</p></div>
+    <div class="panel-head"><h2>Circularity — the load-bearing panel</h2>
+      <p>Two of the four measures are computed from the same features the registrar optimised
+        against; the other two are computed from an independently segmented signal the registrar
+        never saw.</p></div>
     <div class="grid2">
       <div class="branch" style="margin-top:0">
-        <div class="bh">activation memory, per call</div>
-        <div class="opt"><div class="oh"><span>DISK forward pass</span><span class="tag-alt">scales with area</span></div>
-          <div class="ox"><b>GB ≈ 1.1 + 7.3 × Mpx</b> — measured on the pinned stack (3.03 GB at 512 px, 8.78 GB at
-            1024 px thumbnails). At the shipped <code>high</code> tier (2048 px → 4.19 Mpx) that is ≈31.7 GB;
-            <code>TILED_COARSE</code>'s memory closure applies 1.5× headroom on top to reach the <b>48&nbsp;GB</b> it
-            actually requests.</div></div>
+        <div class="bh">circular — same features the registrar fit</div>
+        <div class="opt"><div class="oh"><span>intrinsic TRE</span><span class="tag">↺ self-scored</span></div>
+          <div class="ox">The registrar reports its own residual on the very correspondences it
+            used to solve for the transform. A transform that overfits a handful of bright,
+            easy-to-match points can report an excellent intrinsic TRE while the rest of the
+            tissue — everything the matcher did not key on — is untouched.</div></div>
+        <div class="opt"><div class="oh"><span>STARE confidence gate</span><span class="tag">↺ self-scored</span></div>
+          <div class="ox">The same normalised phase-correlation error is used <i>both</i> to
+            decide which control points enter the mesh <i>and</i> as the only quality signal
+            about how well that tile matched. A tile that agrees with itself for the wrong
+            reason (matched a repeating texture, or a section-edge artefact with low error and
+            small displacement) passes the gate the same way a genuinely well-matched tile
+            does.</div></div>
       </div>
       <div class="branch" style="margin-top:0">
-        <div class="bh">model weights, cached once</div>
-        <div class="opt"><div class="oh"><span>_DISK_MODELS</span><span class="tag">built once per process</span></div>
-          <div class="ox">A module-level dict keyed on device, holding both DISK and LightGlue after the first call
-            — because building both models dominates a single call, not because repeat inference is slow. It matters
-            for the in-process oracle and the test suite; a fresh <code>TILED_COARSE</code> task pays that cost
-            exactly once.</div></div>
+        <div class="bh">independent — a signal the registrar never saw</div>
+        <div class="opt"><div class="oh"><span>cell displacement</span><span class="tag-def">independent input</span></div>
+          <div class="ox">Nuclei are segmented on each slide's <i>native</i>, pre-registration
+            image by the run's own segmenter — a different algorithm, working from cell
+            morphology, that never sees the registrar's keypoints or its optimisation
+            target.</div></div>
+        <div class="opt"><div class="oh"><span>seg-QC IoU / dice_matched</span><span class="tag-def">independent input</span></div>
+          <div class="ox">Computed on the exact same warped, fixed-paired native-segmentation
+            polygons as cell displacement — a second summary of the one independent signal this
+            pipeline has, not a second independent measurement.</div></div>
       </div>
     </div>
-    <div class="callout" style="margin-top:12px"><b>Why <code>reg_tiled_coarse_max_dim</code> is now a memory knob,
-      not just a time knob.</b> Raising the thumbnail bound is no longer a free accuracy trade: the shipped
-      <code>high</code> tier is <b>2048</b> px, not the 4096 an earlier iteration shipped — the whole tier column
-      moved down one step for v1.0.0 because of this same area-scaling formula. A <b>256&nbsp;px floor</b> is
-      enforced at launch, before any task starts: below it, the decimator treats the bound as "no decimation" and
-      would hand DISK the full-resolution plane — a guaranteed OOM now that the matcher is a U-Net rather than a
-      cheap corner detector.</div>
+    <div class="callout" style="margin-top:12px"><b>What this means for reading a report.</b> An
+      excellent intrinsic TRE and an excellent confidence-gate pass rate say the registrar is
+      happy with itself. They say nothing about whether the cells the registrar was never shown
+      actually landed on top of each other. Cell displacement and <code>dice_matched</code> are
+      the only two numbers in this pipeline that can contradict a registrar that is quietly
+      wrong.</div>
+  </section>
+
+  <!-- d — THE CORRELATION -->
+  <section class="panel">
+    <span class="plabel">d</span>
+    <div class="panel-head"><h2>The correlation, and what a divergence means</h2>
+      <p><code>GENERATE_QC_REPORT</code> plots every slide-stage's intrinsic TRE (the circular
+        measure) against its cell displacement (the independent one) on log-log axes, with a
+        shaded agreement band at a fixed divergence ratio.</p></div>
+    <div class="rail">
+      <div class="r"><div class="t">x-axis</div><div class="v">intrinsic TRE</div>
+        <div class="d">The registrar's own self-reported residual for that stage — VALIS's
+          <code>rigid_D</code>/<code>non_rigid_D</code> column, or STARE's
+          <code>coarse_tre_px</code>/refined p50.</div></div>
+      <div class="r"><div class="t">y-axis</div><div class="v">cell displacement</div>
+        <div class="d">The same stage's <code>WARP_SEG_QC</code> centroid-residual p50 — the
+          independent measure.</div></div>
+      <div class="r"><div class="t">the band</div><div class="v">3× either way</div>
+        <div class="d">A slide-stage is called divergent when the larger of the two numbers
+          exceeds <b>3×</b> the smaller — a symmetric rule, drawn as two lines parallel to the
+          identity on the log axes rather than recomputed per point.</div></div>
+    </div>
+    <div class="callout" style="margin-top:12px"><b>Reading a point off the band.</b> A
+      slide-stage whose <b>cell displacement is much larger than its intrinsic TRE</b> is a
+      registrar reporting a small residual on its own features while the independently segmented
+      tissue disagrees — either the transform genuinely failed somewhere the registrar's features
+      never sampled, or the independent segmentation/pairing itself produced an artefact; the
+      reconciliation cannot tell the two apart by itself, only flag that they disagree. A
+      slide-stage whose <b>intrinsic TRE is much larger than its cell displacement</b> means the
+      tissue-level correspondence is actually fine despite a poor self-reported feature fit — the
+      keypoints the registrar had to work with were sparse or noisy in a way that did not carry
+      through to the cells. A point inside the band means the two measures corroborate each
+      other, which is the only case in which either one, alone, would have been a reasonable
+      thing to trust.</div>
+    <div class="warnbox" style="margin-top:10px"><span class="wl">a labelling caveat in the
+      reconciliation itself</span> The reconciliation's own output fields are named
+      <code>feature_tre_um</code> and <code>cell_disp_um</code> regardless of what unit the
+      numbers are actually in. The cell-displacement side is genuine µm only when a pixel size
+      resolved (the VALIS-typical case) and is otherwise the raw px value under a µm-suffixed
+      key; the intrinsic-TRE side is always whichever unit its own source file already reports,
+      unconverted. The divergence ratio is unit-free by construction (it compares a number to
+      itself scaled), so a same-unit comparison is unaffected — but a reader taking either axis
+      label as a literal micron count should not.</div>
   </section>
 
   <!-- e — THE KNOBS -->
   <section class="panel">
     <span class="plabel">e</span>
     <div class="panel-head"><h2>The knobs</h2>
-      <p>Defaults verbatim from the <code>params{}</code> block of <code>nextflow.config</code>, the only place a
-        default is declared. <code>reg_tiled_coarse_max_dim</code> and <code>reg_tiled_halo</code> are
-        <b>tier-owned</b>: both are declared <code>null</code>, and the value comes from <code>reg_tiled_mode</code>'s
-        row in the STARE preset table. Setting either directly requires <code>reg_tiled_mode&nbsp;=&nbsp;custom</code>
-        — an override under any other tier is rejected at launch, before any process runs.</p></div>
+      <p>Defaults verbatim from the <code>params{}</code> block of <code>nextflow.config</code>.</p></div>
     <div class="tbl-scroll"><table class="pr">
-      <tr><td class="k">reg_tiled_coarse_max_dim</td><td class="val nul">null</td>
-        <td class="d">M0 thumbnail longest side (px) — the memory knob from panel&nbsp;d. null → the
-          <code>reg_tiled_mode</code> row in the STARE preset table (<code>high</code>: 2048). 256 px floor enforced
-          at launch.</td></tr>
-      <tr><td class="k">reg_tiled_halo</td><td class="val nul">null</td>
-        <td class="d">tile read halo = the capture radius from panel&nbsp;a (px). null → the same tier row
-          (<code>high</code>: 256).</td></tr>
-      <tr><td class="k">reg_tiled_mode</td><td class="val">high</td>
-        <td class="d">cost/accuracy tier: high | medium | low | custom. <code>custom</code> starts from the
-          <code>high</code> row and keeps every knob not explicitly set.</td></tr>
+      <tr><td class="k">reg_qc</td><td class="val">2</td>
+        <td class="d">0 none · 1 overlay · 2 +cell-based measures. <b>2 is the default</b> — the
+          independent measure this figure argues matters most is on unless a run opts out. The
+          ladder is a cost switch, not a capability tier: no level changes what the registration
+          itself does, only how much of it gets measured.</td></tr>
+      <tr><td class="k">reg_tiled_max_error</td><td class="val">0.99</td>
+        <td class="d">STARE's confidence gate threshold — drop a control point whose
+          phase-correlation error exceeds this (0 = perfect match, ~1 = no shared structure).</td></tr>
+      <tr><td class="k">reg_tiled_gate_tre</td><td class="val">1.0</td>
+        <td class="d">STARE refines only tiles whose rigid-stage TRE (px) exceeds this — a tile
+          already aligned to better than this contributes nothing to the mesh.</td></tr>
+      <tr><td class="k">spatialdata_residual_join_max_px</td><td class="val">15.0</td>
+        <td class="d">Max centroid distance (px) when spatially joining WARP_SEG_QC's per-cell
+          residuals onto the segmentation mask for SpatialData export — a separate join, not a
+          registration-quality knob.</td></tr>
     </table></div>
   </section>
 
@@ -437,50 +466,62 @@
   <section class="panel">
     <span class="plabel">f</span>
     <div class="panel-head"><h2>Honest limits</h2>
-      <p>Three things this front-end swap does not have behind it, stated plainly rather than left for a reviewer to
-        discover.</p></div>
-    <div class="warnbox"><span class="wl">1 — no head-to-head measurement</span> No accuracy comparison between the
-      three deleted classical front-ends and the learned one is recorded anywhere in this tree. The change's own
-      record states a methodological reason — the classical alternatives were not the front-end being replicated —
-      not a measured one. The only tests exercising the learned front-end directly recover a pure synthetic pixel
-      shift injected into a random blob image; there is no real-slide accuracy test for it, classical or learned.</div>
-    <div class="warnbox" style="margin-top:10px"><span class="wl">2 — no CPU fallback</span> If torch or the learned
-      matcher's library fail to import, the front-end raises a <code>RuntimeError</code> naming the missing
-      dependency and the pinned versions to install — there is no classical detector left to fall back to. A
-      deployment node missing the pinned stack fails the task outright rather than degrading.</div>
-    <div class="warnbox" style="margin-top:10px"><span class="wl">3 — the residual is an estimate, not a per-pixel
-      guarantee</span> Both <code>M0</code> and its residual are computed on the thumbnail and then <i>lifted</i> to
-      full resolution by a single multiplicative scale — they are never re-measured at full resolution. The reported
-      residual is therefore an estimate of the global pose error, not a guarantee about any individual full-resolution
-      pixel.</div>
+      <p>What none of the four measures in this figure can do, stated once rather than left for a
+        reviewer to discover per-measure.</p></div>
+    <div class="warnbox"><span class="wl">1 — there is no ground truth anywhere in this
+      pipeline</span> All four measures are reference-free: they describe how well a transform's
+      own features fit each other, or how well two independently produced signals (a registrar's
+      transform and a segmenter's cells) agree with each other. Agreement between two reference-free
+      signals is evidence, not proof — none of the four can say a configuration is correct, only
+      that it is more or less internally consistent than another.</div>
+    <div class="warnbox" style="margin-top:10px"><span class="wl">2 — nothing in this repository
+      or its sibling branches closes that gap today</span> A guard in this very tree
+      (<code>tests/test_figures_have_no_retired_names.py</code>) records that an
+      externally-verified-correspondence accuracy harness once existed in this project and was
+      deleted outright, with its own removal note kept as the record of why. No branch this
+      worktree can see ships a working replacement.</div>
+    <div class="warnbox" style="margin-top:10px"><span class="wl">3 — the question a reviewer is
+      most likely to ask has no answer here</span> "What is the absolute registration error, in
+      physical units, against independently and externally verified correspondences?" This
+      pipeline cannot answer that question for any configuration it ships. That is the fact this
+      figure exists to say out loud, rather than leave for a reviewer to discover by reading four
+      JSON keys and assuming one of them must be it.</div>
   </section>
 
   <p class="caption">
-    <b>Supplementary Figure S5. The STARE coarse front-end.</b>
-    <b>(a)</b> <code>TILED_COARSE</code> estimates one global affine per moving slide on a shared thumbnail; the
-    per-tile step that follows can only recover a residual that lands inside its read halo, and nothing downstream
-    checks that it did — a wide residual mis-registers a slide while the run still exits 0. <b>(b)</b> Three earlier,
-    classical feature-matching front-ends and their selector parameter were deleted outright and replaced by a single
-    learned matcher (DISK + LightGlue) for v1.0.0; the RANSAC fit and the thumbnail-to-full-resolution lift underneath
-    every front-end, past and present, were never touched — what changed was only how correspondences are found
-    between two cross-cycle thumbnails. <b>(c)</b> Six steps carry a plane from raw counts to a lifted transform:
-    percentile normalisation, a batched tensor reshape, two DISK forward passes (padded internally to a multiple of
-    16, up to 2048 keypoints each, CPU-only), a LightGlue match, a RANSAC euclidean fit, and a full-resolution lift.
-    <b>(d)</b> Because the matcher is a U-Net, its activation memory scales with thumbnail <i>area</i>
-    (GB ≈ 1.1 + 7.3 × Mpx) rather than staying near-flat the way a classical corner detector's did — the resource
-    request this step asks for, and the tier this pipeline ships at, both moved to respect that curve. <b>(e)</b> The
-    two knobs governing this step's cost and accuracy are tier-owned and null-declared, resolved from
-    <code>reg_tiled_mode</code>'s row unless <code>reg_tiled_mode=custom</code> explicitly overrides them.
-    <b>(f)</b> The replacement is unmeasured head-to-head against what it replaced, has no fallback if its learned
-    stack is unavailable, and reports a residual that is an estimate lifted from a thumbnail, not a full-resolution
-    guarantee. This figure is the long form of Supplementary Figure <b>S2</b>'s panel on the STARE backend, which it
-    must not contradict; Supplementary Figure <b>S1</b> places registration in the whole workflow.
-    <span class="footnote">All algorithm details and parameter defaults are read verbatim from the pipeline source at
-    the commit stamped at the top of this figure (<code>bin/utils/coarse_align.py</code>, <code>bin/tiled_coarse.py</code>,
-    <code>bin/utils/tile_grid.py</code>, <code>bin/utils/tiled_io.py</code>, <code>lib/RegPresets.groovy</code>,
-    <code>lib/ParamUtils.groovy</code>, <code>conf/modules.config</code>, <code>nextflow.config</code>,
-    <code>containers/tiled/Dockerfile</code>, <code>requirements/torch-cpu.txt</code>,
-    <code>requirements/kornia.txt</code>, <code>tests/test_coarse_frontend.py</code> and CHANGELOG.md).</span>
+    <b>Supplementary Figure S6. What each accuracy measure actually measures.</b>
+    <b>(a)</b> A registration run can emit four differently-scoped accuracy numbers per slide-stage;
+    none is privileged as "the" registration error, and they are not required to agree.
+    <b>(b)</b> Intrinsic TRE and the STARE confidence gate are emitted unconditionally, as part of
+    registration itself; cell displacement and seg-QC IoU/<code>dice_matched</code> exist only at
+    <code>reg_qc&nbsp;=&nbsp;2</code>, computed by <code>WARP_SEG_QC</code> from nuclei segmented on
+    each slide's native image. <b>(c)</b> Intrinsic TRE and the confidence gate are both scored on
+    the same features the registrar optimised against or used to decide its own mesh; cell
+    displacement and <code>dice_matched</code> are the only two numbers computed from a signal the
+    registrar never saw. <b>(d)</b> Plotting intrinsic TRE against cell displacement exposes exactly
+    the failure mode neither catches alone — a registrar that scores itself well on features that
+    do not represent the tissue, or an independent measure thrown off by a segmentation artefact —
+    with a fixed 3× ratio marking disagreement; the reconciliation's own output fields carry a
+    µm-suffixed name regardless of the unit actually inside them. <b>(e)</b> <code>reg_qc</code>
+    defaults to its richest level; STARE's two gating parameters are correctness knobs, not
+    cost/accuracy tier knobs. <b>(f)</b> None of the four measures is checked against an
+    externally-verified correspondence, nothing in this codebase currently closes that gap, and a
+    reviewer asking for an absolute error in physical units against known correspondences has no
+    answer here. This figure is the accuracy counterpart to Supplementary Figure <b>S3</b>'s QC
+    architecture and Supplementary Figure <b>S2</b>'s registration detail, and to Supplementary
+    Figure <b>S5</b>'s account of how the STARE front-end that produces one of these four numbers
+    actually works.
+    <span class="footnote">All algorithm details and parameter defaults are read verbatim from the
+    pipeline source at the commit stamped at the top of this figure
+    (<code>bin/warp_seg_qc.py</code>, <code>bin/utils/cell_pairs.py</code>,
+    <code>bin/utils/tre_report.py</code>, <code>bin/utils/tile_residual.py</code>,
+    <code>bin/tiled_solve.py</code>, <code>bin/register.py</code>,
+    <code>bin/generate_qc_report.py</code>, <code>subworkflows/local/registration.nf</code>,
+    <code>subworkflows/local/adapters/valis_adapter.nf</code>,
+    <code>subworkflows/local/adapters/tiled_adapter.nf</code>, <code>lib/ParamUtils.groovy</code>,
+    <code>nextflow.config</code>, <code>modules/local/warp_seg_qc.nf</code>,
+    <code>lib/WarpBackends.groovy</code>, <code>docs/registration_qc.md</code>,
+    <code>tests/test_figures_have_no_retired_names.py</code>).</span>
   </p>
 </div>
 </body>

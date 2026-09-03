@@ -6,7 +6,7 @@
 <title>MIRAGE Supplementary Figure S4 — Lazy reads</title>
 <style>
   /* ======================================================================
-     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4 · S5)
+     MIRAGE supplementary figures — shared design base (S1 · S2 · S3 · S4 · S5 · S6)
      ----------------------------------------------------------------------
      DUPLICATED ON PURPOSE, not extracted to a shared file. Each figure in
      this set has to survive being detached from the repository — attached to
@@ -14,10 +14,10 @@
      external stylesheet, not even a sibling one. This block is therefore
      repeated verbatim in docs/figures/pipeline-schematic.html,
      docs/figures/registration-schematic.html, docs/figures/qc-schematic.html,
-     docs/figures/zarr-schematic.html and docs/figures/coarse-schematic.html,
-     and is ported (with the slate counterpart the figures deliberately lack)
-     to docs/stylesheets/extra.css.
-     Change one, change all six.
+     docs/figures/zarr-schematic.html, docs/figures/coarse-schematic.html and
+     docs/figures/accuracy-schematic.html, and is ported (with the slate
+     counterpart the figures deliberately lack) to docs/stylesheets/extra.css.
+     Change one, change all seven.
 
      SINGLE THEME BY DESIGN: white paper, black ink. A journal figure has a
      paper ground.
@@ -212,6 +212,7 @@
     <a href="qc-schematic.html">S3 · quality control</a>
     <span class="self">S4 · lazy reads</span>
     <a href="coarse-schematic.html">S5 · coarse alignment</a>
+    <a href="accuracy-schematic.html">S6 · accuracy measures</a>
   </nav>
   <p class="standfirst">Lazy, region-readable zarr views of an OME-TIFF were never missing from this pipeline:
     <code>bin/utils/tiled_io.py</code> has carried <code>open_lazy</code>, <code>read_decimated</code> and
