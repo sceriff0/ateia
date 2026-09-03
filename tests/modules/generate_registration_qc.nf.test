@@ -26,6 +26,7 @@ nextflow_process {
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
@@ -60,6 +61,7 @@ nextflow_process {
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
@@ -102,6 +104,7 @@ nextflow_process {
                         custom_field: 'test'
                     ],
                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true),
                     file('$projectDir/tests/testdata/P002_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
@@ -137,6 +140,7 @@ nextflow_process {
                         channels: ['DAPI', 'PANCK', 'SMA']
                     ],
                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
@@ -167,9 +171,11 @@ nextflow_process {
                     [
                         patient_id: 'P001',
                         is_reference: false,
-                        channels: ['DAPI', 'PANCK', 'SMA']
+                        channels: ['DAPI', 'PANCK', 'SMA'],
+                        pixel_size: 0.325
                     ],
                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
@@ -223,9 +229,11 @@ nextflow_process {
                     [
                         patient_id: 'P001',
                         is_reference: false,
-                        channels: ['DAPI', 'PANCK', 'SMA']
+                        channels: ['DAPI', 'PANCK', 'SMA'],
+                        pixel_size: 0.325
                     ],
                     file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true),
                     file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
                 ]
                 """
@@ -244,7 +252,69 @@ nextflow_process {
                 { assert rendered.size() >= 1,
                     "no rendered GENERATE_REGISTRATION_QC .command.sh found under the task work dir" },
                 { assert rendered.every { it.contains('--nuclear-markers CELLTOX DAPI') },
-                    "rendered command did not carry params.nuclear_markers: " + rendered.join(' --- ') }
+                    "rendered command did not carry params.nuclear_markers: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--pixel-size-um 0.325') },
+                    "rendered command did not carry meta.pixel_size: " + rendered.join(' --- ') }
+            )
+        }
+    }
+
+    test("Should pass the native pre-registration image to the QC script - rendered command") {
+
+        // The teeth for the before/after change. -stub NEVER evaluates a script:
+        // block, so no stub run can observe that --native reaches the command line
+        // -- the process could take the third input, ignore it, and every stub test
+        // in this file would still pass. Same shape as the nuclear-markers case
+        // above: `stub` tag so CI's blocking gate collects it, but NO
+        // options "-stub", because stub mode would substitute away the very
+        // command under assertion.
+        //
+        // P001_mov2 stands in for the native counterpart of P001_mov1. It has to be
+        // a DIFFERENT file: `path(native_image, stageAs: 'native/*')` and
+        // `path(registered)` would otherwise stage two entries under one basename.
+        //
+        // pixel_size is required here too: this is a real (non-stub) run, and the
+        // module unconditionally renders `--pixel-size-um ${meta.pixel_size}`.
+        tag "stub"
+
+        when {
+            params {
+                qc_scale_factor = 0.25
+            }
+            process {
+                """
+                input[0] = [
+                    [
+                        patient_id: 'P001',
+                        is_reference: false,
+                        channels: ['DAPI', 'PANCK', 'SMA'],
+                        pixel_size: 0.325
+                    ],
+                    file('$projectDir/tests/testdata/P001_mov1.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_mov2.ome.tiff', checkIfExists: true),
+                    file('$projectDir/tests/testdata/P001_ref.ome.tiff', checkIfExists: true)
+                ]
+                """
+            }
+        }
+
+        then {
+            def rendered = []
+            new File("$workDir").eachFileRecurse { f ->
+                if (f.name == '.command.sh' && f.text.contains('generate_registration_qc.py')) {
+                    rendered << f.text
+                }
+            }
+
+            assertAll(
+                { assert rendered.size() >= 1,
+                    "no rendered GENERATE_REGISTRATION_QC .command.sh found under the task work dir" },
+                { assert rendered.every { it.contains('--native native/P001_mov2.ome.tiff') },
+                    "rendered command did not carry the native image: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--registered P001_mov1.ome.tiff') },
+                    "rendered command lost the registered image: " + rendered.join(' --- ') },
+                { assert rendered.every { it.contains('--pixel-size-um 0.325') },
+                    "rendered command did not carry meta.pixel_size: " + rendered.join(' --- ') }
             )
         }
     }
