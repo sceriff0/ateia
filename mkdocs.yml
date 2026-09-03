@@ -134,17 +134,9 @@ nav:
   - Illumination correction: basic_illumination.md
   - Incremental cycles: add_cycle.md
   - Registration QC: registration_qc.md
-  - Development: developing.md
   - SpatialData & FlowPath: spatialdata.md
+  - Development: developing.md
   - Citation: citation.md
-  # NOTE (plan 12, 2026-09-02; trimmed 2026-09-03): the brief for this phase
-  # also specifies `- Developing: developing.md` here. That target does not
-  # exist on this branch -- plan 03 (docs/developing.md) has not merged. Adding
-  # the entry now would fail `mkdocs build --strict` on `nav.not_found` for a
-  # page that does not exist, which is worse than the orphan-page warning this
-  # phase exists to fix. Add the line above `- Citation:` in the commit that
-  # lands plan 03.
-  # (Format validation is already navigated above, at `validation/format_validation.md`.)
 
 # ---------------------------------------------------------------------------
 # Appearance extras
