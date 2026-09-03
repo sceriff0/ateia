@@ -27,9 +27,13 @@ nextflow_workflow {
             workflow {
                 """
                 input[0] = 'registered'
-                // Deliberately NOT in patient order: sort: true is what makes the
-                // manifest reproducible, and collectFile writes in COMPLETION order
-                // without it -- two runs of the same commit produced different files.
+                // Deliberately NOT in patient order (P002 emitted before P001): an
+                // explicit `sort: false` on the writer's collectFile would reorder these
+                // to COMPLETION order and fail the assertion below. `sort: true` is
+                // collectFile's own default, so simply OMITTING the option would not
+                // trip this test -- the writer states it explicitly anyway, so an edit
+                // has to delete or flip it to lose the property, not merely forget to
+                // add one. See checkpoint_writer.nf's header comment.
                 input[1] = Channel.of(
                     [ patient_id: 'P002', id: 'P002_s1',
                       registered_image: '/out/P002/registered/P002_s1.ome.tiff',
@@ -52,7 +56,9 @@ nextflow_workflow {
                     assert lines[0] ==
                         'patient_id,id,registered_image,is_reference,channels,pixel_size'
                     assert lines.size() == 3
-                    // sort: true, so P001 precedes P002 regardless of arrival order.
+                    // P001 precedes P002 despite arriving second -- an explicit
+                    // `sort: false` on the writer would reorder these to arrival order
+                    // (P002, P001) and fail this assertion.
                     assert lines[1].startsWith('P001,')
                     assert lines[2].startsWith('P002,')
                     assert lines[1].contains('/out/P001/registered/P001_s1.ome.tiff')

@@ -35,11 +35,17 @@
     So the split is: the CALLER decides what a row says; this file decides whether,
     where, in what order and under what header it is written.
 
-    SORT IS LOAD-BEARING. Without `sort: true` collectFile writes rows in COMPLETION
-    order, so two runs of the same commit produce different files -- found while
-    capturing a golden baseline, when a rerun of an unmodified branch differed from
-    itself. Rows begin with patient_id followed by the published path, so natural string
-    order IS "patient id, then file", and the `seed:` header is written first regardless.
+    SORT IS LOAD-BEARING, WHICH IS WHY IT IS STATED HERE EXPLICITLY RATHER THAN LEFT
+    TO collectFile's DEFAULT. `sort: true` already IS collectFile's default -- it is
+    NOT what makes the manifest reproducible by itself, and an earlier version of this
+    comment claimed the opposite (that omitting it would write completion order). What
+    is load-bearing is that nobody sets `sort: false`: that option writes rows in
+    COMPLETION order, so two runs of the same commit produce different files -- a rerun
+    of an unmodified branch differing from itself is exactly the failure mode this
+    guards against. Stating `sort: true` here means an edit has to delete or flip the
+    option to lose the property, not merely fail to add one. Rows begin with
+    patient_id followed by the published path, so natural string order IS "patient id,
+    then file", and the `seed:` header is written first regardless of sorting.
 
     A CLEANING LEVEL WRITES NO FILE AT ALL. Not an empty one, not a header-only one.
     Checkpoint.writesAtLevel carries the full reasoning (and the observed dangling-path

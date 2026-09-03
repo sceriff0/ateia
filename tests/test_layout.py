@@ -25,6 +25,7 @@ import re
 from pathlib import Path
 
 from tests.nfmodel import block_extent as _block_extent
+from tests.nfmodel import strip_comments as _strip_comments
 from tests.nfmodel import strip_comments_and_strings as _strip_comments_and_strings
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -183,7 +184,12 @@ def test_every_kind_asked_of_layout_is_published_by_modules_config():
     )
     asked = []
     for f in _callers():
-        text = f.read_text()
+        # Comment-stripped, string-preserving view: the needle (a call whose last
+        # argument is a quoted `kind` literal) lives inside a string, but a call
+        # merely ILLUSTRATED in a comment must not be counted as a real call site --
+        # this is a POSITIVE rule (asserting real call sites exist and agree with
+        # conf/modules.config), so a comment satisfying it would blind the guard.
+        text = _strip_comments(f.read_text())
         # Scanned over the whole file, not line by line: registration.nf's call is
         # wrapped across two lines and a per-line scan would silently skip it.
         for m in call.finditer(text):
