@@ -52,7 +52,20 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
-SCAN = [REPO / "README.md", *sorted((REPO / "docs").glob("*.md"))]
+# rglob, not glob: docs/validation/format_validation.md is a navigated page
+# (mkdocs.yml) that a top-level glob silently left outside this guard. The
+# excluded author-facing trees (docs/superpowers, docs/_archive, docs/perf --
+# see mkdocs.yml's exclude_docs) are not published, so they are skipped here
+# for the same reason CHANGELOG.md is: they quote history, not instructions.
+_UNPUBLISHED = {"superpowers", "_archive", "perf"}
+SCAN = [
+    REPO / "README.md",
+    *sorted(
+        p
+        for p in (REPO / "docs").rglob("*.md")
+        if not (set(p.relative_to(REPO / "docs").parts[:-1]) & _UNPUBLISHED)
+    ),
+]
 
 # Profiles that pin BOTH params.max_cpus and params.max_memory, and those that
 # additionally pin params.outdir. Both sets are verified against the config below,

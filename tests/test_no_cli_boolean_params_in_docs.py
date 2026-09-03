@@ -24,34 +24,74 @@ test catches it, and the reader's first run fails on a valid pipeline.
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
-SCAN = [
-    REPO / "README.md",
-    *sorted((REPO / "docs").glob("*.md")),
-    *sorted((REPO / "docs" / "figures").glob("*.html")),
-    # rglob, not glob: tests/cluster/README.md is the file an operator copy-pastes from.
-    *sorted((REPO / "tests").rglob("*.md")),
-    *sorted((REPO / "tests").rglob("*.sh")),
+# Enumerated from the TRACKED tree (`git ls-files`), then filtered, rather than
+# globbed from the filesystem: a glob would also read untracked scratch files
+# in a worktree, and tests/test_nfmodel.py's FLAT_TREE_SCANNERS exemption --
+# which this guard needs once it reads `.nf` source as flat text -- is defined
+# by exactly that enumeration. The filter is the guard's SCOPE; each clause
+# below records why that part of the tree is operator-facing.
+_TRACKED = [
+    REPO / rel
+    for rel in subprocess.run(
+        ["git", "ls-files"], cwd=REPO, capture_output=True, text=True, check=True
+    ).stdout.split("\n")
+    if rel
+]
+
+
+def _in_scope(path):
+    rel = path.relative_to(REPO)
+    parts = rel.parts
+    if rel.as_posix() == "README.md":
+        return True
+    # docs/*.md (the published pages; docs/_archive is history, excluded) and
+    # the supplementary figures a reader copies commands from.
+    if parts[0] == "docs":
+        return (len(parts) == 2 and rel.suffix == ".md") or (
+            len(parts) == 3 and parts[1] == "figures" and rel.suffix == ".html"
+        )
+    # Recursive on purpose: tests/cluster/README.md is the file an operator
+    # copy-pastes from.
+    if parts[0] == "tests" and rel.suffix in {".md", ".sh"}:
+        return True
     # Widened 2026-09-02: nextflow.config's own comment told the reader to run
     # `--skip_seg_quality_eval` with a value, forty lines from the comment
     # explaining that the string "false" is truthy and does the opposite. A
-    # config comment is a document; it was simply out of scope.
-    REPO / "nextflow.config",
-    *sorted((REPO / "conf").glob("*.config")),
-    # conf/*.config doesn't match conf/site.config.template -- a distinct
-    # extension, not a subset of the glob above -- and it is the file
+    # config comment is a document; it was simply out of scope. conf/*.config
+    # and conf/site.config.template -- a distinct extension, and the file
     # docs/installation.md tells every reader to copy verbatim.
-    *sorted((REPO / "conf").glob("*.config.template")),
+    if rel.as_posix() == "nextflow.config":
+        return True
+    if (
+        parts[0] == "conf"
+        and len(parts) == 2
+        and rel.name.endswith((".config", ".config.template"))
+    ):
+        return True
+    # Widened 2026-09-03 (final-review fix round, plan 12): a `log.warn` in
+    # workflows/mirage.nf told the operator to "Pass --cleanup_work false" --
+    # the exact broken CLI form this guard exists to catch, just in Groovy
+    # rather than Markdown. Workflow/subworkflow source is operator-facing
+    # prose (log messages) as much as any doc. Read as flat text, comments
+    # included -- this is deliberately NOT a Nextflow parse (see
+    # tests/test_nfmodel.py's FLAT_TREE_SCANNERS).
+    if parts[0] in {"workflows", "subworkflows"} and rel.suffix == ".nf":
+        return True
     # DECISION, not an oversight: CHANGELOG.md is NOT scanned. It is a
     # historical record that quotes PAST commands -- including broken ones --
     # as part of describing what changed and why (e.g. "Previously
     # `--embed_masks true --quantify_compartments false` ... exited"); rewriting
     # those quotes to hide the old broken form would falsify the changelog
     # entry it documents. A reader copies from a how-to doc, not a changelog.
-]
+    return False
+
+
+SCAN = sorted(p for p in _TRACKED if _in_scope(p))
 
 # Files that quote the broken form ON PURPOSE, with the reason. Each is verified below to still
 # contain it -- a stale exemption would silently cover a real regression.
@@ -108,8 +148,15 @@ _TRAILING_COMMENT = re.compile(r"\s+#.*$")
 def _command_lines(text, always_in_command):
     """Yield (line_no, raw_line, code) for lines that are part of a `nextflow run`.
 
-    In a Markdown file, only inside a fenced block; in a .sh or .config file,
-    every line is eligible. A backslash continuation keeps the command open.
+    In a Markdown file, only lines inside a fenced block are CANDIDATES; in a
+    .sh, .config or .nf file, every line is a candidate. A candidate is a
+    command line only if it contains `nextflow run` or continues one (a
+    backslash continuation keeps the command open). So the BARE form is
+    caught only on an actual `nextflow run` line in any file type; a bare
+    `--dry_run` in a config comment or a log message is prose and is left
+    alone, for the same reason the Markdown prose exclusion exists -- the
+    `--flag true|false` form, by contrast, is caught on every line of every
+    scanned file by `_offending_lines`, with or without a command around it.
     """
     in_fence = always_in_command
     continuing = False

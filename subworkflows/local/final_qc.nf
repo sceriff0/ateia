@@ -252,8 +252,8 @@ workflow FINAL_QC {
 
     // Every declared kind must have a consumer. See artifactsOf() above.
     //
-    // Registered only when both outputs are enabled: --skip_final_qc_report or
-    // --enable_trace=false legitimately leaves that half of the vocabulary
+    // Registered only when both outputs are enabled: skip_final_qc_report set to true,
+    // or enable_trace set to false, legitimately leaves that half of the vocabulary
     // unconsumed, and failing then would break a supported run mode. The guard is
     // therefore about WIRING, checked on the default path, not about run policy.
     if (!params.skip_final_qc_report && params.enable_trace) {

@@ -393,6 +393,13 @@ _FLAT_REASON = "whole-tree flat token scan over `git ls-files`, not a Nextflow p
 
 FLAT_TREE_SCANNERS = {
     "tests/test_no_legacy_frontends.py": _FLAT_REASON,
+    # Scope-FILTERED rather than whole-tree (CHANGELOG.md is excluded on
+    # purpose), but the same kind of thing: since 2026-09-03 it reads
+    # workflows/*.nf and subworkflows/**/*.nf as flat text for a forbidden CLI
+    # form, comments and log strings included -- stripping comments would make
+    # it MISS the `log.warn` it was widened to catch. Enumerates via
+    # `git ls-files`, filters in `_in_scope`.
+    "tests/test_no_cli_boolean_params_in_docs.py": _FLAT_REASON,
 }
 
 

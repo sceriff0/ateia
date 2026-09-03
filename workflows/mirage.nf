@@ -78,8 +78,9 @@ workflow MIRAGE {
     if (params.cleanup_work && workflow.resume) {
         log.warn "--cleanup_work is true (the default) AND -resume was passed. The work " +
                  "directory is emptied after a successful run, so the NEXT -resume will " +
-                 "find nothing cached and re-run every task. Pass --cleanup_work false " +
-                 "for the iterate-with--resume loop docs/usage.md describes."
+                 "find nothing cached and re-run every task. Set cleanup_work to false in " +
+                 "a -params-file or a profile (Nextflow 26 rejects a boolean value on the " +
+                 "command line) for the iterate-with--resume loop docs/usage.md describes."
     }
 
     // --start past preprocessing re-enters from artifacts a cleaning level does not
