@@ -531,4 +531,10 @@
 # 2026-09-03, plan 06 (containers) Tasks 1-4 + 8a: dockerignore/digest/procps/naming
 # guards and the positive REQUIRED_RUNTIME_IMPORTS table's per-entry reachability
 # cases; the 16-entry unreachable-import allowlist and its two tests are gone.
-1663
+
+#
+#
+# 2026-09-03, plan 06 Tasks 5-8: the bioformats jar-bake and jvm-cache route guards, and
+# the reverse-rule guard (86 per-container/per-package cases: an image may not install
+# what nothing reaches). No deletions, no skips.
+1764
