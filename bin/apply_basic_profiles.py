@@ -360,6 +360,9 @@ def apply_basic_profiles(
     try:
         # The dict AND the writer come from bin/utils/ome_io.py. This file used to
         # rebuild both -- one of the four independent copies of the same six keys.
+        # The header's attribute ORDER now follows ome_io.ome_metadata's own order
+        # (the order convert_image.py already used), not this file's former order;
+        # pixels and values are unchanged.
         metadata = ome_metadata(list(channel_names), (pixel_size_x, pixel_size_y))
         with ome_tiff_writer(str(output_path), bigtiff=True, ome=True) as tw:
             tw.write(

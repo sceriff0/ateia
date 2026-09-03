@@ -54,6 +54,17 @@ MIGRATED_CALL_SITES = (
     "workflows/mirage.nf",
 )
 
+#: The exact call each migrated site must make, one needle per site -- not a bare
+#: "RegBackends." in body. A bare substring is satisfied by a doc comment or an
+#: input-doc line that only NAMES the class (register_patient.nf's own Input doc
+#: does exactly that: "one of RegBackends.methods()") without the site calling
+#: anything on it, so it cannot tell a real dispatch from a mention.
+CALL_SITE_NEEDLES = {
+    "subworkflows/local/register_patient.nf": "RegBackends.of(method).adapter",
+    "subworkflows/local/seg_qc.nf": "RegBackends.segQcJoin(method)",
+    "workflows/mirage.nf": "RegBackends.supportsMode(",
+}
+
 _BACKENDS_BLOCK = re.compile(
     r"static\s+final\s+Map<String,\s*Map>\s+BACKENDS\s*=\s*\[(.*?)\]\.asImmutable\(\)",
     re.S,
@@ -137,6 +148,10 @@ def test_the_parse_is_not_vacuous():
     )
     for rel in MIGRATED_CALL_SITES:
         assert (ROOT / rel).is_file(), f"{rel} does not exist -- the list is stale"
+    assert set(CALL_SITE_NEEDLES) == set(MIGRATED_CALL_SITES), (
+        "CALL_SITE_NEEDLES and MIGRATED_CALL_SITES have drifted apart -- every "
+        "migrated call site needs exactly one needle"
+    )
 
 
 def test_the_literal_comparison_regex_actually_matches_one():
@@ -194,21 +209,29 @@ def test_no_migrated_call_site_compares_against_a_method_literal():
     form entirely) stayed green. The positive check closes that: a migrated call site
     must actually CALL something on RegBackends, not merely avoid the one comparison
     shape this file used to look for.
+
+    The positive check is CALL_SITE_NEEDLES, one exact needle per site, not a bare
+    "RegBackends." in body. A later review found the bare form satisfiable by
+    replacing seg_qc.nf's real call with a literal ternary
+    (`method.startsWith('t') ? 'per_slide' : 'per_patient'`) while a `RegBackends.`
+    mention survived elsewhere in the file (its Input doc, or another site's call) --
+    that passed the substring check and only the per-site needle catches it.
     """
     offenders = []
     silent = []
     for rel in MIGRATED_CALL_SITES:
         body = strip_comments((ROOT / rel).read_text())
 
-        if "RegBackends." not in body:
-            silent.append(rel)
+        needle = CALL_SITE_NEEDLES[rel]
+        if needle not in body:
+            silent.append(f"{rel} (expected {needle!r})")
 
         for match in _LITERAL_COMPARISON.finditer(body):
             line = body[: match.start()].count("\n") + 1
             offenders.append(f"{rel}:{line} -> {match.group(0).strip()}")
 
     assert not silent, (
-        "these migrated call sites no longer consult lib/RegBackends.groovy at all:\n  "
+        "these migrated call sites no longer make the expected RegBackends call:\n  "
         + "\n  ".join(silent)
         + "\nA call site that never names RegBackends can decide the backend any way "
         "it likes -- including reintroducing the exact literal dispatch this table was "

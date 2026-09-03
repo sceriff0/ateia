@@ -427,6 +427,30 @@ after that doc and is detailed inline below:
   `input_*/`), `PREFLIGHT_SCALE` (`input_*/*`), `MERGE_AND_PYRAMID` (sum of
   `channels/*`, no longer the directory inode) and `WARP_SEG_QC` (real bytes, was
   hard-coded 0) — size-vs-runtime plots are not comparable across this change.
+- **`bin/utils/ome_io.py` is the one image I/O seam.** Every `bin/` TIFF write goes
+  through `write_tiff`/`write_ome_tiff`/`ome_tiff_writer`; format dispatch goes
+  through `detect_reader`/`require_reader`. An unclaimed samplesheet extension now
+  fails at launch with `UnsupportedFormatError` naming the suffix — it used to fall
+  through to `bioio` and fail several frames inside `BioImage`, naming a problem
+  that was not the problem. `.svs`/`.qptiff`/`.vsi`/`.scn`/`.mrxs`/`.bif`/`.ims` are
+  declared Bio-Formats routes that raise a named `ImportError` until
+  `bioio-bioformats` is installed in the convert image (plan 06).
+- **`CONVERT_IMAGE`'s `versions.yml` now records `bioio`** where it recorded
+  `aicsimageio`.
+- **`APPLY_PROFILES`'s OME-XML header attribute order moved onto `ome_metadata`'s**
+  — the order `convert_image` already used. Pixels and values are unchanged, but a
+  byte-diff against a pre-change preprocessed slide's header will differ, and
+  `-resume` across the change will miss for that step.
+- **`subworkflows/local/checkpoint_writer.nf` (`CHECKPOINT_WRITER`) is the one
+  checkpoint-CSV writer**, and the only reader of `params.cleanup_level` under
+  `subworkflows/`; `registered_checkpoint.nf` is folded into `register_patient.nf`
+  and deleted. `Checkpoint.requireColumns` now runs at every checkpoint reader.
+- **`lib/RegBackends.groovy` is the one table of what a registration backend is**;
+  the three decision sites (the adapter, the seg-QC join, and the add_cycle gate)
+  route through it.
+- **`expand_labels_tiled` has one owner, `bin/utils/segment_io.py`** — both
+  `segment.py` and `segment_cellsam.py` import it rather than carrying their own
+  copy.
 
 ### Fixed
 - **The resource report is found where Nextflow wrote it.** `main.nf` resolved

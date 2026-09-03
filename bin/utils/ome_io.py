@@ -465,6 +465,13 @@ def write_ome_tiff(
     compression arguments, per-level resolution tags and its own validators, and goes
     through ``ome_tiff_writer`` instead.
 
+    THE PYRAMID BRANCH IS NOT STREAMING. Building level 1 needs the whole base plane
+    stack, so it materialises it in full (``np.stack`` of every plane) before decimating
+    -- unlike the base-level write above, which stays tile-by-tile. No production caller
+    passes ``pyramid_levels > 1`` today: ``convert_image.py`` is this function's only
+    caller and always writes a single level; ``merge_channels_pyramid.py`` (the one
+    multi-level writer) uses ``ome_tiff_writer`` directly, not this function.
+
     ``bigtiff=None`` means BigTIFF iff the payload exceeds ``BIGTIFF_THRESHOLD_BYTES``;
     pass ``True``/``False`` to assert.
     """
