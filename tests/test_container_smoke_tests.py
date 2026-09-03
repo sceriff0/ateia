@@ -269,6 +269,41 @@ def test_the_smoke_script_actually_checks_something(name):
     )
 
 
+# `ps` must START a command. Anchored for the same reason the import scan is: the word
+# "procps" appears in prose in several of these headers, and an unanchored search for it
+# would be satisfied by the comment explaining why the check exists.
+_PS_CHECK_RE = re.compile(r"(?m)^\s*ps\s+-e\b")
+
+
+@pytest.mark.parametrize("name", _dirs())
+def test_every_smoke_script_proves_ps_exists(name):
+    """Nextflow's task-metrics wrapper hard-exits BEFORE the script block without `ps`.
+
+    `nextflow/executor/command-trace.txt` opens with
+
+        command -v ps &>/dev/null || { >&2 echo "Command 'ps' required by nextflow ..."; exit 1; }
+
+    and `params.enable_trace` defaults to true, so the wrapper is injected into EVERY
+    task of EVERY run. An image without procps therefore fails every task with exit
+    status 1 and empty stdout -- a failure that reads as "the tool crashed silently",
+    not as "a system package is missing". Debian/Ubuntu bases do not ship procps:
+    `python:*-slim` and `ubuntu:22.04` both lack it, and `AGGREGATE_SIZE_LOGS` ran in
+    bare `ubuntu:22.04` until 2026-09-02.
+
+    COMMENT-BLIND. Every one of these scripts explains procps in prose above the check;
+    reading the raw text would let the explanation satisfy the guard while the command
+    was deleted. That is this repository's most-repeated defect.
+    """
+    body = _strip_hash_comments(smoke_path(name).read_text())
+    assert _PS_CHECK_RE.search(body), (
+        f"containers/{name}/smoke.sh never runs `ps -e`. The image may or may not have "
+        "procps -- nothing proves it, and the symptom on the cluster is exit status 1 "
+        "with empty stdout on every task. Add:\n"
+        '    ps -e -o pid= -o ppid= > /dev/null && echo "procps OK: '
+        'nextflow task-metrics wrapper can run"'
+    )
+
+
 @pytest.mark.parametrize("name", _dirs())
 def test_every_module_the_smoke_script_imports_is_installed_by_the_image(name):
     """The check that earns this file.

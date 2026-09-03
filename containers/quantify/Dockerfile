@@ -3,11 +3,17 @@
 FROM nvidia/cuda:12.2.2-devel-ubuntu22.04
 
 # Install Python and essential tools
+# procps is not optional. Nextflow's task-metrics wrapper hard-exits BEFORE the script
+# block when `ps` is absent, and params.enable_trace defaults to true, so every task in
+# this image would fail with exit status 1 and empty stdout. Installed in all eleven
+# images rather than "verified present in this base" -- apt is a no-op where it already
+# is, and containers/<dir>/smoke.sh asserts it either way.
 RUN apt-get update && apt-get install -y \
     python3.10 \
     python3-pip \
     python3.10-dev \
     git \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Create python symlink

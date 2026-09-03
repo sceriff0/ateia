@@ -39,13 +39,17 @@ NAMESPACE = "bolt3x"
 PREFIX = "mirage-"
 
 # Third-party images the pipeline pulls as-is. VALIS is upstream-maintained and deliberately not
-# re-hosted (its from-source libvips build is heavy); ubuntu is a plain base for a trivial task.
-# basicpy-docker-mcmicro is the vendored nf-core BASICPY module's own container (mcmicro-maintained);
-# BASICPY is a vendored module (modules/nf-core/basicpy/), not a bolt3x/mirage-<component> build, so
-# re-hosting it would mean maintaining a fork of the vendored image too.
+# re-hosted (its from-source libvips build is heavy). basicpy-docker-mcmicro is the vendored
+# nf-core BASICPY module's own container (mcmicro-maintained); BASICPY is a vendored module
+# (modules/nf-core/basicpy/), not a bolt3x/mirage-<component> build, so re-hosting it would mean
+# maintaining a fork of the vendored image too.
+#
+# `ubuntu:22.04` USED TO BE HERE, for AGGREGATE_SIZE_LOGS. It is gone because that base ships no
+# procps, so with params.enable_trace=true (the shipped default) Nextflow's task-metrics wrapper
+# hard-exited before the script block and the process failed on every real run. It now uses
+# bolt3x/mirage-preprocess, which six other modules already pull.
 EXTERNAL_ALLOWED = {
     "cdgatenbee/valis-wsi:1.0.0",
-    "ubuntu:22.04",
     "docker.io/labsyspharm/basicpy-docker-mcmicro:1.2.0-patch5",
 }
 

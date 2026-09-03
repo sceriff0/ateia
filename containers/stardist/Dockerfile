@@ -5,12 +5,18 @@ WORKDIR /workspace
 # Install system dependencies first (if needed)
 ARG NVIDIA_DRIVER_VERSION=470
 
+# procps is not optional. Nextflow's task-metrics wrapper hard-exits BEFORE the script
+# block when `ps` is absent, and params.enable_trace defaults to true, so every task in
+# this image would fail with exit status 1 and empty stdout. Installed in all eleven
+# images rather than "verified present in this base" -- apt is a no-op where it already
+# is, and containers/<dir>/smoke.sh asserts it either way.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ocl-icd-dev \
     ocl-icd-opencl-dev \
     opencl-headers \
     clinfo \
     libnvidia-compute-${NVIDIA_DRIVER_VERSION} \
+    procps \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

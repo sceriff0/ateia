@@ -113,7 +113,6 @@ The first real run downloads each tool's image, which can take several minutes. 
 |---|---|
 | `bolt3x/mirage-*` | preprocessing, segmentation, quantification, export |
 | `cdgatenbee/valis-wsi:1.0.0` | VALIS registration |
-| `ubuntu:22.04` | size-log aggregation (`AGGREGATE_SIZE_LOGS`) |
 
 === "Docker"
 

@@ -5,6 +5,11 @@ FROM nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # System dependencies
+# procps is not optional. Nextflow's task-metrics wrapper hard-exits BEFORE the script
+# block when `ps` is absent, and params.enable_trace defaults to true, so every task in
+# this image would fail with exit status 1 and empty stdout. Installed in all eleven
+# images rather than "verified present in this base" -- apt is a no-op where it already
+# is, and containers/<dir>/smoke.sh asserts it either way.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     wget \
@@ -19,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-dev \
+    procps \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

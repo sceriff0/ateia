@@ -1,6 +1,11 @@
 FROM cdgatenbee/valis-wsi:1.0.0
 
 # Install required native dependencies for imagecodecs
+# procps is not optional. Nextflow's task-metrics wrapper hard-exits BEFORE the script
+# block when `ps` is absent, and params.enable_trace defaults to true, so every task in
+# this image would fail with exit status 1 and empty stdout. Installed in all eleven
+# images rather than "verified present in this base" -- apt is a no-op where it already
+# is, and containers/<dir>/smoke.sh asserts it either way.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         libjpeg-dev \
@@ -11,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libpng-dev \
         liblzma-dev \
         zlib1g-dev \
+        procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies directly

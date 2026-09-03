@@ -33,3 +33,8 @@ print('regqc image OK:',
       '| tifffile', tifffile.__version__,
       '| cv2', cv2.__version__,
       '| skimage', skimage.__version__)"
+
+# procps supplies `ps`. Nextflow's task-metrics wrapper hard-exits BEFORE the script
+# block when it is absent, and params.enable_trace defaults to true, so every task in
+# this image would fail with exit status 1 and empty stdout.
+ps -e -o pid= -o ppid= > /dev/null && echo "procps OK: nextflow task-metrics wrapper can run"

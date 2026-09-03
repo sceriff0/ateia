@@ -33,3 +33,8 @@ print('preprocess image OK:',
       '| tifffile', tifffile.__version__,
       '| zarr', zarr.__version__,
       '| imagecodecs', imagecodecs.__version__)"
+
+# procps supplies `ps`. Nextflow's task-metrics wrapper hard-exits BEFORE the script
+# block when it is absent, and params.enable_trace defaults to true, so every task in
+# this image would fail with exit status 1 and empty stdout.
+ps -e -o pid= -o ppid= > /dev/null && echo "procps OK: nextflow task-metrics wrapper can run"

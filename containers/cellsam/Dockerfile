@@ -3,7 +3,13 @@
 # 2.6.0 -- 12.4 is the nearest tag.
 FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
 
-RUN apt-get update && apt-get install -y git
+# procps is not optional. Nextflow's task-metrics wrapper hard-exits BEFORE the script
+# block when `ps` is absent, and params.enable_trace defaults to true, so every task in
+# this image would fail with exit status 1 and empty stdout. Installed in all eleven
+# images rather than "verified present in this base" -- apt is a no-op where it already
+# is, and containers/<dir>/smoke.sh asserts it either way.
+RUN apt-get update && apt-get install -y --no-install-recommends git procps \
+    && rm -rf /var/lib/apt/lists/*
 
 # The build context is the REPOSITORY ROOT (containers.yml passes `context: .`), so the
 # harmonised pins come from requirements/constraints.txt -- the SAME file the workflows and

@@ -20,6 +20,11 @@ LABEL description="Bioformats CONVERT_IMAGE: bioformats2raw + raw2ometiff + tiff
 ARG BF2RAW_VERSION=0.12.0
 ARG R2OT_VERSION=0.10.0
 
+# procps is not optional. Nextflow's task-metrics wrapper hard-exits BEFORE the script
+# block when `ps` is absent, and params.enable_trace defaults to true, so every task in
+# this image would fail with exit status 1 and empty stdout. Installed in all eleven
+# images rather than "verified present in this base" -- apt is a no-op where it already
+# is, and containers/<dir>/smoke.sh asserts it either way.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         wget \
         unzip \
@@ -27,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-pip \
         ca-certificates \
         coreutils \
+        procps \
     && rm -rf /var/lib/apt/lists/*
 
 RUN wget -q "https://github.com/glencoesoftware/bioformats2raw/releases/download/v${BF2RAW_VERSION}/bioformats2raw-${BF2RAW_VERSION}.zip" \

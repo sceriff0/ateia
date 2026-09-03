@@ -35,3 +35,8 @@ print('convert image OK:',
 command -v bioformats2raw >/dev/null || { echo "bioformats2raw is not on PATH"; exit 1; }
 command -v raw2ometiff   >/dev/null || { echo "raw2ometiff is not on PATH"; exit 1; }
 echo "convert image OK: bioformats2raw and raw2ometiff are on PATH"
+
+# procps supplies `ps`. Nextflow's task-metrics wrapper hard-exits BEFORE the script
+# block when it is absent, and params.enable_trace defaults to true, so every task in
+# this image would fail with exit status 1 and empty stdout.
+ps -e -o pid= -o ppid= > /dev/null && echo "procps OK: nextflow task-metrics wrapper can run"
