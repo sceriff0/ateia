@@ -97,6 +97,31 @@ def _schema_params():
     return names
 
 
+def _schema_seg_method_enum():
+    """`seg_method`'s enum in nextflow_schema.json -- the set of real backends."""
+    schema = json.loads((REPO / "nextflow_schema.json").read_text())
+
+    def walk(node):
+        if isinstance(node, dict):
+            props = node.get("properties")
+            if isinstance(props, dict) and "seg_method" in props:
+                return props["seg_method"].get("enum")
+            for value in node.values():
+                found = walk(value)
+                if found is not None:
+                    return found
+        elif isinstance(node, list):
+            for value in node:
+                found = walk(value)
+                if found is not None:
+                    return found
+        return None
+
+    enum = walk(schema)
+    assert enum, "nextflow_schema.json's seg_method has no enum -- the walk is broken"
+    return set(enum)
+
+
 def _owner(name):
     for backend, prefixes in BACKEND_PREFIXES.items():
         for prefix in prefixes:
@@ -159,6 +184,14 @@ def test_the_site_sizing_exemption_is_not_stale():
             f"SITE_SIZING_EXEMPT names {name}, which no longer sets any of "
             f"{SITE_SIZING_KEYS} -- the exemption is dead"
         )
+
+
+def test_backend_prefixes_covers_exactly_the_schema_backends():
+    """A fourth backend added to the schema's enum without a BACKEND_PREFIXES
+    entry would silently exempt every one of its parameters from the coherence
+    rule above; a stale entry (a backend removed from the schema) would check a
+    backend that no preset can select. Both directions, so this can't drift."""
+    assert set(BACKEND_PREFIXES) == _schema_seg_method_enum()
 
 
 def test_the_owner_map_recognises_the_names_it_is_written_for():

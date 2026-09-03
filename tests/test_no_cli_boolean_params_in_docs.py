@@ -41,6 +41,16 @@ SCAN = [
     # config comment is a document; it was simply out of scope.
     REPO / "nextflow.config",
     *sorted((REPO / "conf").glob("*.config")),
+    # conf/*.config doesn't match conf/site.config.template -- a distinct
+    # extension, not a subset of the glob above -- and it is the file
+    # docs/installation.md tells every reader to copy verbatim.
+    *sorted((REPO / "conf").glob("*.config.template")),
+    # DECISION, not an oversight: CHANGELOG.md is NOT scanned. It is a
+    # historical record that quotes PAST commands -- including broken ones --
+    # as part of describing what changed and why (e.g. "Previously
+    # `--embed_masks true --quantify_compartments false` ... exited"); rewriting
+    # those quotes to hide the old broken form would falsify the changelog
+    # entry it documents. A reader copies from a how-to doc, not a changelog.
 ]
 
 # Files that quote the broken form ON PURPOSE, with the reason. Each is verified below to still
@@ -110,6 +120,9 @@ def _command_lines(text, always_in_command):
             continue
         if not in_fence:
             continue
+        # Stripped BEFORE the bare-flag scan on purpose: a shell line ending
+        # `--dry_run  # explained below` must still read as bare (no value),
+        # not as if the trailing comment were the flag's argument.
         code = _TRAILING_COMMENT.sub("", line)
         is_command = "nextflow run" in code or continuing
         continuing = is_command and code.rstrip().endswith("\\")
@@ -119,7 +132,8 @@ def _command_lines(text, always_in_command):
 
 def _offending_lines(text, params, always_in_command=False):
     alts = "|".join(sorted(params))
-    with_value = re.compile(rf"--({alts})\s+(?:true|false)\b")
+    # [=\s]: Nextflow accepts both `--flag value` and `--flag=value` on the CLI.
+    with_value = re.compile(rf"--({alts})[=\s]+(?:true|false)\b")
     # Bare: the flag is the last token, is followed by a `\` continuation, or is
     # followed by another option.
     bare = re.compile(rf"--({alts})(?=\s*(?:\\\s*)?$|\s+-)")
@@ -147,7 +161,10 @@ def test_no_document_shows_a_boolean_param_on_the_command_line():
         rel = f.relative_to(REPO).as_posix()
         if rel in ALLOWED:
             continue
-        always = f.suffix in (".sh", ".config")
+        # .config.template (site.config.template) isn't a fenced Markdown doc
+        # either -- Path.suffix only sees the LAST extension (".template"), so
+        # check the full name, not just .suffix.
+        always = f.suffix in (".sh", ".config") or f.name.endswith(".config.template")
         for line_no, line in _offending_lines(f.read_text(), params, always):
             offenders.append(f"{rel}:{line_no}: {line}")
 
@@ -181,6 +198,7 @@ def test_the_scan_covers_the_configuration_files_too():
     scanned = {f.relative_to(REPO).as_posix() for f in SCAN}
     assert "nextflow.config" in scanned
     assert "conf/test.config" in scanned
+    assert "conf/site.config.template" in scanned
 
 
 def test_the_detector_recognises_the_bare_form_inside_a_command():
@@ -207,6 +225,15 @@ def test_the_detector_recognises_the_form_that_actually_fails():
 
     assert list(_offending_lines("  --start preprocessing --dry_run true\n", params))
     assert list(_offending_lines("nextflow run . --skip_preprocessing false\n", params))
+
+
+def test_the_detector_recognises_the_equals_form_too():
+    """Nextflow accepts `--flag=value` as well as `--flag value` on the CLI --
+    the value form is broken identically either way."""
+    params = _boolean_params()
+
+    assert list(_offending_lines("nextflow run . --dry_run=true\n", params))
+    assert list(_offending_lines("nextflow run . --skip_preprocessing=false\n", params))
 
 
 def test_the_detector_leaves_the_working_forms_alone():

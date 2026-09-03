@@ -510,17 +510,20 @@ class ParamUtils {
     static void validateCompartmentQuant(Map mode) {
         if (mode.expanded && !mode.compartments) {
             throw new IllegalArgumentException(
-                "--expanded_quantification requires --quantify_compartments to be true."
+                "expanded_quantification requires quantify_compartments to also be true. " +
+                "Both are booleans -- set them in a -params-file or a profile, never on " +
+                "the command line (Nextflow 26 delivers every --param as a String)."
             )
         }
         if (mode.embedMasks && !(mode.compartments && mode.expanded)) {
             throw new IllegalArgumentException(
-                "--embed_masks requires both --quantify_compartments and " +
-                "--expanded_quantification to be true -- without both, the pyramid's " +
+                "embed_masks requires both quantify_compartments and " +
+                "expanded_quantification to also be true -- without both, the pyramid's " +
                 "mask series (Image:1) is never written, and a run advertising " +
-                "--embed_masks that silently omits it is only discovered later, when " +
+                "embed_masks that silently omits it is only discovered later, when " +
                 "this --outdir is handed to mode='add_cycle' as --prior_outdir and " +
-                "EXTRACT_MASK_SERIES finds no Image:1 to reuse."
+                "EXTRACT_MASK_SERIES finds no Image:1 to reuse. All three are booleans -- " +
+                "set them in a -params-file or a profile, never on the command line."
             )
         }
     }

@@ -12,10 +12,14 @@ declaration of any default in the pipeline code it scans (<code>main.nf</code>,
 holds <code>nextflow_schema.json</code> to the same defaults.
 <code>tests/test_parameters_doc_matches_schema.py</code> holds this page's
 <em>parameter list</em> to <code>nextflow_schema.json</code> in both directions, so a
-parameter cannot be added or removed without this page moving; the defaults and
-descriptions below are still hand-maintained and <em>not</em> machine-checked, so
-update them by hand when a default changes, and read <code>nextflow config -flat</code>
-for the values a specific run actually resolved.</p>
+parameter cannot be added or removed without this page moving, and checks that
+every <em>literal</em> default cell (most of them) agrees with
+<code>nextflow.config</code>. A narrative cell — a per-tier default, or
+<em>required, no default</em> — documents a <code>null</code> config default in
+prose instead of restating <code>null</code>, and that prose is <em>not</em> machine-checked;
+neither are the descriptions below. Update those by hand when behaviour changes,
+and read <code>nextflow config -flat</code> for the values a specific run
+actually resolved.</p>
 
 !!! abstract "Canonical sources"
     - **Defaults** — `nextflow.config` (`params { … }`)

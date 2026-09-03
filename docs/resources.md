@@ -336,21 +336,30 @@ launch. Supply them from a `site.config` (`-c site.config`, copied from
 
     The `slurm` profile is the one exception. It assigns `resourceLimits` as a
     **plain map** (`nextflow.config:719`), evaluated eagerly while
-    `nextflow.config` is parsed — before any `-c` file exists. Measured with
-    `nextflow config`:
+    `nextflow.config` is parsed — before any `-c` file exists. Measured with a
+    `site.config` that actually sets a ceiling (`max_cpus = 64`,
+    `max_memory = '300.GB'`), so the comparison is not against two `null`s:
 
     ```text
-    resourceLimits = [cpus:null, memory:null, time:'240.h']   # -profile slurm -c site.config
-    resourceLimits = [cpus:null, memory:null, time:'240.h']   # -profile slurm,ieo
+    $ nextflow -c site.config config . -profile slurm | grep resourceLimits
+       resourceLimits = [cpus:null, memory:null, time:'240.h']
+
+    $ nextflow -c site.config config . | grep resourceLimits
+       resourceLimits = { [ cpus: params.max_cpus, memory: params.max_memory, time: params.max_time ] }
     ```
 
-    So with `-profile slurm`, the ceiling is frozen at whatever `params.max_*`
-    were at that line, and neither `-c site.config` nor a second profile changes
-    it. Since `max_cpus`/`max_memory` have **no default**, that frozen map is the
-    reason to prefer `-profile slurm,singularity -c site.config` together with a
-    site config that is layered for the *params* while the executor comes from the
-    profile — and the reason not to rely on `-profile slurm,<site>` picking up the
-    site's ceiling. Fix, if ever needed: make line 719 a closure, matching the
+    Without `-profile slurm`, `resourceLimits` prints as the **closure literal**
+    (`nextflow config` shows source, not the value it resolves to at
+    submission time) — it reads `site.config`'s `64`/`300.GB` lazily, later, when
+    a task actually submits. *With* `-profile slurm`, the ceiling is frozen at
+    whatever `params.max_*` were at line 719 — `null`/`null`, because that line
+    runs before `-c site.config` is layered — and the `64`/`300.GB` from
+    `site.config` never reaches it, silently. Since `max_cpus`/`max_memory` have
+    **no default**, that frozen map is the reason to prefer
+    `-profile slurm,singularity -c site.config` together with a site config that
+    is layered for the *params* while the executor comes from the profile — and
+    the reason not to rely on `-profile slurm,<site>` picking up the site's
+    ceiling. Fix, if ever needed: make line 719 a closure, matching the
     top-level default.
 
 ---
