@@ -968,9 +968,19 @@ def read_plane(path, channel: int, *, lazy: bool = True):
     formats behind bioio) and for a caller that wants the plane materialised anyway.
 
     On a file where ``read_info`` found ``channels_are_samples`` True (an interleaved
-    RGB-like file), ``channel`` indexes the SAMPLE axis, not C -- the same remap
-    ``read_info`` applies, so a caller never has to know which axis it actually came
-    from.
+    RGB-like file), ``channel`` is INTENDED to index the SAMPLE axis, not C -- the same
+    remap ``read_info`` applies, so a caller never has to know which axis it actually
+    came from. **That promise is only kept for the bioio branch below.** The
+    ``_is_tifffile_readable`` branch above it -- ``open_lazy``'s ``(C, H, W)`` zarr view,
+    and the ``tifffile.imread(...)[channel]`` eager fallback -- both still assume the
+    channel axis is axis 0 of the array tifffile hands back, which for an interleaved
+    ``YXS`` file (``fmt_rgb.tiff``) is Y, not the samples axis: measured,
+    ``read_plane("fmt_rgb.tiff", 1)`` returns shape ``(64, 3)`` (one ROW and all three
+    samples) instead of the ``(64, 64)`` single-sample plane the contract above promises.
+    Fixing it is scheduled for plan 07 Tasks 5-6, which give ``open_lazy`` its own S-axis
+    awareness; until then this is a KNOWN GAP, pinned red-when-fixed by
+    ``tests/integration/formats/test_ome_io_read_info.py::test_read_plane_on_an_interleaved_rgb_tiff``
+    (``xfail(strict=True)``) rather than silently left unasserted.
     """
     path = Path(path)
     info = read_info(path)

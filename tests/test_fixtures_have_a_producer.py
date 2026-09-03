@@ -63,6 +63,28 @@ EMPTY_ON_PURPOSE = {
     ),
 }
 
+# Fixtures that are DELIBERATELY CORRUPT -- non-empty, but built specifically so a
+# reader FAILS on them -- keyed on the name, with the reason. A DIFFERENT shape of
+# exemption from EMPTY_ON_PURPOSE above: these are not zero bytes and the zero-byte
+# check still applies to them (an unexpected truncation to 0 bytes would itself be a
+# regression worth catching); only `_openable()`'s "this must parse" assumption is
+# wrong for a fixture whose entire point is that it does not parse. Each entry is
+# verified below to still exist, still be non-empty, AND still actually fail to open --
+# a fixture that became openable again (or vanished) would make the exemption a stale
+# licence nobody is using.
+DELIBERATELY_UNOPENABLE = {
+    "fmt_truncated.ome.tiff": (
+        "the first 100 bytes of fmt_bigtiff.ome.tiff -- past the TIFF header, short of "
+        "the first IFD (generate_complete_testdata.py section 11f). "
+        "tests/integration/formats/test_ome_io_read_info.py's "
+        "test_a_truncated_file_raises_rather_than_returning_a_partial_read exists "
+        "precisely because a reader that returned an empty array instead of raising on "
+        "a damaged slide becomes an all-zero slide four processes later -- a version of "
+        "THIS guard that demanded the file be openable would fail the one fixture "
+        "whose whole job is proving the pipeline does not swallow that failure."
+    ),
+}
+
 
 def _openable(path):
     """(ok, reason) -- can this fixture be opened as what its suffix claims?
@@ -169,6 +191,8 @@ def test_every_referenced_fixture_is_non_empty_and_openable():
                 f"tests/testdata/{name} is 0 bytes -- referenced by {', '.join(sorted(users))}"
             )
             continue
+        if name in DELIBERATELY_UNOPENABLE:
+            continue
         ok, why = _openable(path)
         if not ok:
             bad.append(
@@ -179,7 +203,8 @@ def test_every_referenced_fixture_is_non_empty_and_openable():
         "process, with a message about the tool rather than about the fixture. Give "
         "it a producer in tests/testdata/generate_complete_testdata.py (RULING R7), "
         "or -- if it is genuinely a sentinel whose content is never read -- add it to "
-        "EMPTY_ON_PURPOSE in this file with the reason."
+        "EMPTY_ON_PURPOSE (zero bytes) or DELIBERATELY_UNOPENABLE (non-empty but built "
+        "to fail a reader on purpose) in this file with the reason."
     )
 
 
@@ -205,6 +230,41 @@ def test_the_empty_on_purpose_allowlist_has_no_dead_entries():
         elif name not in refs:
             stale.append(
                 f"{name}: no longer referenced by any test -- delete the exemption"
+            )
+    assert not stale, "\n".join(stale)
+
+
+def test_the_deliberately_unopenable_allowlist_has_no_dead_entries():
+    """Same shape as the EMPTY_ON_PURPOSE staleness check above, plus a FOURTH way
+    this particular exemption class goes dead that the empty one cannot: the fixture
+    quietly became openable. A DELIBERATELY_UNOPENABLE entry that _openable() now
+    accepts is licensing a claim ("this cannot be read") that is no longer true, and
+    the reader-side test the fixture exists for (e.g.
+    test_a_truncated_file_raises_rather_than_returning_a_partial_read) would then be
+    the only thing standing between a silent regression and the suite -- exactly the
+    blind spot this file exists to close.
+    """
+    stale = []
+    refs = _referenced()
+    for name, reason in DELIBERATELY_UNOPENABLE.items():
+        assert reason.strip(), f"{name} has an empty reason"
+        path = TESTDATA / name
+        if not path.is_file():
+            stale.append(f"{name}: no such fixture -- delete the exemption")
+            continue
+        if path.stat().st_size == 0:
+            stale.append(f"{name}: is 0 bytes -- belongs in EMPTY_ON_PURPOSE, not here")
+            continue
+        if name not in refs:
+            stale.append(
+                f"{name}: no longer referenced by any test -- delete the exemption"
+            )
+            continue
+        ok, _why = _openable(path)
+        if ok:
+            stale.append(
+                f"{name}: _openable() now accepts it -- it is no longer corrupt, "
+                "delete the exemption"
             )
     assert not stale, "\n".join(stale)
 

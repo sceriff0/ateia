@@ -398,3 +398,24 @@ def test_scan_flags_an_unwrapped_dot_name_in_a_synthetic_real_block():
     assert problems, (
         "_scan found nothing in a block with a real, unwrapped .name access"
     )
+
+
+def test_scan_does_not_flag_the_same_access_once_wrapped_in_file():
+    """The NEGATIVE control for the test above: the identical `.name` access,
+    wrapped in `file(...)` -- the discharge this whole guard exists to require --
+    must report NOTHING. Without this half, a `_scan` that flagged every `.name`
+    access unconditionally (wrapped or not) would still pass the positive test
+    above; this is what proves the walk is actually looking at the wrap, not
+    just pattern-matching `.name`."""
+    body = """
+        then {
+            assertAll(
+                { assert file(process.out.nuclei_mask.get(0).get(1)).name == 'foo.tif' }
+            )
+        }
+    """
+    problems: list = []
+    _scan(body, {}, problems, "synthetic:0")
+    assert not problems, (
+        f"_scan flagged a file(...)-wrapped .name access as tainted: {problems}"
+    )

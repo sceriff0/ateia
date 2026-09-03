@@ -566,6 +566,20 @@ jobs:
   # keeps this suite out of python-tests' collection and out of
   # tests/collected_floor.txt. tests/integration is already excluded from the
   # standard pytest invocation, so no ignore flag has to be added anywhere.
+  #
+  # WHAT THIS JOB BUYS TODAY, HONESTLY. It installs the full bioio + bioio-ome-tiff
+  # stack, but `ome_io.read_info`'s own routing (`_is_tifffile_readable`) sends
+  # EVERY current fixture — `.ome.tif(f)`, `.tif(f)`, `.ndpi(s)`, `.h5` — through
+  # `_info_via_tifffile`/`_info_via_hdf5`, never `_info_via_bioio`, because tifffile
+  # can open all of them directly and is preferred (it is installed everywhere,
+  # bioio in one image — see read_info's own docstring). So this job today buys an
+  # IMPORT + PIN-DRIFT check on the bioio stack (it fails if bioio/bioio-ome-tiff
+  # stop installing together, or drift from the image), not READ COVERAGE of the
+  # bioio branch itself. RULING R3 forbids a committable vendor fixture (.svs/.czi/
+  # .nd2/.lif), which is what would force a real file through `_info_via_bioio` —
+  # until one exists, `_info_via_bioio`'s S-as-C remap
+  # (test_read_info_remaps_interleaved_rgb_samples_to_channels in
+  # tests/test_ome_io.py) is exercised only through a mocked BioImage, never bytes.
   format-tests:
     name: Format suite
     runs-on: ubuntu-latest

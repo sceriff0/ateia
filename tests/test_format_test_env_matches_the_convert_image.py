@@ -25,6 +25,19 @@ ROOT = Path(__file__).resolve().parent.parent
 FORMAT_REQS = ROOT / "requirements" / "format-tests.txt"
 DOCKERFILE = ROOT / "containers" / "convert" / "Dockerfile"
 
+# h5py is pinned in THREE requirements/ files, not just format-tests.txt above:
+# requirements/ci.txt and requirements/testdata.txt both gained an h5py==3.11.0 pin
+# in the same phase (the fixture generator writes an HDF5 slide -- see each file's
+# own comment). Neither could go through requirements/constraints.txt --
+# containers/convert is the ONLY image that installs h5py since plan 06's regqc
+# cleanup, and constraints.txt only constrains packages more than one image
+# installs -- so each is a second HAND-WRITTEN copy of the same version, exactly
+# what a drift guard exists to catch. Only format-tests.txt had one.
+OTHER_H5PY_PINS = {
+    "requirements/ci.txt": ROOT / "requirements" / "ci.txt",
+    "requirements/testdata.txt": ROOT / "requirements" / "testdata.txt",
+}
+
 if str(Path(__file__).parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).parent))
 harmonisation = importlib.import_module("test_container_harmonisation")
@@ -81,6 +94,23 @@ def test_every_shared_package_is_pinned_to_the_same_version():
         f"(package: format-tests -> Dockerfile): {drift}. The IMAGE is the authority: "
         "the format suite exists to run the reader stack CONVERT_IMAGE runs, so a "
         "divergence makes it test something that never ships."
+    )
+
+
+@pytest.mark.parametrize("label", sorted(OTHER_H5PY_PINS), ids=sorted(OTHER_H5PY_PINS))
+def test_h5py_stays_in_step_everywhere_else_it_is_pinned_by_hand(label):
+    """format-tests.txt is not the only file that copied containers/convert's h5py
+    pin by hand -- requirements/ci.txt and requirements/testdata.txt did too, and
+    neither drift was guarded until now."""
+    reqs_path = OTHER_H5PY_PINS[label]
+    assert reqs_path.is_file(), f"{reqs_path} is missing"
+    mine = _pins(reqs_path.read_text())
+    theirs = convert_image_pins()
+    assert "h5py" in mine, f"{label} does not pin h5py at all"
+    assert "h5py" in theirs, "containers/convert/Dockerfile no longer pins h5py"
+    assert mine["h5py"] == theirs["h5py"], (
+        f"{label} pins h5py=={mine['h5py']}, but containers/convert/Dockerfile pins "
+        f"h5py=={theirs['h5py']}. The image is the authority -- see this file's header."
     )
 
 
