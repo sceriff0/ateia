@@ -204,14 +204,20 @@ opt-out.
 
 | Process | `cpus` | `memory` (attempt 1) | `time` | Owner |
 |---|---|---|---|---|
-| `GENERATE_REGISTRATION_QC` | `1` *(withName)* | tier on `registered + reference`: `f<20` → 100, `f<50` → 200, else 300 GB, `× attempt` | `12.h × attempt` *(label `process_high`)* | partial |
+| `GENERATE_REGISTRATION_QC` | `1` *(withName)* | tier on `registered + native + reference`: `f<20` → 100, `f<50` → 200, else 300 GB, `× attempt` | `12.h × attempt` *(label `process_high`)* | partial |
 | `SEG_QC_SEGMENT` | `8` | tier on image: `f<10` → 32, `f<30` → 64, else 128 GB, `× attempt` | `4.h × attempt` | `withName` (`SEGMENT`'s, matched via the alias) |
 | `SEG_QC_GEOJSON` | `1` | `64 GB × attempt` | `4.h × attempt` | `withName` |
 | `WARP_SEG_QC` | `2` | `32 GB × 2^(attempt−1)` → 32 / 64 / 128 / 256 | `3.h × attempt` | `withName` |
 
 `GENERATE_REGISTRATION_QC` is the one process whose tier is keyed on the
-**combined** size of two inputs (the registered image *and* the reference), not
-on a single file — it holds both to build the overlay.
+**combined** size of *three* inputs (the registered image, its native
+pre-registration counterpart, and the reference), not on a single file — it
+holds all three to build the before/after pair. Per full-resolution pixel it
+carries three float32 planes plus a six-plane uint8 two-panel composite, about
+1.6× what the single-panel version held; summing the native's bytes into the
+tier is what tracks that. An input read but not summed here is a silent
+under-request, which is why `tests/test_registration_qc_wiring.py` fails when
+the closure omits one of the process's `path()` inputs.
 
 `WARP_SEG_QC` uses a *doubling* ramp rather than a linear one. Its historical
 exit-140 kills came from rasterizing both slides' polygons onto a whole-slide

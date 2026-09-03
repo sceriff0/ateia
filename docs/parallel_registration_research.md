@@ -73,7 +73,7 @@ Other registration-subworkflow processes and their labels:
 | `REGISTER` | `process_high` | 8 CPU / 200+100·att GB / 12 h | VALIS rigid+non-rigid+micro, all slides/patient |
 | `SEG_QC_GEOJSON` | `process_high` + `gpu` container | 8 CPU / 200+100·att GB | StarDist DAPI seg on native slide → cell GeoJSON (reg_qc=2) |
 | `WARP_SEG_QC` | `process_medium` | 4 CPU / 100+100·att GB / 4 h | warp polygons through stages, score overlap (reg_qc=2) |
-| `GENERATE_REGISTRATION_QC` | `process_high` | 8 CPU / 200+100·att GB | RGB DAPI overlay (reg_qc≥1) |
+| `GENERATE_REGISTRATION_QC` | `process_high` | 8 CPU / 200+100·att GB | RGB before/after DAPI overlay (reg_qc≥1) |
 
 There is no `process_high_memory` label — `conf/modules.config` defines only `process_single`,
 `process_low`, `process_medium`, and `process_high` (8 CPU / 200+100·att GB / 12 h, the ceiling
