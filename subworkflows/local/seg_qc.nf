@@ -54,7 +54,8 @@
         ch_transform          [patient_id, transform] per-PATIENT transform (valis branch)
         ch_stage_checkpoint   [patient_id, ckpt_dir]  REGISTER pre-micro checkpoint, may be empty
         ch_transform_by_slide [meta, transform]       per-MOVING-SLIDE transform (tiled branch)
-        method                String                  'tiled' | anything else = valis
+        method                String                  one of RegBackends.methods(); the join
+                                                        shape comes from RegBackends.segQcJoin
 
     Output:
         metrics   [meta, *_seg_qc.json]

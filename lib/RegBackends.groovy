@@ -54,6 +54,22 @@ class RegBackends {
      *   hasStageCheckpoint whether the method writes a pre-micro stage checkpoint the
      *                      reg_qc=2 warp can separate 'non_rigid' from 'micro' with.
      *   hasIntrinsicTre    whether the method estimates its own TRE.
+     *
+     *                      hasStageCheckpoint and hasIntrinsicTre are the ADAPTER
+     *                      CONTRACT'S declared optional emits (stage_checkpoint,
+     *                      intrinsic_tre — the null-object rule described in this file's
+     *                      header): what an adapter for this method is allowed to fill,
+     *                      versus what it must emit Channel.empty() for. No production
+     *                      call site reads these two fields yet — register_patient.nf
+     *                      passes the adapters' emits straight through unrenamed rather
+     *                      than branching on them — so today tests/lib_probe.nf's
+     *                      checkRegBackends() is their only reader. They stay in the
+     *                      table anyway because the master plan for this class mandates
+     *                      them as part of the contract, and because the alternative is
+     *                      the thing this class exists to prevent: a future consumer
+     *                      that needs to know "does this method have a stage checkpoint"
+     *                      discovering the answer by reading an adapter instead of
+     *                      asking the table.
      *   supportedModes     the params.mode values this backend may run under.
      *   warp               the lib/WarpBackends.groovy key for this method. Equal to the
      *                      method name today, and stated rather than assumed so that a

@@ -65,7 +65,7 @@ include { CHECKPOINT_WRITER } from './checkpoint_writer'
 workflow REGISTER_PATIENT {
     take:
     ch_grouped   // [patient_id, ref_item, all_items]
-    method       // String: 'tiled' | 'valis'
+    method       // String: one of RegBackends.methods() — see the Input doc above
 
     main:
     // Single-slide patients (only the reference, nothing to register) must NOT

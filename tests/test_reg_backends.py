@@ -67,9 +67,13 @@ _WARP_BLOCK = re.compile(
 #: `warp: 'valis'` field -- is not counted as a backend.
 _TOP_LEVEL_KEY = re.compile(r"^\s{4,8}([a-z][a-z0-9_]*)\s*:\s*\[", re.M)
 
-#: A comparison against a backend-name literal: `method == 'tiled'`, `'valis' != x`.
+#: A comparison against a backend-name literal: `method == 'tiled'`, `'valis' != x`, or
+#: the membership form `method in ['tiled']` -- the exact shape a Tasks 18-20 review found
+#: could replace `RegBackends.of(method).adapter` and leave this file green (the
+#: negative-only rule below did not catch it; see test_a_regbackends_call_is_actually_present).
 _LITERAL_COMPARISON = re.compile(
     r"(?:==|!=)\s*'(valis|tiled)'|'(valis|tiled)'\s*(?:==|!=)"
+    r"|\bin\s*\[\s*'(valis|tiled)'"
 )
 
 
@@ -137,12 +141,18 @@ def test_the_parse_is_not_vacuous():
 
 def test_the_literal_comparison_regex_actually_matches_one():
     """The negative rule below is only worth anything if its needle can fire. This
-    is the exact shape the three call sites carried before they were migrated."""
+    is the exact shape the three call sites carried before they were migrated, plus
+    the membership form (`method in ['tiled']`) a Tasks 18-20 review found could
+    replace RegBackends.of(method) and slip past the equality/inequality shapes alone."""
     assert _LITERAL_COMPARISON.search("if (method == 'tiled') {")
     assert _LITERAL_COMPARISON.search("if (params.registration_method != 'valis') {")
+    assert _LITERAL_COMPARISON.search(
+        "def adapter = (method in ['tiled']) ? 'TILED_ADAPTER' : 'VALIS_ADAPTER'"
+    )
     # ... and it must not fire on the table's own field values, which are legitimate.
     assert not _LITERAL_COMPARISON.search("warp: 'valis'],")
     assert not _LITERAL_COMPARISON.search("adapter: 'TILED_ADAPTER',")
+    assert not _LITERAL_COMPARISON.search("supportedModes: ['linear', 'add_cycle'],")
 
 
 def test_schema_enum_matches_the_backend_table():
@@ -175,12 +185,35 @@ def test_the_two_backend_tables_declare_the_same_set():
 
 
 def test_no_migrated_call_site_compares_against_a_method_literal():
+    """Two rules, not one, because a NEGATIVE rule alone is satisfiable by a call site
+    that never mentions RegBackends at all. A Tasks 18-20 review replaced
+    register_patient.nf's `def adapter = RegBackends.of(method).adapter` with
+    `def adapter = (method in ['tiled']) ? 'TILED_ADAPTER' : 'VALIS_ADAPTER'` -- a
+    literal three-way-if rewritten as a ternary, holding no `==`/`!=` against a quoted
+    method name -- and the negative check below (at the time, missing the membership
+    form entirely) stayed green. The positive check closes that: a migrated call site
+    must actually CALL something on RegBackends, not merely avoid the one comparison
+    shape this file used to look for.
+    """
     offenders = []
+    silent = []
     for rel in MIGRATED_CALL_SITES:
         body = strip_comments((ROOT / rel).read_text())
+
+        if "RegBackends." not in body:
+            silent.append(rel)
+
         for match in _LITERAL_COMPARISON.finditer(body):
             line = body[: match.start()].count("\n") + 1
             offenders.append(f"{rel}:{line} -> {match.group(0).strip()}")
+
+    assert not silent, (
+        "these migrated call sites no longer consult lib/RegBackends.groovy at all:\n  "
+        + "\n  ".join(silent)
+        + "\nA call site that never names RegBackends can decide the backend any way "
+        "it likes -- including reintroducing the exact literal dispatch this table was "
+        "built to replace -- without tripping the comparison-shape check below."
+    )
 
     assert not offenders, (
         "these files compare against a registration-method name directly:\n  "
