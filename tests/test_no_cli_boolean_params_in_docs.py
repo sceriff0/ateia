@@ -14,7 +14,7 @@ problem: `.github/workflows/ci.yml`'s `nextflow-stub` matrix already includes
 
 **Both CLI forms fail.** `--dry_run true` fails, and so does a bare valueless `--dry_run` --
 NF26 still delivers a String. The only working forms are `-params-file` with a real JSON
-boolean, or a profile. That applies to all 17 boolean parameters in the schema, not just
+boolean, or a profile. That applies to all 18 boolean parameters in the schema, not just
 `dry_run`, which is why this guard derives its parameter list from the schema rather than
 hardcoding a name.
 
@@ -35,6 +35,12 @@ SCAN = [
     # rglob, not glob: tests/cluster/README.md is the file an operator copy-pastes from.
     *sorted((REPO / "tests").rglob("*.md")),
     *sorted((REPO / "tests").rglob("*.sh")),
+    # Widened 2026-09-02: nextflow.config's own comment told the reader to run
+    # `--skip_seg_quality_eval` with a value, forty lines from the comment
+    # explaining that the string "false" is truthy and does the opposite. A
+    # config comment is a document; it was simply out of scope.
+    REPO / "nextflow.config",
+    *sorted((REPO / "conf").glob("*.config")),
 ]
 
 # Files that quote the broken form ON PURPOSE, with the reason. Each is verified below to still
@@ -79,14 +85,58 @@ def _boolean_params():
 # excuses and quietly start covering a working example.
 _COUNTEREXAMPLE = re.compile(r"#\s*x\s+fails\b", re.I)
 
+# THE BARE FORM FAILS TOO, and the module docstring above says so: NF26 delivers
+# a valueless `--flag` as the String "true". It is detected only inside a FENCED
+# COMMAND, never in prose, and the distinction is deliberate: these documents
+# name boolean parameters in prose constantly ("`--expanded_quantification`
+# requires `--quantify_compartments`"), and a detector that fired on those would
+# be noise nobody reads. What the reader copies is what is in the code block.
+_FENCE = re.compile(r"^\s*(```|~~~)")
+_TRAILING_COMMENT = re.compile(r"\s+#.*$")
 
-def _offending_lines(text, params):
-    pattern = re.compile(rf"--({'|'.join(sorted(params))})\s+(?:true|false)\b")
+
+def _command_lines(text, always_in_command):
+    """Yield (line_no, raw_line, code) for lines that are part of a `nextflow run`.
+
+    In a Markdown file, only inside a fenced block; in a .sh or .config file,
+    every line is eligible. A backslash continuation keeps the command open.
+    """
+    in_fence = always_in_command
+    continuing = False
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if not always_in_command and _FENCE.match(line):
+            in_fence = not in_fence
+            continuing = False
+            continue
+        if not in_fence:
+            continue
+        code = _TRAILING_COMMENT.sub("", line)
+        is_command = "nextflow run" in code or continuing
+        continuing = is_command and code.rstrip().endswith("\\")
+        if is_command:
+            yield line_no, line, code
+
+
+def _offending_lines(text, params, always_in_command=False):
+    alts = "|".join(sorted(params))
+    with_value = re.compile(rf"--({alts})\s+(?:true|false)\b")
+    # Bare: the flag is the last token, is followed by a `\` continuation, or is
+    # followed by another option.
+    bare = re.compile(rf"--({alts})(?=\s*(?:\\\s*)?$|\s+-)")
+
     for i, line in enumerate(text.splitlines(), start=1):
         if _COUNTEREXAMPLE.search(line):
             continue
-        if pattern.search(line):
+        if with_value.search(line):
             yield i, line.strip()
+
+    for line_no, raw, code in _command_lines(text, always_in_command):
+        if _COUNTEREXAMPLE.search(raw):
+            continue
+        if with_value.search(code):
+            continue  # already reported above
+        if bare.search(code):
+            yield line_no, raw.strip()
 
 
 def test_no_document_shows_a_boolean_param_on_the_command_line():
@@ -97,7 +147,8 @@ def test_no_document_shows_a_boolean_param_on_the_command_line():
         rel = f.relative_to(REPO).as_posix()
         if rel in ALLOWED:
             continue
-        for line_no, line in _offending_lines(f.read_text(), params):
+        always = f.suffix in (".sh", ".config")
+        for line_no, line in _offending_lines(f.read_text(), params, always):
             offenders.append(f"{rel}:{line_no}: {line}")
 
     assert not offenders, (
@@ -124,6 +175,31 @@ def test_the_scan_covers_the_documents_this_guard_exists_for():
 
     for expected in ("README.md", "docs/usage.md", "tests/test_validation.md"):
         assert expected in scanned
+
+
+def test_the_scan_covers_the_configuration_files_too():
+    scanned = {f.relative_to(REPO).as_posix() for f in SCAN}
+    assert "nextflow.config" in scanned
+    assert "conf/test.config" in scanned
+
+
+def test_the_detector_recognises_the_bare_form_inside_a_command():
+    params = _boolean_params()
+    fenced = "```bash\nnextflow run . --input s.csv --dry_run\n```\n"
+    assert list(_offending_lines(fenced, params))
+
+    continued = "```bash\nnextflow run . \\\n  --cleanup_work \\\n  --outdir r\n```\n"
+    assert list(_offending_lines(continued, params))
+
+
+def test_the_detector_leaves_prose_naming_a_boolean_param_alone():
+    """These documents name boolean parameters in prose constantly; a detector
+    that fired on those would be noise nobody reads."""
+    params = _boolean_params()
+    prose = (
+        "Either add `--quantify_compartments`, or drop `--expanded_quantification`.\n"
+    )
+    assert not list(_offending_lines(prose, params))
 
 
 def test_the_detector_recognises_the_form_that_actually_fails():

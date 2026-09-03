@@ -528,8 +528,11 @@ key grammar is a cross-repository contract — see
     ```
 
 ??? failure "`--expanded_quantification requires --quantify_compartments`"
-    Expanded output depends on compartments. Either add `--quantify_compartments`,
-    or drop `--expanded_quantification` for a flat per-cell table.
+    Expanded output depends on compartments. Both are booleans, so set them in a
+    `-params-file`: either add `"quantify_compartments": true` alongside
+    `"expanded_quantification": true`, or drop `expanded_quantification` for a
+    flat per-cell table. Neither can be passed on the command line — see
+    [Boolean parameters](#boolean-parameters).
 
 ??? question "Do I need a GPU?"
     No — run CPU-only with `seg_gpu = false`. A GPU mainly accelerates `SEGMENT`.
