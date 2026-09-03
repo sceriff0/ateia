@@ -581,10 +581,19 @@ def test_every_default_a_figure_states_matches_nextflow_config():
 # carry -- registration-schematic.html:507). Neither is a claim that mirage
 # ships that backend; a bare "ashlar" or "elastix" with no possessive/bindings
 # tail still matches, which is what the drills below rely on.
+#
+# Residual: a possessive tail is not proof the sentence is merely descriptive
+# -- "mirage ships ashlar's tile solver" would dodge the exclusion above while
+# still being a shipping claim. Tightened by flagging a possessive match too
+# when a shipping verb sits within 40 chars before it.
 _METHOD_WORD = re.compile(
     r"(?<![A-Za-z0-9_])(valis|tiled|ashlar|stare_ml|elastix)(?![A-Za-z0-9_])"
     r"(?!'s)(?! bindings)",
     re.I,
+)
+_SHIP_VERB = re.compile(r"\b(?:ships|supports|adds|selectable)\b", re.I)
+_POSSESSIVE_METHOD = re.compile(
+    r"(?<![A-Za-z0-9_])(valis|tiled|ashlar|stare_ml|elastix)(?![A-Za-z0-9_])'s", re.I
 )
 
 
@@ -596,7 +605,11 @@ def test_figures_name_exactly_the_shipped_registration_backends():
 
     named, per_file = set(), {}
     for path in _live_figures():
-        found = {m.group(1).lower() for m in _METHOD_WORD.finditer(_prose(path))}
+        prose = _prose(path)
+        found = {m.group(1).lower() for m in _METHOD_WORD.finditer(prose)}
+        for m in _POSSESSIVE_METHOD.finditer(prose):
+            if _SHIP_VERB.search(prose[max(0, m.start() - 40) : m.start()]):
+                found.add(m.group(1).lower())
         per_file[path.name] = found
         named |= found
 
@@ -616,6 +629,20 @@ def test_figures_name_exactly_the_shipped_registration_backends():
         f"ships. A supplementary set that omits a whole backend is a claim that "
         f"it does not exist."
     )
+
+
+def test_a_shipping_claim_is_not_excused_by_a_possessive_tail():
+    """Drill for the residual noted above _METHOD_WORD: a possessive form
+    dressed up as a shipping claim ("mirage ships ashlar's tile solver")
+    must still be caught, even though a bare possessive ("mirrors ASHLAR's")
+    must not be."""
+    adversarial = "mirage ships ashlar's tile solver end to end."
+    m = next(_POSSESSIVE_METHOD.finditer(adversarial))
+    assert _SHIP_VERB.search(adversarial[max(0, m.start() - 40) : m.start()])
+
+    descriptive = "the kernel mirrors ASHLAR's phase-correlation approach."
+    m = next(_POSSESSIVE_METHOD.finditer(descriptive))
+    assert not _SHIP_VERB.search(descriptive[max(0, m.start() - 40) : m.start()])
 
 
 # --------------------------------------------------------------------------

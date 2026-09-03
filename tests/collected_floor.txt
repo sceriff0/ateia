@@ -581,4 +581,15 @@
 # `pytest --collect-only -q` reports "1618 tests collected", and a full run
 # with MIRAGE_STRICT_SKIPS=1 gives 1605 passed, 13 skipped, 0 failed --
 # 1605 + 13 = 1618. 1617 + 1 = 1618.
-1796
+
+#
+#
+# RE-MEASURED 2026-09-03, release 1.0.0 plan 11 Task 11 (phase exit-state
+# assertions plus the backend-name guard's possessive-exclusion fold-in). One
+# new case: tests/test_figures_match_the_pipeline.py::test_a_shipping_claim_is_not_excused_by_a_possessive_tail,
+# a drill proving "mirage ships ashlar's tile solver" is still caught even
+# though the possessive exclusion normally lets "ASHLAR's"/"Elastix bindings"
+# through. `pytest --collect-only -q` reports "1619 tests collected", and a
+# full run with MIRAGE_STRICT_SKIPS=1 gives 1606 passed, 13 skipped, 0 failed
+# -- 1606 + 13 = 1619. 1618 + 1 = 1619.
+1797
