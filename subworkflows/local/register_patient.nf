@@ -26,8 +26,9 @@
         ch_grouped: [patient_id, reference_item, all_items]
                     reference_item = [meta, file]
                     all_items      = [[meta, file], ...]  (INCLUDING the reference)
-        method:     registration backend name — 'tiled' selects TILED_ADAPTER (STARE),
-                    anything else the classic VALIS_ADAPTER.
+        method:     registration backend name — one of RegBackends.methods().
+                    lib/RegBackends.groovy maps it to an adapter; an unknown name
+                    throws there rather than falling through to VALIS.
 
                     A plain String, not a channel: Nextflow binds workflow `take:`
                     values verbatim (same pattern as INPUT_CHECK's image_column).
@@ -112,24 +113,34 @@ workflow REGISTER_PATIENT {
     // instead of a per-emit translation table plus the pre-declared empty channels that
     // used to exist only so the union of the vocabularies could be assembled here.
     //
-    // EVERY BACKEND IS NAMED EXPLICITLY, AND THE FALLBACK IS AN ERROR. This used to read
-    // `if (tiled) ... else VALIS`, which meant any method name the schema enum gained but
-    // this file did not know about registered with VALIS and reported success — the whole
-    // arm would have measured VALIS twice under two labels. An unknown method is now loud.
+    // WHICH ADAPTER IS lib/RegBackends.groovy's ANSWER, NOT THIS FILE'S. It used to be a
+    // three-arm if/else over method-name literals, which was itself a repair of an
+    // earlier `if (tiled) ... else VALIS` that registered any unknown method with VALIS
+    // and reported success. RegBackends.of() throws on a name the table does not know,
+    // so the unknown-METHOD case is closed before this branch runs; the else-arm's own
+    // check below closes the other half — a method the table knows whose adapter this
+    // dispatch has no arm for, which is what a third backend would be on the day it is
+    // added to the table and not here.
+    //
+    // A two-arm `if` and not a lookup: a Nextflow workflow cannot be invoked by name out
+    // of a map, so the CALL has to be written out. Only the DECISION moved.
     //
     // NOTE: the *old distributed-VALIS* low-memory path was archived 2026-07-24
-    // (git tag archive/tiled-valis-2026-07-24). `method == 'tiled'` is a SEPARATE,
+    // (git tag archive/tiled-valis-2026-07-24). The 'tiled' backend is a SEPARATE,
     // live STARE backend — don't confuse the two.
-    if (method == 'tiled') {
+    def adapter = RegBackends.of(method).adapter
+    if (adapter == 'TILED_ADAPTER') {
         TILED_ADAPTER(ch_grouped_multi)
         ch_adapter = TILED_ADAPTER.out
-    } else if (method == 'valis') {
+    } else {
+        if (adapter != 'VALIS_ADAPTER')
+            error "REGISTER_PATIENT: RegBackends.of('${method}').adapter is '${adapter}', " +
+                  "which this dispatch has no arm for. A Nextflow workflow cannot be " +
+                  "invoked by name from a table, so a new adapter needs an arm here as " +
+                  "well as a row in lib/RegBackends.groovy. Known methods: " +
+                  "${RegBackends.methods()}."
         VALIS_ADAPTER(ch_grouped_multi)
         ch_adapter = VALIS_ADAPTER.out
-    } else {
-        error "REGISTER_PATIENT: unknown registration method '${method}'. " +
-              "Valid: valis, tiled. (nextflow_schema.json's registration_method " +
-              "enum and this dispatch must be widened together.)"
     }
 
     // Re-introduce single-slide patients (reference passed through unregistered)

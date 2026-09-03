@@ -132,15 +132,23 @@ workflow MIRAGE {
         ParamUtils.validateAddCycleStepFlags(params)
         ParamUtils.validateAddCycle(params.outdir, params.prior_outdir)
         ParamUtils.validateCompartmentQuant(compartment_mode)
-        // add_cycle re-registers the new cycle via the classic VALIS_ADAPTER only —
-        // add_cycle.nf hands REGISTER_PATIENT the literal 'valis'. Reject anything else
-        // loudly rather than registering with VALIS under another method's name.
+        // add_cycle re-registers the new cycle through whichever adapters declare they
+        // support that mode — today VALIS alone; add_cycle.nf hands REGISTER_PATIENT the
+        // literal 'valis'. Reject anything else loudly rather than registering with VALIS
+        // under another method's name.
         //
-        // ALLOWLIST, NOT DENYLIST. This used to name 'tiled' explicitly, so any method the
-        // schema enum gained afterwards passed the check and was then silently registered
-        // with VALIS -- the next method added to the enum would have been the first to hit it.
-        if (params.registration_method != 'valis') {
-            error "mode='add_cycle' does not support --registration_method ${params.registration_method} yet; use valis."
+        // ALLOWLIST, NOT DENYLIST, and now one the backend TABLE owns. This used to name
+        // 'tiled' explicitly (so any method the enum gained afterwards passed the check
+        // and was silently registered with VALIS), was then narrowed to `!= 'valis'`
+        // (correct, but a second place to update when a backend gains add_cycle support),
+        // and is now RegBackends.supportsMode — the same field lib_probe asserts and the
+        // same table register_patient.nf dispatches from.
+        if (!RegBackends.supportsMode(params.registration_method, 'add_cycle')) {
+            def supported = RegBackends.methods().findAll {
+                RegBackends.supportsMode(it, 'add_cycle')
+            }
+            error "mode='add_cycle' does not support --registration_method " +
+                  "${params.registration_method}; supported: ${supported.join(', ')}."
         }
 
         if (!params.input) error "mode='add_cycle' requires --input (the new cycle samplesheet)"
