@@ -474,4 +474,8 @@
 # tests/lib_probe.nf (a Nextflow script, not pytest-collected); M3 and M6 touch no
 # test file. `pytest --collect-only -q` reports "1345 tests collected", and a full
 # run gives 1332 passed, 13 skipped, 0 failed -- 1332 + 13 = 1345.
-1435
+#
+# 2026-09-03, plan 05 (deepening B) after the rebase onto dev: ome_io's own suite
+# (test_ome_io.py), the repointed seam tests, the only-writer guard and the
+# container-harmonisation premise cases; no deletions, no skips.
+1565
