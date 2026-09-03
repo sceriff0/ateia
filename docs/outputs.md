@@ -320,7 +320,7 @@ apart from a real one.
 |---|---|---|
 | `versions.yml` | per task, aggregated into `qc/mirage_qc_data_<timestamp>/collated_versions.yml` | tool versions + the resolved container, per process |
 | `*.size.csv` | per task, aggregated into `size_logs/input_sizes.csv` | one row per task: `process,sample_id,filename,bytes` — the byte total of that task's inputs |
-| `qc/` (run level) | `<outdir>/qc/` | the aggregated HTML QC report, `mirage_resource_report.html`, and both reports' data folders |
+| `qc/` (run level) | `<outdir>/qc/` | the aggregated HTML QC report plus its `mirage_qc_data_<timestamp>/` folder, and the self-contained `mirage_resource_report.html` |
 | `<trace_dir>/` | resolved against the **launch directory**, not `--outdir` | Nextflow's own `trace.txt`, `report.html`, `timeline.html` only |
 
 !!! note "The resource report lives in `<outdir>/qc/`; only its INPUT lives under `trace_dir`"
