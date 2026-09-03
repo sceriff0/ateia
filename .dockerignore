@@ -31,7 +31,10 @@ tests/testdata
 # directory that is missing here.
 .citadel
 .claude
+.eggs
+.idea
 .nextflow
+.nextflow-plugins
 .nf-test
 .planning
 .pytest_cache
@@ -39,14 +42,20 @@ tests/testdata
 .superpowers
 .trace
 .venv-bench
+.vscode
 .worktrees
 bench_matrix
 bench_runs
+build
 challenge
+csv
+dist
+htmlcov
 illum_bench
 legacy
 mirage_app
 notebooks
+null
 pixie-main
 site
 traces

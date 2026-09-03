@@ -138,8 +138,9 @@ class ProcessEnvelope {
     /**
      * The heredoc for a module with NO Python interpreter.
      *
-     * modules/local/aggregate_size_logs.nf runs in `container 'ubuntu:22.04'` and is the
-     * only such module. It hand-wrote its heredoc for exactly this reason, and
+     * modules/local/aggregate_size_logs.nf runs in
+     * `container 'bolt3x/mirage-preprocess:1.0.0'` and is the only such module.
+     * It hand-wrote its heredoc for exactly this reason, and
      * tests/test_versions_envelope.py carried it as a documented exception. That is no
      * longer necessary: the reason was never "this module is special", it was "versions()
      * always prepends python:", and `python --version 2>&1` in an image without Python

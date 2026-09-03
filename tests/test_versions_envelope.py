@@ -40,12 +40,13 @@ LOCAL_PROCESSES = [p for p in processes().values() if p.path.parent.name == "loc
 # file allowed the exception, and that reason is now false.
 #
 # There is no exception left. aggregate_size_logs.nf was the last one: it runs in
-# `container 'ubuntu:22.04'` with no Python interpreter, and ProcessEnvelope always
-# prepended a `python:` row, so routing it through versions() would have run
-# `python --version 2>&1` and written the shell's own "command not found" message
-# into a published report as a version number. ProcessEnvelope.versionsBash() renders
-# a `bash:` row instead, so all 28 modules under modules/local/ now go through the
-# class and this check covers every one of them.
+# `container 'bolt3x/mirage-preprocess:1.0.0'` with no Python interpreter, and
+# ProcessEnvelope always prepended a `python:` row, so routing it through versions()
+# would have run `python --version 2>&1` and written the shell's own "command not
+# found" message into a published report as a version number.
+# ProcessEnvelope.versionsBash() renders a `bash:` row instead, so all 28 modules
+# under modules/local/ now go through the class and this check covers every one of
+# them.
 
 
 def test_no_module_hand_writes_a_versions_heredoc():

@@ -178,20 +178,20 @@ def checkProcessEnvelope() {
     assert !stubContainer.contains('bolt3x')
 
     // The bash-only pair, for a module with no Python interpreter at all.
-    // AGGREGATE_SIZE_LOGS runs in ubuntu:22.04; routing it through versions() would
-    // run `python --version 2>&1` and write the SHELL'S ERROR MESSAGE
+    // AGGREGATE_SIZE_LOGS runs in bolt3x/mirage-preprocess:1.0.0; routing it through
+    // versions() would run `python --version 2>&1` and write the SHELL'S ERROR MESSAGE
     // ("bash: python: command not found") into a published report as a version
     // number, because that heredoc pipes stderr into the value.
-    def bashVersions = ProcessEnvelope.versionsBash('MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS', 'ubuntu:22.04')
+    def bashVersions = ProcessEnvelope.versionsBash('MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS', 'bolt3x/mirage-preprocess:1.0.0')
     assert bashVersions.readLines() == [
         'cat <<-END_VERSIONS > versions.yml',
         '"MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS":',
         '    bash: $(bash --version | head -n1 | sed \'s/GNU bash, version //\')',
-        '    container: ubuntu:22.04',
+        '    container: bolt3x/mirage-preprocess:1.0.0',
         'END_VERSIONS',
     ]
     assert !bashVersions.contains('python:')
-    def bashStub = ProcessEnvelope.versionsBashStub('MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS', 'ubuntu:22.04')
+    def bashStub = ProcessEnvelope.versionsBashStub('MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS', 'bolt3x/mirage-preprocess:1.0.0')
     assert bashStub.readLines() == [
         'cat <<-END_VERSIONS > versions.yml',
         '"MIRAGE:FINAL_QC:AGGREGATE_SIZE_LOGS":',

@@ -17,8 +17,17 @@ instrument.
 
 SCOPE IS TOP-LEVEL DIRECTORIES ONLY, and deliberately so. A `.gitignore` rule like
 `tests/output/` names a directory INSIDE a tracked one; dockerignoring its first segment
-(`tests`) would be wrong. Only a rule that is exactly `name`, `name/` or `name/*`, whose
-`name` exists as a top-level directory, is treated as a claim this guard can check.
+(`tests`) would be wrong. Only a rule that is exactly `name`, `name/` or `name/*` is
+treated as a claim this guard can check.
+
+A CLAIM COUNTS EVEN WHEN NOTHING IS ON DISK YET. A rule shaped `name/` or `name/*` is
+unambiguously a directory claim by .gitignore's own syntax -- gitignore's trailing `/`
+means "only match a directory" -- so it is trusted without checking `is_dir()`. A bare
+`name` rule (no trailing slash) is ambiguous between a file and a directory, so THAT form
+is still gated on `is_dir()`. Without the union, this guard is vacuous on any clean
+checkout (this repo's own fresh worktrees, and CI): none of the scratch directories are
+materialised there, so `is_dir()` returns False for every one of them and coverage
+"passes" by comparing nothing against nothing.
 """
 
 import re
@@ -44,27 +53,36 @@ def _rules(path):
 
 
 def gitignored_top_level_dirs():
-    """Top-level directories .gitignore claims, that actually exist on disk."""
+    """Top-level directories .gitignore claims.
+
+    A rule shaped `name/` or `name/*` is trusted as a directory claim on its syntax alone
+    (gitignore's trailing `/` means "directory only"), regardless of whether it currently
+    exists on disk -- a clean checkout has none of these scratch directories materialised,
+    and this guard must still see the claim. A bare `name` rule (no trailing slash) is
+    ambiguous between a file and a directory, so it is included only when `is_dir()`
+    confirms it -- see test_the_root_html_reviews_are_excluded for the file-shaped case
+    this deliberately excludes (`/*.html`, which is not even a bare-name rule).
+    """
     found = set()
     for line in _rules(GITIGNORE):
         match = _TOP_LEVEL_DIR_RULE.match(line)
-        if match and (REPO / match.group(1)).is_dir():
-            found.add(match.group(1))
+        if not match:
+            continue
+        name = match.group(1)
+        dir_shaped = line.endswith("/") or line.endswith("/*")
+        if dir_shaped or (REPO / name).is_dir():
+            found.add(name)
     return found
 
 
 def _gitignore_top_level_rule_names():
-    """Bare names of every top-level-shaped `.gitignore` rule, WITHOUT filtering by
-    on-disk existence.
+    """Bare names of every top-level-shaped `.gitignore` rule, WITHOUT the directory-shape
+    or on-disk filtering gitignored_top_level_dirs() applies.
 
-    Used only to prove the parser itself still finds something. gitignored_top_level_dirs()
-    deliberately filters by is_dir() -- that is correct for the coverage assertion below,
-    which must not demand .dockerignore list a directory nobody has -- but it also means
-    that function legitimately returns an EMPTY set on any clean checkout (this repo's own
-    fresh worktrees, and CI, materialise none of these scratch directories). A non-vacuity
-    check built on is_dir() would then fail on every clean checkout, which is exactly the
-    condition this guard exists to protect even when nobody has hit it yet. Counting rules
-    instead of on-disk directories keeps the check meaningful there too.
+    Used only to prove the parser itself still finds something -- a sanity floor
+    independent of which of those two admission rules is in play. Counting every
+    top-level-shaped rule, unfiltered, keeps this check meaningful even if a future edit
+    changes what counts as a directory claim.
     """
     found = set()
     for line in _rules(GITIGNORE):
