@@ -170,6 +170,21 @@ after that doc and is detailed inline below:
   `add_cycle` runs is still **not** supported: `csv/postprocessed.csv` is still not written
   (`add_cycle` has no `POSTPROCESSING` step), and `ParamUtils.validateAddCycle` requires both
   checkpoints to be present.
+- **Two new supplementary figures.** `docs/figures/coarse-schematic.html` (S5) walks the DISK +
+  LightGlue coarse front-end that replaced the four-way `reg_tiled_frontend` dispatch above;
+  `docs/figures/accuracy-schematic.html` (S6) distinguishes what each of the pipeline's accuracy
+  measures actually measures (intrinsic TRE, the residual-confidence gate, the reconciliation
+  scatter) so a reviewer stops conflating them. The set is now six files, mutually linked via a
+  shared `figset` nav.
+- **`tests/test_figures_have_no_retired_names.py`** — a NEGATIVE guard: no figure may say a
+  backend, front-end or harness the pipeline retired (the ten stale `ORB` mentions in
+  `registration-schematic.html` were the motivating case — `ORB` still parsed as a real word, so
+  no *positive* name check had anything to fail on). Reads raw text, not the comment-stripped
+  `_prose()` the positive checks use, so a retired name hidden in an HTML comment still fails it.
+- **`tests/test_figures_match_the_pipeline.py` gained a fourth claim class**: figure prose is
+  checked against `RegBackends.methods()` so the shipped registration-backend names (currently
+  `valis`, `tiled`) are exactly what the figure set advertises — no deleted backend lingering in
+  prose, no shipped backend the figures never mention.
 
 ### Changed
 - **The resource report is plots, not tables.** The per-process rollup,
@@ -495,6 +510,14 @@ after that doc and is detailed inline below:
 - **The container-requirements guards now derive from module-scope imports plus a
   positive `REQUIRED_RUNTIME_IMPORTS` table** — the 16-entry unreachable-import
   allowlist is gone — and a reverse rule now forbids installing what nothing reaches.
+- **`docs/figures/` rewritten to match the current pipeline**: two registration backends (VALIS,
+  tiled/STARE) instead of three, the DISK + LightGlue coarse front-end, the QC report's
+  plots-first rework, and the registration-QC two-panel (native + registered) overlay. The
+  parameter defaults, pipeline names and registration-method words each figure states are now
+  drift-checked against `nextflow.config`, the pipeline source and `RegBackends.methods()`
+  respectively — see the guards listed under Added.
+- **`tests/test_no_cli_boolean_params_in_docs.py` now scans `docs/figures/*.html`**, not just
+  prose docs, so a figure can no longer show the CLI-rejected `--dry_run true` form.
 
 ### Fixed
 - **The resource report is found where Nextflow wrote it.** `main.nf` resolved
@@ -985,6 +1008,11 @@ after that doc and is detailed inline below:
   like every other first-party image, so there is no separate tag to override. An old
   `-params-file` that still carries the key now fails schema validation at launch; delete
   the key rather than updating its value.
+- **`docs/figures/failure-schematic.html` is retired.** It was a draft never wired into
+  the published set — linked from no docs page and from no sibling figure's `figset`
+  nav — and it claimed "Supplementary Figure S4", a number `zarr-schematic.html`
+  already holds. `.gitignore` keeps the filename listed so a stray re-creation cannot
+  become a tracked figure by accident.
 
 ## [1.0.0] - 2026-07-29
 
