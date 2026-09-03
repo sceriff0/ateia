@@ -45,7 +45,22 @@ GENERATOR = TESTDATA / "generate_complete_testdata.py"
 
 # Any tests/testdata/<name> reference in an nf-test file, a Python test or a
 # test config. A trailing '.' is prose punctuation, not part of the name.
-_REF = re.compile(r"tests/testdata/([A-Za-z0-9_\-][A-Za-z0-9_.\-]*[A-Za-z0-9_\-])")
+# `\w` is Python's default Unicode-aware word class (no re.UNICODE needed for a
+# str pattern), so this already matches an accented filename like
+# P001_ünïcode.ome.tiff -- it does NOT match a space, which is deliberate: this
+# regex also runs over prose (docstrings, assertion messages) where a bare
+# space would swallow the rest of a sentence as part of the "fixture name".
+_REF = re.compile(r"tests/testdata/([\w\-][\w\-.]*[\w\-])")
+
+# A tests/testdata/<name> reference INSIDE A CSV FIXTURE FIELD specifically
+# (space_path_input.csv, unicode_input.csv, and friends -- generate_complete_
+# testdata.py section 10i). A CSV field's own syntax already gives an
+# unambiguous terminator -- a comma (unquoted) or the closing quote (quoted) --
+# so unlike _REF above, this can safely allow a space or a `/` subdirectory
+# without risking swallowing trailing prose: a fixture CSV has no prose. This
+# is what lets "with space/P001 ref.ome.tiff" and a comma-free absolute path
+# resolve to the right file instead of just the first path segment.
+_REF_CSV_FIELD = re.compile(r'tests/testdata/([^,"\n]+)')
 
 # Fixtures that are DELIBERATELY empty, keyed on the name, with the reason. Each
 # entry is verified below to still exist AND still be empty -- a stale exemption is
@@ -146,7 +161,13 @@ def _referenced():
         # reference, and would make this file demand a producer for a path
         # nothing opens. The path itself lives inside a quoted `file('...')`
         # argument, so the strings must survive or the scan finds nothing.
-        for name in _REF.findall(strip_comments(path.read_text(errors="ignore"))):
+        #
+        # A .csv fixture gets the CSV-FIELD pattern, not the prose-safe one: a
+        # fixture CSV has no prose to protect against, and its own comma/quote
+        # syntax is what lets a space or a `/` subdirectory be captured safely
+        # (see _REF_CSV_FIELD's doc above).
+        pattern = _REF_CSV_FIELD if path.suffix == ".csv" else _REF
+        for name in pattern.findall(strip_comments(path.read_text(errors="ignore"))):
             refs.setdefault(name, set()).add(str(path.relative_to(ROOT)))
     return refs
 

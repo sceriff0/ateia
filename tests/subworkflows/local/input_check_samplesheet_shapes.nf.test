@@ -1,0 +1,176 @@
+/*
+ * INPUT_CHECK against the BYTES a real samplesheet arrives as -- line endings,
+ * a byte-order mark, quoting, encoding, and columns nobody reads.
+ *
+ * Separate from input_check.nf.test on purpose: that file is about the COUNTING
+ * contract and each of its cases carries the history of a specific regression.
+ * These are about the CSV itself, and every one of them was handled by code no
+ * test executed -- the BOM strip in CsvUtils.readCsvLines, the trims that keep a
+ * CRLF from producing a marker literally named "CD8<CR>", and parseCsvLine's
+ * quote handling applied to a PATH rather than to an --outdir.
+ *
+ * Counts, for every case below: the fixtures carry test_input.csv's two rows
+ * (P001 reference DAPI|PANCK|SMA + P001 moving DAPI|CD3|CD8), so channels_count
+ * is 5 under the claim-once rule -- the reference claims DAPI, PANCK and SMA,
+ * the moving slide adds CD3 and CD8 and contributes no second DAPI. The two
+ * single-row sheets are 1 image and 3 channels.
+ */
+nextflow_workflow {
+
+    name "Test INPUT_CHECK against real-world samplesheet shapes"
+    script "subworkflows/local/input_check.nf"
+    workflow "INPUT_CHECK"
+
+    test("CRLF line endings do not leak a carriage return into the last column") {
+        tag "stub"
+
+        when {
+            workflow {
+                """
+                input[0] = "$projectDir/tests/testdata/crlf_input.csv"
+                input[1] = 'path_to_file'
+                """
+            }
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.samples.size() == 2 },
+                { assert workflow.out.samples.every { it[0].images_count == 2 } },
+                { assert workflow.out.counts[0].channels.P001 == 5 },
+                // THE assertion. `channels` is the LAST column, so an untrimmed
+                // reader yields "CD8\r" -- a marker name that matches nothing,
+                // splits no keep-set, and produces a QUANTIFY task for a channel
+                // that does not exist.
+                { assert workflow.out.samples.every { s ->
+                        s[0].channels.every { !it.contains('\r') } } },
+                { assert workflow.out.samples.collect { it[0].channels }.flatten()
+                        .toSorted() == ['CD3', 'CD8', 'DAPI', 'DAPI', 'PANCK', 'SMA'] }
+            )
+        }
+    }
+
+    test("a UTF-8 BOM on the header does not blind every column lookup") {
+        tag "stub"
+
+        // Without CsvUtils.readCsvLines' strip the first header cell reads as
+        // "<BOM>patient_id", findIndexOf returns -1, and the per-patient counts
+        // map comes back empty -- which is a HANG in the sized groupTuples, not
+        // an error. Excel and Windows PowerShell both write this by default.
+        when {
+            workflow {
+                """
+                input[0] = "$projectDir/tests/testdata/bom_input.csv"
+                input[1] = 'path_to_file'
+                """
+            }
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.samples.size() == 2 },
+                { assert workflow.out.samples.every { it[0].patient_id == 'P001' } },
+                { assert workflow.out.samples.every { it[0].images_count == 2 } },
+                { assert workflow.out.counts[0].patients == [P001: 2] },
+                { assert workflow.out.counts[0].channels.P001 == 5 }
+            )
+        }
+    }
+
+    test("a quoted path containing a space reaches the process as one file") {
+        tag "stub"
+
+        // Shared microscopy drives are full of "Patient 001/scan 3.ome.tiff".
+        // Only a quoted --outdir had been covered (tests/checkpoint_manifest.nf.test);
+        // the quote handling had never been applied to a PATH, where a wrong split
+        // produces two nonexistent files rather than one real one.
+        when {
+            workflow {
+                """
+                input[0] = "$projectDir/tests/testdata/space_path_input.csv"
+                input[1] = 'path_to_file'
+                """
+            }
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.samples.size() == 1 },
+                { assert workflow.out.samples[0][1].toString().endsWith('P001 ref.ome.tiff') },
+                { assert workflow.out.samples[0][0].images_count == 1 },
+                { assert workflow.out.counts[0].channels.P001 == 3 }
+            )
+        }
+    }
+
+    test("a non-ASCII filename survives the samplesheet read") {
+        tag "stub"
+
+        when {
+            workflow {
+                """
+                input[0] = "$projectDir/tests/testdata/unicode_input.csv"
+                input[1] = 'path_to_file'
+                """
+            }
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.samples.size() == 1 },
+                { assert workflow.out.samples[0][1].toString().contains('ünïcode') },
+                { assert workflow.out.counts[0].channels.P001 == 3 }
+            )
+        }
+    }
+
+    test("unknown extra columns are ignored, not fatal, and do not shift the read") {
+        tag "stub"
+
+        // extra_column_input.csv is test_input.csv plus `operator` and
+        // `scan_date`. Accepting them is deliberate -- a checkpoint CSV carries
+        // columns the entry step does not read -- and the warning half is
+        // asserted in tests/run_validation_tests.sh, which can grep the log.
+        // What this pins is that the extra columns do not shift the COLUMN
+        // LOOKUPS: every value must still be read from its own column.
+        when {
+            workflow {
+                """
+                input[0] = "$projectDir/tests/testdata/extra_column_input.csv"
+                input[1] = 'path_to_file'
+                """
+            }
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.samples.size() == 2 },
+                { assert workflow.out.samples.every { it[0].patient_id == 'P001' } },
+                { assert workflow.out.samples.count { it[0].is_reference } == 1 },
+                { assert workflow.out.samples.every { it[0].channels_count == 5 } },
+                { assert workflow.out.samples.collect { it[0].channels }.flatten()
+                        .toSorted() == ['CD3', 'CD8', 'DAPI', 'DAPI', 'PANCK', 'SMA'] }
+            )
+        }
+    }
+}
