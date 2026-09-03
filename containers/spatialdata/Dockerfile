@@ -54,3 +54,13 @@ ENV XDG_CACHE_HOME=/tmp/.cache \
     NUMBA_CACHE_DIR=/tmp/.numba
 
 CMD ["python", "--version"]
+
+# OCI provenance. LAST IN THE FILE ON PURPOSE: VCS_REF changes on every commit, and an ARG
+# referenced earlier would invalidate the layer cache for everything below it on every
+# build. Here it invalidates one metadata layer. .github/workflows/containers.yml passes
+# both values; a local `docker build` gets "unknown", which is honest.
+ARG VCS_REF=unknown
+ARG IMAGE_VERSION=unknown
+LABEL org.opencontainers.image.source="https://github.com/sceriff0/mirage" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${IMAGE_VERSION}"

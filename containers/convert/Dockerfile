@@ -163,5 +163,28 @@ COPY bin/utils/jvm_cache.py /usr/local/lib/mirage_jvm/jvm_cache.py
 #
 # LAST, and after every pip install, on purpose: a COPY invalidates the layer cache for
 # everything below it, so putting this at the end costs no rebuilds.
+# Read-only $HOME safety, as in containers/segeval and containers/spatialdata.
+#
+# CJDK_CACHE_DIR IS PINNED SEPARATELY AND MUST NOT FOLLOW XDG_CACHE_HOME. The Java runtime
+# scyjava may fetch through cjdk was baked under /root/.cache/cjdk by the bake step above
+# and made world-readable; redirecting the lookup to an empty /tmp would send a task to the
+# network, which is the exact failure the bake exists to prevent. The jgo and Maven caches
+# are not XDG directories at all -- bin/utils/jvm_cache.py points scyjava at /root/.jgo and
+# /root/.m2 through its config API.
+ENV XDG_CACHE_HOME=/tmp/.cache \
+    MPLCONFIGDIR=/tmp/.mplconfig \
+    NUMBA_CACHE_DIR=/tmp/.numba \
+    CJDK_CACHE_DIR=/root/.cache/cjdk
+
 COPY containers/convert/smoke.sh /usr/local/bin/mirage-smoke.sh
 RUN bash /usr/local/bin/mirage-smoke.sh
+
+# OCI provenance. LAST IN THE FILE ON PURPOSE: VCS_REF changes on every commit, and an ARG
+# referenced earlier would invalidate the layer cache for everything below it on every
+# build. Here it invalidates one metadata layer. .github/workflows/containers.yml passes
+# both values; a local `docker build` gets "unknown", which is honest.
+ARG VCS_REF=unknown
+ARG IMAGE_VERSION=unknown
+LABEL org.opencontainers.image.source="https://github.com/sceriff0/mirage" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${IMAGE_VERSION}"
