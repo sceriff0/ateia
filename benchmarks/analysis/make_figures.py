@@ -73,11 +73,12 @@ def _join_ground_truth(runs_df, reg_eval_csv, outdir):
     """
     if reg_eval_csv is None:
         raise ValueError(
-            "reg_eval_csv is required. It carries the landmark TRE that is this "
-            "benchmark's only ground-truth accuracy measure; running the analysis "
-            "without it produces a cost-only result that reads like a complete "
-            f"one. Pass --reg-eval <path>, or --reg-eval {NO_GROUND_TRUTH} to "
-            "record deliberately running without it."
+            "reg_eval_csv is required. It carries an EXTERNALLY produced landmark "
+            "TRE table -- the only ground-truth accuracy measure this analysis can "
+            "use, and one this repository cannot produce; running without it gives "
+            "a cost-only result that reads like a complete one. Pass --reg-eval "
+            f"<path>, or --reg-eval {NO_GROUND_TRUTH} to record deliberately running "
+            "without it."
         )
     if str(reg_eval_csv).strip().lower() == NO_GROUND_TRUTH:
         (Path(outdir) / "NO_GROUND_TRUTH.txt").write_text(
