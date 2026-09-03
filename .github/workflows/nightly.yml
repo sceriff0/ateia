@@ -20,13 +20,24 @@
 # workflow's own status. That is the point of giving it a status of its own.
 #
 # -----------------------------------------------------------------------------
-# THIS MOVE IS A DEFERRAL, NOT A FIX. READ THIS BEFORE ASSUMING IT WAS GREEN.
+# GREEN as of run 33742731796, 2026-09-03. THE MOVE WAS A DEFERRAL; IT IS DISCHARGED.
 # -----------------------------------------------------------------------------
-# `nf-test (real)` was RED at the moment it was moved here and it is still not
-# green. What follows is the CURRENT list, re-measured on a real dispatch rather
-# than carried over: run 33633986188 (2026-09-02) against release/p01-suite-truth,
-# https://github.com/sceriff0/mirage/actions/runs/33633986188 --
-# `FAILURE: Executed 28 tests in 1226.191s (14 failed)`.
+# `nf-test (real)` was RED when it was moved here, and this section carried the
+# list of why. Both advisory legs are green now, on this exact workflow file:
+#
+#   run 33742731796, workflow_dispatch against release/p07-formats, 2026-09-03
+#   https://github.com/sceriff0/mirage/actions/runs/33742731796
+#     nf-test (real)         SUCCESS: Executed 29 tests in 1245.405s
+#     nf-test (integration)  SUCCESS
+#
+# The baseline it is measured against is run 33633986188 (2026-09-02, plan 01):
+# `FAILURE: Executed 28 tests in 1226.191s (14 failed)`, in five families. 29 not
+# 28 because one case was ADDED on the way (the expanded-quantification companion
+# in (5) below).
+#
+# DO NOT DELETE THE HISTORY BELOW WITHOUT REPLACING THE JOB'S GATE. Every entry
+# names a defect that a green `nf-test test --tag stub` could not see, which is
+# the property that made this suite worth keeping honest in the first place.
 #
 # FIXED 2026-09-02 (release 1.0.0, plan 01 -- suite truth):
 #
@@ -41,88 +52,92 @@
 #      already-local and skip `singularity pull`, nothing ever opens it, and it is
 #      allowlisted in tests/test_fixtures_have_a_producer.py's EMPTY_ON_PURPOSE
 #      with that reason. That guard no longer accepts any OTHER fixture that
-#      exists but cannot be opened. The string `not a TIFF file` appears ZERO
-#      times in the run above, and EXTRACT_NUCLEI_PROPERTIES completes for both
-#      patients in every pipeline-level test in it.
+#      exists but cannot be opened.
 #   2. The exported GeoJSON carried 0 features against 20 rows in the
-#      quantification CSV. This was NOT downstream of (1), as this header used to
-#      say: the failing case is tests/modules/export_geojson.nf.test's real test,
-#      whose only inputs are sample_merged_quant.csv and sample_contours.json.
-#      Two fixture defects -- a quantification CSV with `centroid_x`/`centroid_y`
-#      where every producer writes `x`/`y`, and a contours JSON that wrapped each
-#      ring in a `coordinates` key. Both fixed in the generator; reproduced and
-#      re-verified locally in a second by
-#      tests/test_export_geojson_fixture_contract.py, which runs in the BLOCKING
-#      suite because `--tag real` runs on the schedule against the default branch
-#      only, i.e. nowhere at all on dev. Both real export_geojson cases PASSED in
-#      the run above.
+#      quantification CSV. This was NOT downstream of (1): the failing case is
+#      tests/modules/export_geojson.nf.test's real test, whose only inputs are
+#      sample_merged_quant.csv and sample_contours.json. Two fixture defects -- a
+#      quantification CSV with `centroid_x`/`centroid_y` where every producer
+#      writes `x`/`y`, and a contours JSON that wrapped each ring in a
+#      `coordinates` key. Both fixed in the generator, and pinned in the BLOCKING
+#      suite by tests/test_export_geojson_fixture_contract.py.
 #
-# STILL RED: 14 of 28 in `real`, in five distinct families, all measured on run
-# 33633986188. NONE of the five is a fixture defect, so none is fixed here; each
-# names what would fix it.
+# FIXED 2026-09-03 (release 1.0.0, plan 07 task 0 -- the remaining five families):
 #
-#   3. WAS "the preprocessed and registered `.ome.tif` outputs never appear at
-#      all". They DO appear -- in the work directory -- and are never PUBLISHED.
-#      Two tests, both in tests/integration/full_pipeline.nf.test:
-#        java.lang.AssertionError: Preprocessed image should exist:
-#          .../output/P001/preprocessed/P001_mov1_DAPI_CD3_CD8_corrected.ome.tif
-#        java.lang.AssertionError: Registered image should exist:
-#          .../output/P001/registered/registered_slides/P001_mov1_registered.ome.tiff
-#      Those name exactly the two publishDir entries in conf/modules.config that
-#      carry `enabled: params.cleanup_level == 'none'` (APPLY_PROFILES, REGISTER).
-#      A plain boolean there is evaluated EAGERLY, where it appears, and that is
-#      before `profiles {}` runs -- so a profile pin never reaches it, and
-#      nf-test's own `-profile test,docker` is a profile. Measured statically in a
-#      second, no CI needed: `nextflow config -profile test,docker` reports
-#      `cleanup_level = 'none'` and STILL renders 15 gates as `enabled:false`,
-#      those two among them; the same command with the value passed on the command
-#      line renders 0. The workflow-side half of the same decision,
-#      Checkpoint.writesAtLevel, reads params at RUN time, where the profile HAS
-#      applied -- so csv/preprocessed.csv is written, naming files that were never
-#      published. That dangling manifest is the exact outcome the filter in
-#      subworkflows/local/preprocess.nf exists to prevent. Owned by whichever
-#      change settles what conf/test.config's pin can actually reach; CLAUDE.md
-#      records the same measurement and why it was left alone (changing what
-#      `-profile test` effectively pins risks the 78-stub-test snapshot failure).
-#   4. EIGHT of the fourteen are assertions that treat an nf-test output path as a
-#      File. `process.out.<x>.get(0).get(1)` is a String, so `.size()` returns the
-#      LENGTH OF THE PATH and `.name` / `.toFile()` do not exist:
-#        assert it.size() > 1000  ->  161, for a 161-character path
-#        groovy.lang.MissingMethodException: No signature of method:
-#          java.lang.String.toFile()
-#        groovy.lang.MissingPropertyException: No such property: name for class:
-#          java.lang.String
-#      Affected: convert_image, generate_preprocess_qc, generate_registration_qc,
-#      merge_and_pyramid, split_channels (x2), and the preprocessing and
-#      registration subworkflow tests. These CANNOT pass whatever the pipeline
-#      does; the stub-tagged cases in the same files wrap with `file(...)` and are
-#      green. A test-code repair, not a pipeline one.
-#   5. One stale assertion against a default that moved. tests/modules/quantify
-#      asserts 11 columns "(label + marker + 3 statistics x 3 compartments)" and
-#      gets 5: [label, DAPI, DAPI: Nucleus: Median, DAPI: Cytoplasm: Median,
-#      DAPI: Cell: Median]. `expanded_quantification` ships false, so Median alone
-#      is computed. The pipeline is right and the test was never updated.
-#   6. One pipeline-facing defect -- the only one of the fourteen. The postprocess
-#      subworkflow's real test leaves pixel_size unset, it reaches the process as
-#      the literal string `null`, and EXPORT_GEOJSON (P001) exits 1 with
-#      `pixel_size.PixelSizeError: --pixel_size 'null' is neither a number nor
-#      'auto'` (bin/utils/pixel_size.py:295).
-#   7. The synthetic-data segmentation wall, RE-MEASURED and still holding -- this
-#      header used to say it had not been re-measured. SEGMENT's regression case
-#      gets a 145-byte cell mask and a 147-byte nuclei mask (an all-zero label
-#      image), and MERGE_AND_PYRAMID's gets a 135-byte pyramid. See the job's own
-#      comment below for the diagnosis (StarDist's 2D_versatile_fluo finds no
-#      nuclei in smooth synthetic blobs) and the two candidate fixes.
+#   3. The preprocessed and registered `.ome.tif` outputs were produced and never
+#      PUBLISHED, so both tests/integration/full_pipeline.nf.test cases failed
+#      walking csv/preprocessed.csv and csv/registered.csv. Their publishDir
+#      entries (conf/modules.config, APPLY_PROFILES and REGISTER) carry
+#      `enabled: params.cleanup_level == 'none'`, a PLAIN boolean, which Nextflow
+#      evaluates EAGERLY where it appears -- before `profiles {}` runs -- so
+#      conf/test.config's own pin never reaches it. Measured statically:
+#      `nextflow config -profile test,docker` reports `cleanup_level = 'none'` and
+#      STILL renders 15 gates `enabled:false`; with the value on the command line,
+#      0. Fixed test-side, by setting `cleanup_level = 'none'` in those two cases'
+#      `params {}` -- nf-test passes a params block as a -params-file, which IS in
+#      the binding before conf/modules.config is parsed. THE TRAP ITSELF IS
+#      UNCHANGED and is still documented in CLAUDE.md; only these two tests now
+#      reach past it.
+#   4. EIGHT of the fourteen were assertions treating an nf-test output path as a
+#      File. `process.out.<x>.get(0).get(1)` is a String, so `.size()` returned the
+#      LENGTH OF THE PATH (161, for a 161-character work path), `.readLines()` split
+#      the path rather than the file, and `.name`/`.toFile()` did not exist at all.
+#      Every site now wraps with `file(...)`. Guarded FORWARD, in the blocking
+#      pytest suite, by tests/test_real_assertions_do_not_treat_strings_as_paths.py
+#      -- `--tag stub` cannot see a `real` case, which is why this family survived
+#      for as long as it did.
+#   5. One stale assertion against a default that moved: tests/modules/quantify
+#      asserted 11 columns and got 5, because `expanded_quantification` ships
+#      false and Median alone is computed. The test now asserts the shipped five
+#      (and that no `: Mean` / `: Sum` column is present), and a SECOND real case
+#      was added that turns `expanded_quantification` on and asserts all 11 -- the
+#      flag is rendered from a `script:`-time ext.args closure, so no stub run can
+#      reach it.
+#   6. `pixel_size` reached EXPORT_GEOJSON as the literal string `null` and the
+#      process exited 1 (`PixelSizeError: --pixel_size 'null' is neither a number
+#      nor 'auto'`). A TEST defect, not a pipeline one: the postprocess
+#      subworkflow's real case builds its metas by hand and set pixel_size in
+#      `params {}` only, but EXPORT_GEOJSON and EXPORT_SPATIALDATA read
+#      `meta.pixel_size` -- deliberately, since neither is handed the source image
+#      and so neither can resolve `auto` itself. Production always has the key
+#      (lib/Meta.groovy's fromCheckpointRow refuses a row without it).
+#   7. The synthetic-data segmentation wall. StarDist's 2D_versatile_fluo returned
+#      0 nuclei, giving a 145-byte (all-zero) cell mask. MEASURED CAUSE, on the
+#      generated file rather than inferred: P001_ref.ome.tiff's DAPI channel is 40
+#      gaussian blobs of radius 6-13 in 128x128 merged with np.maximum, and forms
+#      37.7% foreground in exactly ONE connected component -- there are no separate
+#      nuclei in it to find. That density is what makes it a good REGISTRATION
+#      fixture (VALIS needs the shared texture), so it was left alone and
+#      segmentation got its own image: P001_seg_nuclei.ome.tiff, 256x256, 45
+#      non-touching nuclei 10-18 px across, written and ASSERTED by
+#      generate_complete_testdata.py section 10. Both cases pass on the real
+#      StarDist container in the run above.
 #
-# `nf-test (integration)` CONTRIBUTES NO INDEPENDENT FAILURE. It ran 5 tests and
-# failed 2, and those 2 are test ids 1387f758 and 47ddb28b -- the same two cases
-# as (3) above, in the same file. tests/integration/full_pipeline.nf.test carries
+# A SIXTH family appeared only after (4) was fixed, because every one of its
+# assertions had a MissingPropertyException standing in front of it and had
+# therefore never been evaluated: a comma-separated channels manifest asserted as
+# newline-separated, a `qc` emit that globs TWO files handed to `file()` as a
+# List, and -- twice -- an unqualified `collect` inside a `with(...)` block, which
+# does not reach the delegate List and hands the closure the whole list as `it`.
+# Fixed in the same task; the stub-tagged cases in those same files already used
+# the working form. Recorded here because it is the shape of the thing: a broken
+# assertion can hide another broken assertion indefinitely.
+#
+# `nf-test (integration)` NEVER CONTRIBUTED AN INDEPENDENT FAILURE. It ran 5 tests
+# and failed 2, and those 2 were test ids 1387f758 and 47ddb28b -- the same two
+# cases as (3), in the same file. tests/integration/full_pipeline.nf.test carries
 # a file-level `tag "integration"` and a per-test `tag "real"`, so four of its five
-# cases are collected by BOTH legs. Fixing (3) turns both jobs green together.
+# cases are collected by BOTH legs, and (3) turned both jobs together.
 #
-# A job moved to a nightly workflow with no note reads as "this always passed
-# somewhere else", which is false here. When these are fixed, the job goes back
-# into ci.yml's `all-tests` gate and this section gets deleted with it.
+# WHAT IS LEFT BEFORE THIS JOB GOES BACK IN ci.yml's `all-tests` GATE. Being green
+# once is not the bar; two things are still open and neither is a test failure:
+#   - the `docs` job in this same workflow is RED, on broken intra-doc anchors in
+#     docs/parameters.md and docs/resources.md (`Aborted with 4 warnings in strict
+#     mode!`). It is unrelated to the suites -- it fails identically on
+#     release/p01-suite-truth -- but it makes this workflow's own status red, so
+#     the "advisory suites are green" claim has to be read per-job for now.
+#   - `dev` still has NO real-suite coverage: `schedule:` fires on the default
+#     branch only. See the note further down.
 #
 # -----------------------------------------------------------------------------
 # GATING, AND WHAT WAS PRESERVED
@@ -230,18 +245,20 @@ jobs:
     # because it is in a workflow no merge is gated on -- and it still reports its
     # true colour, which is the whole trade.
     #
-    # The diagnosis behind the header's cause (7), kept here because it is older
-    # than the rest and was measured in a different round: registration,
-    # segmentation model-loading and most test-staging bugs are fixed (the suite
-    # went 26 -> ~20 failing, and is 14 of 28 on run 33633986188); what remains of
-    # THAT round is the synthetic-data segmentation wall -- StarDist's built-in
-    # 2D_versatile_fluo detects 0 nuclei in the smooth synthetic test blobs even at
-    # a low prob_thresh, so cell/quant/geojson assertions cannot pass on this
-    # fixture data. The fix is to bundle a tiny real nuclei crop, or to weaken
-    # those assertions to "runs without error".
+    # The header's cause (7) was diagnosed here for a long time as "StarDist's
+    # built-in 2D_versatile_fluo detects 0 nuclei in the smooth synthetic test
+    # blobs even at a low prob_thresh", with the proposed fixes being to bundle a
+    # real nuclei crop or to weaken the assertions to "runs without error".
+    # Neither was needed and the diagnosis was half right: the model was fine and
+    # the THRESHOLD was fine -- the fixture had no separate nuclei in it at all
+    # (one connected component covering 37.7% of the frame). A synthetic image
+    # with non-touching nuclei segments correctly. Kept here rather than deleted
+    # because "the model cannot do it" was the wrong conclusion drawn from the
+    # right symptom, twice.
     #
-    # Put this job back in ci.yml's `all-tests` gate once it is green. That is the
-    # end state; this workflow is where it waits, not where it belongs.
+    # Put this job back in ci.yml's `all-tests` gate once this whole workflow is
+    # green -- both suites pass as of run 33742731796; the `docs` job does not.
+    # That is the end state; this workflow is where it waits, not where it belongs.
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
