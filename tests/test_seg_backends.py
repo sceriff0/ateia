@@ -35,11 +35,15 @@ SEGMENT_NF = ROOT / "modules" / "local" / "segment.nf"
 # The backends the pipeline ships, and the image each MUST use. Written out rather
 # than parsed so a silent retag (the class of change that turns a reproducible run
 # into an unreproducible one) shows up as a test diff.
+# stardist's tools were ("deepcell", "tensorflow") until 2026-09-02. deepcell was a
+# phantom -- no image installs it -- and this very assertion is what kept it in place, so
+# the fix had to move both. See
+# tests/test_version_tools_are_importable_in_their_image.py.
 EXPECTED = {
     "stardist": (
         "bolt3x/mirage-stardist:1.0.0",
         "segment.py",
-        ("deepcell", "tensorflow"),
+        ("tensorflow",),
     ),
     "instantseg": (
         "bolt3x/mirage-instanseg:1.0.0",

@@ -134,6 +134,11 @@ BASE_IMAGE_PROVIDES = {
     # CUDA-matched wheel with a mismatched one.
     "cellsam": {"torch"},
     "instanseg": {"torch"},
+    # tensorflow/tensorflow:2.15.0-gpu-jupyter bakes in a GPU-matched TensorFlow build; a
+    # pip install of a second one here would risk replacing that wheel with a mismatched
+    # one, exactly as for torch below. bin/segment.py does not import tensorflow directly,
+    # but stardist 0.9.1 does, and lib/SegBackends.groovy reports its version.
+    "stardist": {"tensorflow"},
 }
 
 # Packages that are genuinely absent from a given image are fine; these are the ones that must
