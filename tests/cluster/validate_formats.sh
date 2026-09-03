@@ -112,7 +112,7 @@ done
     echo
     echo '```'
     awk -F'\t' 'NR==1 || $0 ~ /CONVERT_IMAGE/ {print}' "$OUTDIR/trace.txt" \
-        | cut -f 4,9,10,11 || true
+        | cut -f 4,9,10,11 2>/dev/null || echo "(no CONVERT_IMAGE trace rows found in $OUTDIR/trace.txt)"
     echo '```'
     echo
     echo "## Container digests recorded by the run"
