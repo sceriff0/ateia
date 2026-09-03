@@ -18,6 +18,11 @@
  * tested for the literal "DAPI" and fell back to channel 0 -- correct only because
  * CONVERT_IMAGE reserves channel 0 for the nuclear channel, and noisy on every
  * CELLTOX panel.
+ *
+ * The `native/` stageAs directory name is a pairing contract, not just a collision
+ * guard: tests/subworkflows/local/registration.nf.test and
+ * tests/subworkflows/add_cycle.nf.test both key their pairing assertions off it, so
+ * renaming the convention means updating both.
  */
 process GENERATE_REGISTRATION_QC {
     tag "${meta.patient_id}"
