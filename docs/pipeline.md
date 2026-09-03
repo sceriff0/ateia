@@ -23,7 +23,7 @@ process, default and path below is read from the pipeline source —
     - **S5 · coarse alignment** — [figure](figures/coarse-schematic.html){ target=_blank } ·
       why the STARE global pose is a learned matcher, and what that costs in memory
     - **S6 · accuracy measures** — [figure](figures/accuracy-schematic.html){ target=_blank } ·
-      the four registration-accuracy numbers, which three are circular, and why none is ground truth
+      the four registration-accuracy numbers, which two are scored on the registrar's own features, and why none is ground truth
 
 ---
 
