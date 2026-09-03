@@ -48,7 +48,9 @@ COPY requirements/constraints.txt /tmp/requirements/constraints.txt
 
 # TWO REMOVALS, 2026-09-02.
 #   nd2         — nothing this image runs imports it. Reading .nd2 is containers/convert's
-#                 job, through the bioio-nd2 plugin. This image's four scripts import
+#                 job, through the bioio-nd2 plugin. This image's six scripts
+#                 (apply_basic_profiles.py generate_preprocess_qc.py generate_qc_report.py
+#                 preflight_scale.py split_multichannel.py tile_for_basic.py) import
 #                 numpy, skimage, tifffile and zarr and nothing else.
 #   imagecodecs — was listed TWICE, once pinned and once bare. _installed() in
 #                 tests/test_container_harmonisation.py keeps the first specifier it sees,
