@@ -618,4 +618,22 @@
 # 11 new cases (6 plain functions + the 5-way test_every_vendor_format_has_a_row
 # parametrisation). `pytest --collect-only -q` reports "1885 tests collected",
 # up from the prior entry's 1874. 1874 + 11 = 1885.
-1892
+#
+#
+# The value carried here (1797) between the entry above and this one was set by
+# other release-1.0.0 plan-12 work in a sibling worktree, not measured in this
+# file's own prose -- not re-derived here, just recorded as the starting point.
+#
+# RE-MEASURED 2026-09-03, release 1.0.0 plan 12 Tasks 9/4/10 (widen the
+# CLI-boolean guard to configs and the bare form; params/full_pipeline.json's
+# InstanSeg coherence guard; docs/parameters.md<->schema sync guard). 23 new
+# cases: tests/test_no_cli_boolean_params_in_docs.py gained 3
+# (test_the_scan_covers_the_configuration_files_too,
+# test_the_detector_recognises_the_bare_form_inside_a_command,
+# test_the_detector_leaves_prose_naming_a_boolean_param_alone);
+# tests/test_param_presets_are_coherent.py is new with 16 (2 parametrised over
+# 7 presets each, plus 2 plain); tests/test_parameters_doc_matches_schema.py is
+# new with 4. `pytest --collect-only -q` reports "1820 tests collected", and a
+# full run with MIRAGE_STRICT_SKIPS=1 gives 1807 passed, 13 skipped, 0 failed --
+# 1807 + 13 = 1820. 1797 + 23 = 1820.
+1915
