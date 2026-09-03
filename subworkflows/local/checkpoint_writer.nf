@@ -24,9 +24,12 @@
     artifact publishes under, whether a passthrough slide needs Layout.passthroughPath,
     whether a mask came from this run (Layout.publishedPath) or a prior one
     (Layout.publishedOrAsIs). Those decisions differ per step and are not mechanism.
-    Additionally, tests/test_layout.py statically scans for the literal shape
-    `Layout.publishedPath(params.outdir, <pid>, '<kind>')` at call sites, so folding
-    those calls in here behind a variable would blind that guard.
+    Additionally, tests/test_layout.py statically scans real call sites for the
+    shape "Layout.publishedPath, given params.outdir, a patient id, then a literal
+    kind string" -- so folding those calls in here behind a variable would blind
+    that guard, and writing the shape itself as a literal example in THIS file's
+    comments would trip the very same scan (it does not distinguish a real call
+    from a comment that merely illustrates one).
 
     So the split is: the CALLER decides what a row says; this file decides whether,
     where, in what order and under what header it is written.
