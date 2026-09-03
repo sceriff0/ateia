@@ -507,13 +507,35 @@ _OME_IO_READER_DISPATCH_UNREACHABLE = (
     "functions (_open_bioio and read_info's h5py branch), reached only through "
     "detect_reader/require_reader/read_info/read_plane. apply_basic_profiles.py, "
     "tiled_stitch.py, merge_channels_pyramid.py, extract_mask_series.py, segment.py, "
-    "segment_cellsam.py, segment_instantseg.py, split_multichannel.py, tile_for_basic.py, "
-    "bin/utils/qc.py and bin/utils/image_utils.py all import write_tiff (or, transitively "
-    "through image_utils.py/qc.py, nothing more than that) from the same module -- the "
-    "write seam, not the read one -- and never call a reader-dispatch name, so the import "
-    "never runs in these containers. bioio/h5py stay containers/convert-only, per "
-    "ome_io.py's own module docstring. Guarded by "
-    "test_ome_io_reader_dispatch_is_unreachable_from_the_writer_only_scripts."
+    "segment_cellsam.py, segment_instantseg.py, split_multichannel.py and tile_for_basic.py "
+    "all import write_tiff from the same module -- the write seam, not the read one -- and "
+    "never call a reader-dispatch name, so the import never runs in these containers. "
+    "bioio/h5py stay containers/convert-only, per ome_io.py's own module docstring. Guarded "
+    "by test_ome_io_reader_dispatch_is_unreachable_from_the_writer_only_scripts."
+)
+
+#: Reason for the (regqc, bioio) exemption specifically. NOT the same claim as the one above:
+#: bin/utils/qc.py's create_registration_qc DOES call read_info/read_plane directly (plan
+#: 08's before/after panel, reading the native pre-registration plane) -- so, unlike every
+#: script covered by _OME_IO_READER_DISPATCH_UNREACHABLE, the dispatch names themselves are
+#: genuinely reached in this container. What stays unreached is specifically _open_bioio and
+#: the hdf5 branch INSIDE read_info/read_plane, because every path those two ever see at this
+#: call site -- reference_path, registered_path and native_path -- is one of this pipeline's
+#: own .ome.tif intermediates (CONVERT_IMAGE emits `*.ome.tif`, modules/local/convert_image.nf:13;
+#: REGISTER stages `*.ome.tif`/`*.ome.tiff`, modules/local/register.nf:103), which
+#: ome_io._TIFFFILE_READABLE covers -- so read_info/read_plane always take the tifffile
+#: branch and _open_bioio is dead code for THIS caller specifically. Guarded by
+#: test_qc_reader_dispatch_stays_tifffile_only, a narrower and separate claim from the one
+#: test_ome_io_reader_dispatch_is_unreachable_from_the_writer_only_scripts checks for the
+#: other seven containers above.
+_QC_READER_DISPATCH_STAYS_TIFFFILE_ONLY = (
+    "bin/utils/qc.py's create_registration_qc calls ome_io.read_info/read_plane directly "
+    "(plan 08's before/after panel), so -- unlike the writer-only scripts above -- the "
+    "dispatch names ARE called in this container. bioio stays unreached because every path "
+    "reaching read_info/read_plane here (reference_path, registered_path, native_path) is "
+    "this pipeline's own .ome.tif/.ome.tiff intermediate (CONVERT_IMAGE/REGISTER's own "
+    "output convention), which ome_io._TIFFFILE_READABLE covers, so _open_bioio is never "
+    "reached from this caller. Guarded by test_qc_reader_dispatch_stays_tifffile_only."
 )
 
 # Imports the static graph reaches but that can never EXECUTE. Narrow on purpose: keyed by
@@ -547,10 +569,13 @@ UNREACHABLE_IMPORTS = {
     # for ensure_dir/load_image; image_utils.py's save_tiff now delegates to ome_io.write_tiff.
     ("quantify", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
     ("quantify", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
-    # generate_registration_qc.py imports bin/utils/qc.py, which now imports
-    # ome_io.write_tiff for its two composite writes. containers/regqc already installs
-    # h5py (requirements/regqc.txt) for its own vendor readers, so only bioio is missing.
-    ("regqc", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
+    # generate_registration_qc.py imports bin/utils/qc.py, which imports ome_io.write_tiff
+    # for its composite writes AND (plan 08) ome_io.read_info/read_plane for the native
+    # pre-registration plane. containers/regqc already installs h5py (requirements/regqc.txt)
+    # for its own vendor readers, so only bioio is missing -- see
+    # _QC_READER_DISPATCH_STAYS_TIFFFILE_ONLY for why it stays unreached even though
+    # read_info/read_plane themselves are now genuinely called.
+    ("regqc", "bioio"): _QC_READER_DISPATCH_STAYS_TIFFFILE_ONLY,
     # There is deliberately NO ("tiled", "torch")/("tiled", "kornia") entry. Both used to be
     # exempted here on the grounds that torch/kornia shipped "only in the stare-ml container",
     # so :tiled was never expected to satisfy the import. containers/tiled now installs both,
@@ -584,16 +609,23 @@ def test_unreachable_import_exemptions_are_still_unreachable():
 
 
 def test_ome_io_reader_dispatch_is_unreachable_from_the_writer_only_scripts():
-    """The premise behind every (preprocess|tiled|merge|stardist|cellsam|instanseg|quantify|
-    regqc, bioio|h5py) exemption above.
+    """The premise behind every (preprocess|tiled|merge|stardist|cellsam|instanseg|quantify,
+    bioio|h5py) exemption above.
 
     Each script below imports something from bin/utils/ome_io.py -- directly (write_tiff)
-    or transitively, through image_utils.py's/qc.py's own `from ome_io import write_tiff` --
-    which is the write seam, never the read one. That module's ONLY bioio/h5py imports are
-    lazy, inside its reader-dispatch functions (detect_reader/require_reader/read_info/
-    read_plane and the private helpers they call). If any of these scripts starts calling
-    one of those names, this fails and the exemption must be reconsidered rather than
-    assumed to still hold.
+    or transitively, through image_utils.py's own `from ome_io import write_tiff` -- which
+    is the write seam, never the read one. That module's ONLY bioio/h5py imports are lazy,
+    inside its reader-dispatch functions (detect_reader/require_reader/read_info/read_plane
+    and the private helpers they call). If any of these scripts starts calling one of those
+    names, this fails and the exemption must be reconsidered rather than assumed to still
+    hold.
+
+    NOT checked here: utils/qc.py and generate_registration_qc.py. Plan 08's before/after
+    panel made create_registration_qc call read_info/read_plane directly for the native
+    plane, so the "never calls a reader-dispatch name" premise this test checks is no longer
+    true for those two -- see test_qc_reader_dispatch_stays_tifffile_only and
+    _QC_READER_DISPATCH_STAYS_TIFFFILE_ONLY for the (regqc, bioio) exemption's own, narrower
+    claim instead.
     """
     dispatch_names = ("detect_reader", "require_reader", "read_info", "read_plane")
     writer_only_scripts = (
@@ -606,17 +638,15 @@ def test_ome_io_reader_dispatch_is_unreachable_from_the_writer_only_scripts():
         "segment_instantseg.py",
         "split_multichannel.py",
         "tile_for_basic.py",
-        "utils/qc.py",
         "utils/image_utils.py",
-        # The four ENTRY scripts the quantify/regqc exemption comments above actually name
-        # as the reason (they reach ome_io only transitively, through utils/image_utils.py
-        # or utils/qc.py) -- checked directly rather than assumed, so a dispatch call added
-        # straight to one of these would be caught here too, not just in the module it
-        # currently reaches ome_io through.
+        # The three ENTRY scripts the quantify exemption comments above actually name as the
+        # reason (they reach ome_io only transitively, through utils/image_utils.py) --
+        # checked directly rather than assumed, so a dispatch call added straight to one of
+        # these would be caught here too, not just in the module it currently reaches ome_io
+        # through.
         "quantify.py",
         "export_geojson.py",
         "extract_cell_properties.py",
-        "generate_registration_qc.py",
     )
     callers = []
     for rel in writer_only_scripts:
@@ -628,11 +658,81 @@ def test_ome_io_reader_dispatch_is_unreachable_from_the_writer_only_scripts():
                     callers.append(f"{rel}:{lineno} ({fn})")
     assert not callers, (
         "UNREACHABLE_IMPORTS exempts containers/preprocess, containers/tiled, "
-        "containers/merge, containers/stardist, containers/cellsam, containers/instanseg, "
-        "containers/quantify and containers/regqc from installing bioio/h5py because none "
+        "containers/merge, containers/stardist, containers/cellsam, containers/instanseg "
+        "and containers/quantify from installing bioio/h5py because none "
         f"of {writer_only_scripts} call ome_io's reader-dispatch functions -- but they now "
         f"do, at {callers}. The lazy bioio/h5py imports inside those functions now execute, "
         "so the affected container must install bioio/h5py (or the call must go)."
+    )
+
+
+def test_qc_reader_dispatch_stays_tifffile_only():
+    """The premise behind the (regqc, bioio) exemption -- see
+    _QC_READER_DISPATCH_STAYS_TIFFFILE_ONLY.
+
+    Unlike the writer-only scripts test_ome_io_reader_dispatch_is_unreachable_from_the_writer_
+    only_scripts checks, bin/utils/qc.py DOES call ome_io's reader-dispatch functions (plan
+    08's before/after panel reads the native pre-registration plane through
+    ome_io.read_info/read_plane). What keeps containers/regqc from needing bioio is narrower:
+    those two functions only reach _open_bioio (the lazy `import bioio`) for a path outside
+    ome_io._TIFFFILE_READABLE, and every path qc.py ever calls them with is one of this
+    pipeline's own .ome.tif/.ome.tiff intermediates. This test pins both halves of that claim
+    so a change to either -- qc.py calling a riskier dispatch name, or the pipeline's own
+    producers drifting off the .ome.tif convention -- fails here rather than silently
+    invalidating the exemption.
+    """
+    qc_path = REPO / "bin" / "utils" / "qc.py"
+    called = set()
+    for lineno, line in enumerate(qc_path.read_text().splitlines(), 1):
+        code = line.split("#", 1)[0]
+        for fn in ("detect_reader", "require_reader", "read_info", "read_plane"):
+            if f"{fn}(" in code:
+                called.add(fn)
+    assert called, (
+        "qc.py no longer calls any ome_io reader-dispatch function -- the (regqc, bioio) "
+        "exemption should go back to _OME_IO_READER_DISPATCH_UNREACHABLE (the same claim as "
+        "the other seven containers), and this test (now vacuous) should be removed."
+    )
+    # detect_reader is pure extension-sniffing (no import); require_reader is what a NEW,
+    # riskier read path would call to force a specific backend. Neither is what
+    # create_registration_qc calls -- if one appears, the "always tifffile" branch reasoning
+    # below no longer applies and the exemption needs re-deriving, not just re-reading.
+    assert called <= {"read_info", "read_plane"}, (
+        f"bin/utils/qc.py now calls {called - {'read_info', 'read_plane'}}, not just "
+        "read_info/read_plane -- the (regqc, bioio) exemption's reasoning (read_info/"
+        "read_plane only reach _open_bioio for a non-_TIFFFILE_READABLE suffix) does not "
+        "cover detect_reader/require_reader and must be re-derived."
+    )
+
+    ome_io_src = (REPO / "bin" / "utils" / "ome_io.py").read_text()
+    tifffile_readable_match = re.search(
+        r"_TIFFFILE_READABLE\s*=\s*\(([^)]*)\)", ome_io_src
+    )
+    assert tifffile_readable_match, (
+        "ome_io._TIFFFILE_READABLE not found by this guard's regex"
+    )
+    tifffile_readable = tifffile_readable_match.group(1)
+    for suffix in (".ome.tif", ".ome.tiff", ".tif", ".tiff"):
+        assert f'"{suffix}"' in tifffile_readable, (
+            f"ome_io._TIFFFILE_READABLE no longer names {suffix!r} -- "
+            "CONVERT_IMAGE/REGISTER's own output convention would then route through "
+            "_open_bioio, and the (regqc, bioio) exemption is no longer sound."
+        )
+
+    # The pipeline-level half of the claim: reference_path/registered_path/native_path are
+    # always CONVERT_IMAGE's or REGISTER's own output, never an arbitrary user-supplied
+    # format. Pinned against the actual .nf source rather than assumed.
+    convert_image_nf = (REPO / "modules" / "local" / "convert_image.nf").read_text()
+    assert '"*.ome.tif"' in convert_image_nf, (
+        "modules/local/convert_image.nf no longer emits '*.ome.tif' -- the (regqc, bioio) "
+        "exemption assumed CONVERT_IMAGE's output is always tifffile-readable, and that "
+        "assumption needs re-checking against whatever it emits now."
+    )
+    register_nf = (REPO / "modules" / "local" / "register.nf").read_text()
+    assert '"*.ome.tif"' in register_nf and '"*.ome.tiff"' in register_nf, (
+        "modules/local/register.nf no longer stages '*.ome.tif'/'*.ome.tiff' -- the "
+        "(regqc, bioio) exemption assumed REGISTER's output is always tifffile-readable, "
+        "and that assumption needs re-checking against whatever it stages now."
     )
 
 
