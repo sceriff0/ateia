@@ -672,4 +672,14 @@
 # test count moved. `pytest --collect-only -q` reports "1839 tests collected",
 # and a full run with MIRAGE_STRICT_SKIPS=1 gives 1825 passed, 14 skipped, 0
 # failed -- 1825 + 14 = 1839. 1834 + 5 = 1839.
+# RE-MEASURED 2026-09-03 on release/p12-docs (plan 12 Task 13, phase exit).
+# The earlier plan-12 notes above were written on the pre-rebase branch and
+# describe smaller counts; after the rebase onto dev (22c8e15, plans 04-11
+# merged) the integrated tree collects 1934: a full run with
+# MIRAGE_STRICT_SKIPS=1 gives 1917 passed, 17 skipped, 0 failed --
+# 1917 + 17 = 1934. Plan 12 as a whole adds four documentation guards
+# (site.config sizing, documented-command runnability, params/*.json
+# coherence, parameters.md-vs-schema), the cases widening the CLI-boolean
+# guard to configs and to the bare form, and one BLOCKING_CHECKS
+# parametrisation for the mkdocs job.
 1934
