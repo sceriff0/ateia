@@ -132,6 +132,15 @@ NOT_A_PARAM_ROW = {
 _STYLE_BLOCK = re.compile(r"<style\b.*?</style>", re.S | re.I)
 _STYLE_ATTR = re.compile(r"""\sstyle\s*=\s*(["']).*?\1""", re.S | re.I)
 _VAR_REF = re.compile(r"var\(\s*--[A-Za-z0-9_-]+\s*\)")
+# HTML comments cannot nest, so a non-greedy DOTALL match is the whole comment,
+# never less. Every POSITIVE check in this file ("this row/name exists") reads
+# `_prose()`, not `path.read_text()`, precisely so commented-out markup cannot
+# satisfy a claim that never renders -- see `_prose`'s docstring. The negative
+# guard in tests/test_figures_have_no_retired_names.py is the mirror image and
+# deliberately reads RAW text instead: there, a retired name inside a comment
+# must still fire, because a positive and a negative rule need opposite
+# treatment (CLAUDE.md, "Verification reality" #7).
+_COMMENT = re.compile(r"<!--.*?-->", re.S)
 
 # A Nextflow parameter is snake_case and never contains a hyphen -- true of all
 # 92 declared in nextflow.config. So `--jvm-heap-gb`, `--checkpoint-dir` and
@@ -186,13 +195,47 @@ def _live_figures():
 
 
 def _prose(path: Path) -> str:
-    """Figure text with CSS custom properties removed. See `_STYLE_BLOCK`."""
+    """Figure text with CSS custom properties AND HTML comments removed.
+
+    See `_STYLE_BLOCK` for the CSS half. The HTML-comment half (`_COMMENT`)
+    exists because every check that asks "does the figure claim X" is a
+    POSITIVE rule, and a positive rule satisfied by markup that never renders
+    is checking nothing -- a parameter row or a pipeline name sitting inside
+    `<!-- ... -->` must not count as the figure making that claim.
+    """
     text = path.read_text()
-    return _VAR_REF.sub(" ", _STYLE_ATTR.sub(" ", _STYLE_BLOCK.sub(" ", text)))
+    return _COMMENT.sub(
+        " ", _VAR_REF.sub(" ", _STYLE_ATTR.sub(" ", _STYLE_BLOCK.sub(" ", text)))
+    )
 
 
 def _cell_text(fragment: str) -> str:
     return html.unescape(_TAG.sub("", fragment)).replace("\xa0", " ").strip()
+
+
+def test_a_param_row_inside_an_html_comment_is_not_counted(tmp_path):
+    """`_prose()` must blank HTML comments, or a commented-out row/name would
+    satisfy a POSITIVE check without the figure ever making that claim.
+
+    Regression for the hole named in this module's own docstring update: before
+    `_COMMENT` existed, `_prose()` stripped `<style>` blocks and `style=""`
+    attrs but not `<!-- ... -->`, so a `<table class="pr">` row or an
+    UPPER_SNAKE_CASE name commented out of a figure still resolved as if it
+    were live markup.
+    """
+    fixture = tmp_path / "commented.html"
+    fixture.write_text(
+        "<html><body>\n"
+        "<!--\n"
+        '<table class="pr"><tr>'
+        '<td class="k">reg_qc</td><td class="v">2</td>'
+        "</tr></table>\n"
+        "REGISTER_PATIENT\n"
+        "-->\n"
+        "</body></html>\n"
+    )
+    assert list(_param_rows(fixture)) == []
+    assert "REGISTER_PATIENT" not in _names_used(fixture)
 
 
 def _config_defaults():
@@ -303,8 +346,13 @@ def test_non_param_flags_are_really_not_params():
 # 2. pipeline names
 # --------------------------------------------------------------------------
 def _names_used(path):
-    """Every token in this figure that is a claim about a pipeline name."""
-    text = path.read_text()
+    """Every token in this figure that is a claim about a pipeline name.
+
+    Reads `_prose()`, not `path.read_text()`, so a name sitting only inside a
+    `<!-- ... -->` section-label comment (e.g. `<!-- e — SEG_QC -->`) does not
+    count as the figure claiming that name exists.
+    """
+    text = _prose(path)
     named = {m.group(0) for m in _UPPER.finditer(text)}
     for span in _CODE_SPAN.finditer(text):
         fragment = _TAG.sub("", span.group(1) or span.group(2) or "")
@@ -380,8 +428,11 @@ def _param_rows(path):
     for parameters; `qa`, `rc`, `own`, `ss` and `bk` pair prose with prose
     (`step 1 · features`, `eager whole-array write`). Unscoped, every prose row
     would have to be excused by name.
+
+    Reads `_prose()`, not `path.read_text()`, so a `<table class="pr">` row
+    sitting inside an HTML comment does not count as a claim the figure makes.
     """
-    for table in _PR_TABLE.finditer(path.read_text()):
+    for table in _PR_TABLE.finditer(_prose(path)):
         for m in _KV_ROW.finditer(table.group(1)):
             yield _cell_text(m.group(1)), _cell_text(m.group(2))
 

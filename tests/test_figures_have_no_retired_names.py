@@ -1,0 +1,189 @@
+"""No figure may name a backend, front-end or harness the pipeline retired.
+
+`tests/test_figures_match_the_pipeline.py` resolves the names a figure writes
+against the pipeline, so it catches a name that never existed or was renamed.
+It cannot catch the opposite drift: a name that still resolves (`SEGMENT` is
+still a process) sitting in a sentence that describes a world that is gone.
+The ten `ORB` mentions in registration-schematic.html were exactly that -- the
+front-end symbol was deleted from `bin/utils/coarse_align.py`, so no name check
+had anything to fail on, and the figure went on telling reviewers the coarse
+step is ORB + cross-check matching.
+
+NARROW ON PURPOSE, and this is not caution -- it is the same ruling
+`tests/test_ashlar_backend_removed.py` records in its own docstring: "a blanket
+grep would delete them". Two ASHLAR sentences in this set are CORRECT and must
+survive:
+  * pipeline-schematic.html -- mcmicro applies BaSiC profiles inside ASHLAR's
+    mosaic step, which mirage has no counterpart for.
+  * registration-schematic.html -- STARE's phase-correlation kernel mirrors
+    ASHLAR's.
+So `ashlar` is forbidden only where it reads as a SELECTABLE BACKEND (a
+`registration_method` value, a process name, an adapter name), never as a word.
+
+Every pattern below is paired with the file:line that proves the thing is gone,
+because an entry whose subject still exists forbids a name the pipeline uses.
+
+This is a NEGATIVE rule ("must not appear"), and it reads RAW text
+(`path.read_text()`), never `_prose()`. That is the opposite treatment from
+`tests/test_figures_match_the_pipeline.py`'s POSITIVE checks, which read
+`_prose()` (comments stripped) so that commented-out markup cannot satisfy a
+claim the figure never actually makes. Here the risk runs the other way: a
+retired name hidden inside `<!-- ... -->` is still a retired name sitting in
+the file, and a trailing comment making the guard comment-blind is exactly the
+failure mode CLAUDE.md's "Verification reality" #7 catalogues -- a positive
+and a negative rule need opposite treatment.
+"""
+
+from __future__ import annotations
+
+import re
+
+from tests.nfmodel import REPO_ROOT
+
+FIGURES_DIR = REPO_ROOT / "docs" / "figures"
+
+# pattern source -> (why it is retired, the evidence that it is)
+RETIRED = {
+    r"(?<![A-Za-z0-9])orb(?![A-Za-z0-9])": (
+        "the classical ORB front-end is deleted",
+        "bin/utils/coarse_align.py has no _frontend_orb; the only front-end is "
+        "_frontend_disk_lightglue",
+    ),
+    r"(?<![A-Za-z0-9])sift(?![A-Za-z0-9])": (
+        "the SIFT front-end is deleted",
+        "same file, same reason",
+    ),
+    r"fourier[_ -]?mellin": (
+        "the Fourier-Mellin front-end is deleted",
+        "same file, same reason",
+    ),
+    r"reg_tiled_frontend": (
+        "the front-end selector param is deleted",
+        "nextflow.config declares no such param; a single-valued enum is dead config",
+    ),
+    r"stare[_-]ml": (
+        "containers/stare-ml/ is deleted; torch+kornia folded into the tiled image",
+        "containers/images.json has no stare-ml entry",
+    ),
+    r"attend_image_analysis": (
+        "the single-repo Docker Hub layout is retired",
+        "every module names bolt3x/mirage-<name>:<version>",
+    ),
+    r"aicsimageio": (
+        "the reader stack is bioio/tifffile/bioio-bioformats",
+        "bin/utils/ome_io.py READERS",
+    ),
+    r"(?<![A-Za-z0-9])anhir(?![A-Za-z0-9])": (
+        "the ANHIR/ACROBAT landmark harness is deleted",
+        "benchmarks/registration_eval/ exists on no branch; benchmarks/README.md "
+        "section B is its removal record",
+    ),
+    r"(?<![A-Za-z0-9])acrobat(?![A-Za-z0-9])": (
+        "as anhir -- except as DISK+LightGlue provenance, which no figure writes",
+        "same",
+    ),
+    # ashlar ONLY where it reads as a selectable backend. See the module docstring.
+    r"registration_method[^<\n]{0,40}ashlar": (
+        "ashlar was removed as a registration_method for v1.0.0",
+        "tests/test_ashlar_backend_removed.py; nextflow_schema.json's enum",
+    ),
+    r"ASHLAR_(?:RETILE|SOLVE|ADAPTER)": (
+        "the ashlar processes and adapter are deleted",
+        "modules/local/ has no ashlar_*.nf",
+    ),
+}
+
+# Shrink-only debt allowlist, same shape and same rule as
+# tests/test_figures_match_the_pipeline.py's STALE_FIGURES: an entry is a debt,
+# not a permission, and `test_the_allowlist_only_shrinks` fails once an entry
+# stops matching. Do NOT add a figure here to make it pass.
+ALLOW = {
+    "registration-schematic.html": (
+        "ten ORB mentions in panel d step 1. Cleared by plan 11 Task 4, which "
+        "rewrites that panel to DISK + LightGlue."
+    ),
+    "pipeline-schematic.html": (
+        "one ANHIR/ACROBAT line in panel h's registration-accuracy signal. "
+        "Cleared by plan 11 Task 3."
+    ),
+}
+
+_COMPILED = {re.compile(p, re.I): v for p, v in RETIRED.items()}
+
+# Non-vacuity, checked at import time rather than inside a test: an empty
+# RETIRED would make every test below pass by iterating over nothing, and
+# that must be caught before any test body runs, not discovered later as a
+# suspiciously-green run.
+assert RETIRED, "RETIRED is empty -- every check below would pass vacuously"
+
+
+def _figures():
+    found = sorted(FIGURES_DIR.glob("*.html"))
+    assert len(found) >= 4, (
+        f"only {len(found)} figure(s) found under {FIGURES_DIR} -- expected at "
+        "least the four shipped supplementary figures; the glob or the "
+        "directory has broken"
+    )
+    return found
+
+
+def _hits(path):
+    out = []
+    for i, line in enumerate(path.read_text().splitlines(), 1):
+        for rx, (why, _evidence) in _COMPILED.items():
+            if rx.search(line):
+                out.append(f"{path.name}:{i}: {why} -- {line.strip()[:110]}")
+    return out
+
+
+def test_no_figure_names_a_retired_backend_or_frontend():
+    problems = []
+    for path in _figures():
+        if path.name in ALLOW:
+            continue
+        problems += _hits(path)
+    assert not problems, "figure(s) name something the pipeline retired:\n" + "\n".join(
+        problems
+    )
+
+
+def test_the_patterns_still_match_something_somewhere():
+    """A negative rule over a set that never matched proves nothing.
+
+    Every pattern here was measured against this figure set on 2026-09-02 and at
+    least four of them had live hits. If ALL of them stop matching -- including
+    inside the allow-listed files -- the extractor has broken and every assertion
+    above is looping over nothing.
+    """
+    matched = set()
+    for path in _figures():
+        text = path.read_text()
+        for rx in _COMPILED:
+            if rx.search(text):
+                matched.add(rx.pattern)
+    assert matched or not ALLOW, (
+        "not one retired-name pattern matched anywhere in docs/figures/ -- either "
+        "the set is finally clean (then ALLOW must be empty, and this assertion "
+        "passes) or the reader has broken"
+    )
+
+
+def test_the_allowlist_only_shrinks():
+    """An ALLOW entry must name a figure that exists and still has a hit."""
+    stale = []
+    for name, reason in ALLOW.items():
+        path = FIGURES_DIR / name
+        if not path.is_file():
+            stale.append(f"{name}: no longer exists -- remove it from ALLOW")
+            continue
+        if not _hits(path):
+            stale.append(
+                f"{name}: carries no retired name any more -- remove it from ALLOW "
+                f"so the next drift in it is caught (entry reason: {reason})"
+            )
+    assert not stale, "\n".join(stale)
+
+
+def test_the_allowlist_is_not_a_blanket():
+    """At least one figure must actually be checked."""
+    assert len(ALLOW) < len(_figures())
