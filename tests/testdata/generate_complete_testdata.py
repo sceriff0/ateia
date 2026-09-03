@@ -501,6 +501,21 @@ with open(OUT_DIR / "new_cycle.csv", "w") as f:
     f.write(f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8\n")
 print("  Created new_cycle.csv (add_cycle new-cycle samplesheet for prior_run/)")
 
+# 3f. The SAME new-cycle samplesheet, plus one unknown column -- the add_cycle-mode
+# counterpart of extra_column_input.csv (section 10i). workflows/mirage.nf's
+# add_cycle branch calls CsvUtils.validateInputCSV(params.input,
+# ParamUtils.requiredColumnsForStep('preprocessing')) exactly like the linear
+# path, but until fix round 1 nothing warned about a column that call ignores --
+# a mistyped column in a new-cycle samplesheet stayed silent. This pins the fix:
+# warnUnknownColumns (workflows/mirage.nf) fires on THIS path too, with the
+# literal step 'preprocessing' (add_cycle has no --start/--stop choice).
+with open(OUT_DIR / "new_cycle_extra_column.csv", "w") as f:
+    f.write("patient_id,path_to_file,is_reference,channels,operator\n")
+    f.write(f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8,AB\n")
+print(
+    "  Created new_cycle_extra_column.csv (add_cycle samplesheet with one unknown column)"
+)
+
 # =============================================================================
 # 4. Generate INVALID input CSVs for validation testing
 # =============================================================================
@@ -1574,11 +1589,18 @@ _SHEET_ROWS = [
     f"P001,{TESTDATA_ABS}/P001_mov1.ome.tiff,false,DAPI|CD3|CD8",
 ]
 
-# CRLF. Excel on Windows writes \r\n, and Groovy's readLines() strips it while
-# Nextflow's splitCsv leaves the \r on the LAST field of every row -- which is
-# `channels`, so an untrimmed reader produces a marker literally named "CD8\r".
-# CsvUtils.parseCsvLine trims and input_check.nf's .map trims, but nothing
-# asserted either, so a future reader that stopped trimming would be invisible.
+# CRLF. Excel on Windows writes \r\n. MEASURED on NXF_VER=25.04.7 and 26.04.6
+# (plan 07 Tasks 7-10's own verification): both Groovy's readLines() (CsvUtils)
+# AND Nextflow's splitCsv() (input_check.nf's actual reader) already strip the
+# trailing \r cleanly -- neither leaves it on the last field. So this fixture is
+# not currently exercising a live bug; it is kept as a REGRESSION GUARD against
+# (a) a future Nextflow engine version changing splitCsv's line-ending handling,
+# and (b) any reader added later that splits on "\n" by hand instead of going
+# through readLines()/splitCsv, which would NOT get the same protection.
+# CsvUtils.parseCsvLine trims and input_check.nf's .map trims too, so even a
+# reader that somehow saw a stray \r would still not produce a marker literally
+# named "CD8\r" -- belt and braces, asserted by
+# tests/subworkflows/local/input_check_samplesheet_shapes.nf.test.
 with open(OUT_DIR / "crlf_input.csv", "wb") as f:
     f.write(("\r\n".join([_SHEET_HEADER] + _SHEET_ROWS) + "\r\n").encode("utf-8"))
 print("  Created crlf_input.csv (CRLF line endings)")

@@ -234,9 +234,12 @@ run_test \
     "" \
     --start preprocessing
 
-# Test 3.2: CRLF line endings (Excel on Windows). Nextflow's splitCsv leaves the
-# \r on the last field of every row -- which is `channels` -- so an untrimmed
-# reader yields a marker literally named "CD8<CR>".
+# Test 3.2: CRLF line endings (Excel on Windows). MEASURED on NXF_VER=25.04.7
+# and 26.04.6: Nextflow's splitCsv already strips the trailing \r cleanly, so
+# this is a regression guard (a future engine change, or a hand-rolled reader
+# that splits on "\n" without going through splitCsv/readLines) rather than a
+# currently-live bug -- see generate_complete_testdata.py's crlf_input.csv
+# comment for the full measurement.
 run_test \
     "Valid - CRLF line endings" \
     "pass" \

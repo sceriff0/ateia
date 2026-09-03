@@ -22,6 +22,26 @@ include { POSTPROCESSING      } from '../subworkflows/local/postprocess'
 include { ADD_CYCLE           } from '../subworkflows/local/add_cycle'
 include { FINAL_QC            } from '../subworkflows/local/final_qc'
 
+// Unknown columns are ACCEPTED -- a checkpoint CSV legitimately carries columns
+// the entry step does not read -- but never silently: a mistyped 'channles'
+// beside a missing 'channels' otherwise surfaces much later, as a null,
+// somewhere else. CsvUtils.unknownColumns derives the known set from
+// ParamUtils.STEPS + Checkpoint.STEPS, so a legitimate checkpoint header warns
+// about nothing.
+//
+// ONE implementation, called from BOTH the add_cycle branch (step is always the
+// literal 'preprocessing' there -- add_cycle has no --start/--stop choice) and
+// the linear start/stop path (step is params.start) below, rather than two
+// copies of the same log.warn. Defined at SCRIPT level, not inside workflow
+// MIRAGE{} or in lib/: `log` is unbound inside lib/*.groovy and inside
+// conf/*.config (see CLAUDE.md), but resolves in a workflow script -- which is
+// why this lives here, where both call sites can see it, and nowhere else.
+def warnUnknownColumns(String csv, String step) {
+    def unknown_columns = CsvUtils.unknownColumns(csv, step)
+    if (unknown_columns)
+        log.warn "Samplesheet column(s) this pipeline does not read, and will ignore: " +
+                 "${unknown_columns.join(', ')} (in ${csv})"
+}
 
 workflow MIRAGE {
 
@@ -153,6 +173,10 @@ workflow MIRAGE {
 
         if (!params.input) error "mode='add_cycle' requires --input (the new cycle samplesheet)"
         CsvUtils.validateInputCSV(params.input, ParamUtils.requiredColumnsForStep('preprocessing'))
+        // add_cycle has no --start/--stop choice, so the step is always the
+        // literal 'preprocessing' here -- the same column set INPUT_CHECK reads
+        // below via 'path_to_file'.
+        warnUnknownColumns(params.input, 'preprocessing')
 
         // The new-cycle samplesheet intentionally has NO reference row: the
         // registration reference is the frozen prior-run reference (external to
@@ -227,17 +251,7 @@ workflow MIRAGE {
         params.input,
         ParamUtils.requiredColumnsForStep(params.start)
     )
-
-    // Unknown columns are ACCEPTED -- a checkpoint CSV legitimately carries
-    // columns the entry step does not read -- but never silently: a mistyped
-    // 'channles' beside a missing 'channels' otherwise surfaces much later, as a
-    // null, somewhere else. CsvUtils.unknownColumns derives the known set from
-    // ParamUtils.STEPS + Checkpoint.STEPS, so a legitimate checkpoint header
-    // warns about nothing. `log` is bound HERE and nowhere in lib/ or conf/.
-    def unknown_columns = CsvUtils.unknownColumns(params.input, params.start)
-    if (unknown_columns)
-        log.warn "Samplesheet column(s) this pipeline does not read, and will ignore: " +
-                 "${unknown_columns.join(', ')} (in ${params.input})"
+    warnUnknownColumns(params.input, params.start)
 
     // Fail-fast semantic validation (per-row format + per-patient reference
     // counts + file existence). Runs here so it is also exercised by --dry_run.
