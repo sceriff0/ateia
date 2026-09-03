@@ -562,6 +562,63 @@ def test_every_default_a_figure_states_matches_nextflow_config():
 
 
 # --------------------------------------------------------------------------
+# 4. registration backend names
+# --------------------------------------------------------------------------
+# `test_every_pipeline_name_a_figure_uses_exists` resolves VALIS_ADAPTER and
+# TILED_ADAPTER because they are include aliases -- and would resolve a third
+# adapter just as happily. It says nothing at all about the lower-case METHOD
+# VALUES the figures write in prose and in `registration_method` rows. So a
+# figure could keep advertising a backend that was deleted (this set did
+# exactly that with ashlar until spec Phase 2 removed it), or miss one that was
+# added, and stay green. lib/RegBackends.groovy is the one owner of that list.
+#
+# Two exclusions, both keyed to the exact carve-out
+# `tests/test_figures_have_no_retired_names.py`'s own module docstring already
+# names and defends ("Two ASHLAR sentences in this set are CORRECT and must
+# survive"): "ASHLAR's" (a possessive reference to the external tool, e.g.
+# "the kernel mirrors ASHLAR's") and "Elastix bindings" (VALIS's optional
+# SimpleITK+Elastix affine refiner, which the image explicitly does not
+# carry -- registration-schematic.html:507). Neither is a claim that mirage
+# ships that backend; a bare "ashlar" or "elastix" with no possessive/bindings
+# tail still matches, which is what the drills below rely on.
+_METHOD_WORD = re.compile(
+    r"(?<![A-Za-z0-9_])(valis|tiled|ashlar|stare_ml|elastix)(?![A-Za-z0-9_])"
+    r"(?!'s)(?! bindings)",
+    re.I,
+)
+
+
+def test_figures_name_exactly_the_shipped_registration_backends():
+    from tests.test_reg_backends import reg_backend_methods
+
+    shipped = set(reg_backend_methods())
+    assert shipped, "RegBackends.methods() parsed as empty -- the reader is broken"
+
+    named, per_file = set(), {}
+    for path in _live_figures():
+        found = {m.group(1).lower() for m in _METHOD_WORD.finditer(_prose(path))}
+        per_file[path.name] = found
+        named |= found
+
+    assert named, (
+        "no registration-method word found in any figure -- the extractor has "
+        "stopped matching and this test is checking nothing"
+    )
+    extra = named - shipped
+    assert not extra, (
+        f"figure(s) name registration backend(s) the pipeline does not ship: "
+        f"{sorted(extra)} (RegBackends.methods() == {sorted(shipped)}). "
+        f"Per file: { {k: sorted(v) for k, v in per_file.items() if v & extra} }"
+    )
+    missing = shipped - named
+    assert not missing, (
+        f"the figure set names no backend {sorted(missing)}, which the pipeline "
+        f"ships. A supplementary set that omits a whole backend is a claim that "
+        f"it does not exist."
+    )
+
+
+# --------------------------------------------------------------------------
 # the allowlist meta-test
 # --------------------------------------------------------------------------
 def test_the_allowlist_only_shrinks():

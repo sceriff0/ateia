@@ -572,4 +572,13 @@
 # satisfies a positive claim check). `pytest --collect-only -q` reports "1617 tests
 # collected", and a full run with MIRAGE_STRICT_SKIPS=1 gives 1604 passed, 13
 # skipped, 0 failed -- 1604 + 13 = 1617. 1612 + 5 = 1617.
-1795
+
+#
+#
+# RE-MEASURED 2026-09-03, release 1.0.0 plan 11 Task 9 (pin the figure set's
+# registration backend names to RegBackends.methods()). One new case:
+# tests/test_figures_match_the_pipeline.py::test_figures_name_exactly_the_shipped_registration_backends.
+# `pytest --collect-only -q` reports "1618 tests collected", and a full run
+# with MIRAGE_STRICT_SKIPS=1 gives 1605 passed, 13 skipped, 0 failed --
+# 1605 + 13 = 1618. 1617 + 1 = 1618.
+1796
