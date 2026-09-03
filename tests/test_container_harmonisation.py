@@ -435,14 +435,91 @@ _IMPORT_TO_DIST = {
 }
 
 
-def _third_party_imports(script):
-    """Top-level distributions a script imports, parsed with ``ast``.
+def _module_level_imports(tree):
+    """``Import``/``ImportFrom`` nodes reachable WITHOUT descending into a function or
+    class body -- i.e. the ones that execute the moment the module is imported.
 
-    Deliberately not a regex: ``^\\s*(import|from)\\s+(\\w+)`` also matches prose inside
-    docstrings ("import the module first"), which reported a package named ``the`` as a
-    missing dependency. Only a real parse distinguishes an import statement from a sentence.
+    A lazy ``import x`` inside a ``def`` (or a ``class`` body, which runs once at class
+    creation but is exactly as deferred from a *module-requirement* standpoint since the
+    class is rarely instantiated at import time either) is a RUNTIME dependency, not a
+    module one: the import statement only executes if something calls the function.
+    ``if``/``try``/``with`` at module scope are still descended into -- a
+    ``try: import cupy except ImportError`` guard at module scope runs at import time and
+    must still count.
+
+    This is what makes ``_third_party_imports`` module-scope-aware. Before this, walking
+    with plain ``ast.walk`` visited every node regardless of nesting, so a script that
+    merely imported ``bin/utils/ome_io.py`` (whose ``bioio``/``h5py`` imports are lazy,
+    INSIDE its reader-dispatch functions) was reported as requiring ``bioio``/``h5py`` --
+    the root cause of every one of the 16 entries the old ``UNREACHABLE_IMPORTS``
+    allowlist existed to excuse.
     """
-    local_files = {p.stem: p for p in (REPO / "bin").rglob("*.py")}
+    stack = list(ast.iter_child_nodes(tree))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            yield node
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue  # executes only if called -- a runtime import, not a module one.
+        else:
+            stack.extend(ast.iter_child_nodes(node))
+
+
+def _import_names(node, local_files, local_pkgs):
+    """Local/third-party names an ``Import`` or ``ImportFrom`` node references, resolved
+    against the local file/package tables. ``[]`` for any other node type.
+
+    Shared by ``_reachable_local_files`` (which walks EVERY import, at any nesting depth,
+    to find local modules a script transitively pulls in) and ``_third_party_imports``
+    (which only ever sees the subset ``_module_level_imports`` yields), so the name
+    resolution itself -- relative imports, ``from pkg.sub import x`` following, the
+    vendored-package case -- has exactly one definition.
+    """
+    if isinstance(node, ast.Import):
+        return [a.name.split(".")[0] for a in node.names]
+    if not isinstance(node, ast.ImportFrom):
+        return []
+    head = node.module.split(".")[0] if (node.level == 0 and node.module) else None
+    names = [head] if head else []
+    # ``from utils.tiled_io import open_lazy`` -- follow into the submodule, but ONLY
+    # when the head is itself local. Taking the last component unconditionally turned
+    # ``from skimage.transform import warp`` into a package named "transform".
+    if head in local_files or head in local_pkgs:
+        if node.module and "." in node.module:
+            names.append(node.module.split(".")[-1])
+    if node.level:
+        # A RELATIVE import is local by definition -- there is no such thing as a
+        # relative third-party import. Follow the module it names, and treat the
+        # imported SYMBOLS as symbols: queue the ones that are themselves local
+        # modules, and discard the rest rather than reporting them as missing
+        # packages. Without this, the vendored `bin/utils/cse` package's own
+        # ``from .functions import cell_size_uniformity, ...`` was read as a dozen
+        # third-party dependencies that containers/segeval "failed to install".
+        if node.module:
+            names.append(node.module.split(".")[-1])
+        names += [a.name for a in node.names if a.name in local_files]
+    elif head is None or head in local_pkgs:
+        names += [a.name for a in node.names]
+    return names
+
+
+def _reachable_local_files(script, root=None):
+    """``(files, local_files, local_pkgs)``: every local ``.py`` file reachable from
+    ``script`` (``script`` included) by following LOCAL imports, discovered with an
+    UNRESTRICTED ``ast.walk`` -- a local import is followed regardless of nesting, which
+    is the resolution ``_third_party_imports`` has always performed for LOCAL modules.
+    This task only restricts THIRD-PARTY name collection to module scope (in
+    ``_third_party_imports`` itself); which local files even exist to check is unchanged.
+
+    ``root`` defaults to ``REPO / "bin"`` and can be overridden to point the walker at a
+    scratch directory (see ``test_walker_ignores_imports_nested_in_function_bodies``).
+
+    Returns the ``local_files``/``local_pkgs`` tables alongside ``files`` so a caller that
+    needs to resolve further names against them (``_third_party_imports``,
+    ``test_required_runtime_imports_are_actually_reached``) does not repeat the ``rglob``.
+    """
+    root = root or (REPO / "bin")
+    local_files = {p.stem: p for p in root.rglob("*.py")}
     # Local PACKAGES, not just modules. `local_files` is keyed by file stem, so a
     # package directory is invisible to it -- `bin/utils/cse/__init__.py` has the stem
     # `__init__`, and `from cse import single_method_eval` therefore looked like a
@@ -451,11 +528,9 @@ def _third_party_imports(script):
     # nothing for it. `utils` used to be hardcoded here for exactly this reason;
     # deriving the set covers it and every future vendored package alike.
     local_pkgs = {
-        d.name
-        for d in (REPO / "bin").rglob("*")
-        if d.is_dir() and (d / "__init__.py").is_file()
+        d.name for d in root.rglob("*") if d.is_dir() and (d / "__init__.py").is_file()
     }
-    third, seen, queue = set(), set(), [script]
+    seen, queue, files = set(), [script], []
     while queue:
         cur = queue.pop()
         if cur in seen:
@@ -464,231 +539,260 @@ def _third_party_imports(script):
         path = local_files.get(Path(cur).stem)
         if path is None or not path.is_file():
             continue
+        files.append(path)
         for node in ast.walk(ast.parse(path.read_text())):
-            if isinstance(node, ast.Import):
-                names = [a.name.split(".")[0] for a in node.names]
-            elif isinstance(node, ast.ImportFrom):
-                head = (
-                    node.module.split(".")[0]
-                    if (node.level == 0 and node.module)
-                    else None
-                )
-                names = [head] if head else []
-                # ``from utils.tiled_io import open_lazy`` -- follow into the submodule, but ONLY
-                # when the head is itself local. Taking the last component unconditionally turned
-                # ``from skimage.transform import warp`` into a package named "transform".
-                if head in local_files or head in local_pkgs:
-                    if node.module and "." in node.module:
-                        names.append(node.module.split(".")[-1])
-                if node.level:
-                    # A RELATIVE import is local by definition -- there is no such thing as a
-                    # relative third-party import. Follow the module it names, and treat the
-                    # imported SYMBOLS as symbols: queue the ones that are themselves local
-                    # modules, and discard the rest rather than reporting them as missing
-                    # packages. Without this, the vendored `bin/utils/cse` package's own
-                    # ``from .functions import cell_size_uniformity, ...`` was read as a dozen
-                    # third-party dependencies that containers/segeval "failed to install".
-                    if node.module:
-                        names.append(node.module.split(".")[-1])
-                    names += [a.name for a in node.names if a.name in local_files]
-                elif head is None or head in local_pkgs:
-                    names += [a.name for a in node.names]
-            else:
-                continue
-            for n in names:
+            for n in _import_names(node, local_files, local_pkgs):
                 if n in local_files or n in local_pkgs:
                     queue.append(n)
+    return files, local_files, local_pkgs
+
+
+def _third_party_imports(script, root=None):
+    """Top-level distributions a script imports AT MODULE SCOPE, parsed with ``ast``.
+
+    Deliberately not a regex: ``^\\s*(import|from)\\s+(\\w+)`` also matches prose inside
+    docstrings ("import the module first"), which reported a package named ``the`` as a
+    missing dependency. Only a real parse distinguishes an import statement from a sentence.
+
+    MODULE SCOPE ONLY (``_module_level_imports``): an import nested inside a ``def``/
+    ``class`` is a RUNTIME dependency a script may never exercise, not a module one. A
+    container whose scripts reach one only through a lazy import declares it instead in
+    ``REQUIRED_RUNTIME_IMPORTS``, with a test (``test_required_runtime_imports_are_actually_
+    reached``) that the lazy import still exists, rather than this function over-reporting
+    every reachable file's entire ``ast.walk`` as if it always ran.
+    """
+    files, local_files, local_pkgs = _reachable_local_files(script, root=root)
+    third = set()
+    for path in files:
+        for node in _module_level_imports(ast.parse(path.read_text())):
+            for n in _import_names(node, local_files, local_pkgs):
+                if n in local_files or n in local_pkgs:
+                    continue
                 elif n not in _STDLIB_OK:
                     third.add(n)
     return third
 
 
-#: Shared reason for the (container, bioio/h5py) exemptions below: every writer-only script
-#: reaches both names through the same shared module, for the same reason.
-_OME_IO_READER_DISPATCH_UNREACHABLE = (
-    "bin/utils/ome_io.py's bioio/h5py imports are lazy, INSIDE its reader-dispatch "
-    "functions (_open_bioio and read_info's h5py branch), reached only through "
-    "detect_reader/require_reader/read_info/read_plane. apply_basic_profiles.py, "
-    "tiled_stitch.py, merge_channels_pyramid.py, extract_mask_series.py, segment.py, "
-    "segment_cellsam.py, segment_instantseg.py, split_multichannel.py and tile_for_basic.py "
-    "all import write_tiff from the same module -- the write seam, not the read one -- and "
-    "never call a reader-dispatch name, so the import never runs in these containers. "
-    "bioio/h5py stay containers/convert-only, per ome_io.py's own module docstring. Guarded "
-    "by test_ome_io_reader_dispatch_is_unreachable_from_the_writer_only_scripts."
-)
+def test_walker_ignores_imports_nested_in_function_bodies(tmp_path):
+    """A lazy ``import x`` inside a ``def`` (or a ``class`` body) is NOT a module
+    requirement.
 
-#: Reason for the (regqc, bioio) exemption specifically. NOT the same claim as the one above:
-#: bin/utils/qc.py's create_registration_qc DOES call read_info/read_plane directly (plan
-#: 08's before/after panel, reading the native pre-registration plane) -- so, unlike every
-#: script covered by _OME_IO_READER_DISPATCH_UNREACHABLE, the dispatch names themselves are
-#: genuinely reached in this container. What stays unreached is specifically _open_bioio and
-#: the hdf5 branch INSIDE read_info/read_plane, because every path those two ever see at this
-#: call site -- reference_path, registered_path and native_path -- is one of this pipeline's
-#: own .ome.tif intermediates (CONVERT_IMAGE emits `*.ome.tif`, modules/local/convert_image.nf:13;
-#: REGISTER stages `*.ome.tif`/`*.ome.tiff`, modules/local/register.nf:103), which
-#: ome_io._TIFFFILE_READABLE covers -- so read_info/read_plane always take the tifffile
-#: branch and _open_bioio is dead code for THIS caller specifically. Guarded by
-#: test_qc_reader_dispatch_stays_tifffile_only, a narrower and separate claim from the one
-#: test_ome_io_reader_dispatch_is_unreachable_from_the_writer_only_scripts checks for the
-#: other seven containers above.
-_QC_READER_DISPATCH_STAYS_TIFFFILE_ONLY = (
-    "bin/utils/qc.py's create_registration_qc calls ome_io.read_info/read_plane directly "
-    "(plan 08's before/after panel), so -- unlike the writer-only scripts above -- the "
-    "dispatch names ARE called in this container. bioio stays unreached because every path "
-    "reaching read_info/read_plane here (reference_path, registered_path, native_path) is "
-    "this pipeline's own .ome.tif/.ome.tiff intermediate (CONVERT_IMAGE/REGISTER's own "
-    "output convention), which ome_io._TIFFFILE_READABLE covers, so _open_bioio is never "
-    "reached from this caller. Guarded by test_qc_reader_dispatch_stays_tifffile_only."
-)
+    Measured before this change: ``_third_party_imports`` reported ``bioio`` for every
+    script that merely imports ``ome_io``, and 16 ``UNREACHABLE_IMPORTS`` entries existed
+    only to say so.
+    """
+    (tmp_path / "probe_script.py").write_text(
+        "import numpy\n"
+        "def f():\n"
+        "    import bioio\n"
+        "class C:\n"
+        "    import h5py\n"
+        "    def m(self):\n"
+        "        from skimage import io\n"
+    )
+    assert _third_party_imports("probe_script.py", root=tmp_path) == {"numpy"}
 
-# Imports the static graph reaches but that can never EXECUTE. Narrow on purpose: keyed by
-# (container, imported name), each with the reason, and each reason guarded by its own test below
-# so an exemption cannot outlive the fact that justified it.
-UNREACHABLE_IMPORTS = {
-    ("segeval", "aicsimageio"): (
-        "bin/utils/cse/functions.py's get_voxel_volume/get_pixel_area open with a lazy "
-        "`from aicsimageio import AICSImage` and then never use the name -- it is dead in "
-        "upstream CellSegmentationEvaluator 1.5.19, and bin/utils/cse/ is kept byte-identical to "
-        "upstream on purpose. Nothing in bin/ calls either function, so the import never runs. "
-        "Guarded by test_unreachable_import_exemptions_are_still_unreachable."
-    ),
-    ("preprocess", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
-    ("preprocess", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
-    ("tiled", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
-    ("tiled", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
-    ("merge", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
-    ("merge", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
-    # segment.py/segment_cellsam.py/segment_instantseg.py (Task 7) each added a direct
-    # `from ome_io import write_tiff`, and every one of them already imports image_utils.py
-    # (also now `from ome_io import write_tiff`) for `ensure_dir`. Neither route calls a
-    # reader-dispatch name.
-    ("stardist", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
-    ("stardist", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
-    ("cellsam", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
-    ("cellsam", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
-    ("instanseg", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
-    ("instanseg", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
-    # export_geojson.py, extract_cell_properties.py and quantify.py all import image_utils.py
-    # for ensure_dir/load_image; image_utils.py's save_tiff now delegates to ome_io.write_tiff.
-    ("quantify", "bioio"): _OME_IO_READER_DISPATCH_UNREACHABLE,
-    ("quantify", "h5py"): _OME_IO_READER_DISPATCH_UNREACHABLE,
-    # generate_registration_qc.py imports bin/utils/qc.py, which imports ome_io.write_tiff
-    # for its composite writes AND (plan 08) ome_io.read_info/read_plane for the native
-    # pre-registration plane. containers/regqc already installs h5py (requirements/regqc.txt)
-    # for its own vendor readers, so only bioio is missing -- see
-    # _QC_READER_DISPATCH_STAYS_TIFFFILE_ONLY for why it stays unreached even though
-    # read_info/read_plane themselves are now genuinely called.
-    ("regqc", "bioio"): _QC_READER_DISPATCH_STAYS_TIFFFILE_ONLY,
-    # There is deliberately NO ("tiled", "torch")/("tiled", "kornia") entry. Both used to be
-    # exempted here on the grounds that torch/kornia shipped "only in the stare-ml container",
-    # so :tiled was never expected to satisfy the import. containers/tiled now installs both,
-    # which makes that reason false -- and a false exemption is worse than none, because
-    # test_container_installs_what_its_scripts_import `continue`s past an exempted (container,
-    # import) pair and would stop checking a dependency that genuinely has to be there.
+
+# The packages a container must install even though the walker (module-scope only, as of
+# this task) no longer sees them: a script that runs in that image executes the lazy
+# import anyway, because the call reaching it is unconditional on the container's live
+# path. {container: {import_name: reason}}. Each entry is proven still genuine by
+# ``test_required_runtime_imports_are_actually_reached`` below, which walks the container's
+# scripts (and the local modules they import) with an UNRESTRICTED ``ast.walk`` -- the
+# traversal ``_third_party_imports`` deliberately no longer performs -- looking for a
+# nested import of that exact name. An entry whose import no longer exists anywhere is
+# stale and fails there rather than silently permitting a container to skip installing
+# something nothing in it needs any more.
+#
+# This replaces ``UNREACHABLE_IMPORTS``, which inverted the same problem: it named every
+# (container, import) pair the OLD unrestricted walker over-reported and asserted each was
+# unreachable. Fixing the walker made the whole allowlist redundant for the writer-only
+# bioio/h5py cases (ome_io.py's reader-dispatch functions -- _open_bioio, read_info's h5py
+# branch -- are simply invisible to a module-scope walk now), but it also means the walker
+# no longer POSITIVELY requires bioio/h5py for containers/convert, where the lazy import
+# genuinely runs every time CONVERT_IMAGE handles anything but tifffile/HDF5. This table is
+# what still catches that, and the small number of other containers whose OWN scripts (read,
+# not copied from the old allowlist) execute a lazy import unconditionally on their one job.
+REQUIRED_RUNTIME_IMPORTS = {
+    "convert": {
+        "bioio": (
+            "bin/convert_image.py routes every non-tifffile/non-HDF5 format through "
+            "ome_io.detect_reader -> require_reader('bioio') -> _open_bioio; the lazy "
+            "import runs on every .czi/.nd2/.lif/... slide."
+        ),
+        "h5py": "ome_io.read_info's HDF5 branch; CONVERT_IMAGE accepts .h5/.hdf5 inputs.",
+    },
+    "tiled": {
+        "torch": (
+            "bin/utils/coarse_align.py's estimate_rigid -- tiled_coarse.py's single "
+            "coarse-alignment entry point -- calls _frontend_disk_lightglue "
+            "unconditionally, which imports torch lazily (confined there by "
+            "test_tiled_container_torch_kornia_imports_are_confined_to_disk_lightglue "
+            "below). requirements/torch-cpu.txt installs the CPU wheel."
+        ),
+        "kornia": (
+            "same _frontend_disk_lightglue call as torch above (DISK+LightGlue feature "
+            "matching); requirements/kornia.txt installs it, deliberately AFTER torch "
+            "(see containers/tiled/Dockerfile's ordering note -- kornia drags the CUDA "
+            "torch wheel from PyPI otherwise)."
+        ),
+        "zarr": (
+            "bin/utils/tiled_io.py's open_lazy (tifffile's aszarr region-read view) is "
+            "called directly by tiled_coarse.py, tiled_reg_tile.py and tiled_stitch.py "
+            "for every streamed tile read."
+        ),
+        "scipy": (
+            "bin/utils/tile_residual.py's residual_displacement -- called from "
+            "tiled_reg_tile.py's main flow -- imports scipy.ndimage.gaussian_filter."
+        ),
+        "skimage": (
+            "bin/utils/tile_residual.py's foreground_fraction/residual_displacement "
+            "(both called from tiled_reg_tile.py) import skimage.filters/.registration."
+        ),
+    },
+    "cellsam": {
+        "cellSAM": (
+            "segment_cellsam.py's segmentation call is a lazy "
+            "`from cellSAM import cellsam_pipeline` -- the container's whole reason to "
+            "exist. Installed via git+https://github.com/vanvalenlab/cellSAM.git."
+        ),
+        "zarr": (
+            "segment_cellsam.py imports extract_dapi_channel from "
+            "bin/utils/segment_io.py, whose lazy open_lazy call reads the input image "
+            "via tifffile's zarr view."
+        ),
+    },
+    "instanseg": {
+        "instanseg": (
+            "segment_instantseg.py's segmentation call is a lazy "
+            "`from instanseg import InstanSeg` -- the container's whole reason to "
+            "exist. Installed as instanseg-torch."
+        ),
+    },
+    "stardist": {
+        "zarr": (
+            "segment.py imports extract_dapi_channel from bin/utils/segment_io.py, "
+            "whose lazy open_lazy call reads the input image via tifffile's zarr view."
+        ),
+    },
+    "merge": {
+        "cv2": (
+            "merge_channels_pyramid.py's downsample path lazily imports cv2 (with a "
+            "block-averaging fallback ONLY if the import itself fails); "
+            "requirements/merge.txt installs opencv-python deliberately so that "
+            "fallback is never exercised."
+        ),
+        "zarr": (
+            "merge_channels_pyramid.py calls open_lazy (bin/utils/tiled_io.py) "
+            "directly to stream each channel's pyramid base level."
+        ),
+    },
+    "preprocess": {
+        "zarr": (
+            "apply_basic_profiles.py, split_multichannel.py, tile_for_basic.py and "
+            "generate_preprocess_qc.py each call open_lazy (bin/utils/tiled_io.py) "
+            "directly."
+        ),
+    },
+    "regqc": {
+        "zarr": (
+            "bin/utils/qc.py's create_registration_qc -- generate_registration_qc.py's "
+            "core function -- calls open_lazy directly to stream the "
+            "reference/registered pair."
+        ),
+    },
+    "segeval": {
+        "matplotlib": (
+            "the vendored CSE source runs `import matplotlib.pyplot as plt` at the top "
+            "of functions.py's foreground_separation() and never touches `plt` -- dead "
+            "in upstream CellSegmentationEvaluator 1.5.19, but the import still "
+            "EXECUTES, and single_method_eval.py's main evaluation path calls "
+            "foreground_separation(). See requirements/segeval.txt's own comment: "
+            "without matplotlib the image builds clean and then dies with "
+            "ModuleNotFoundError the first time CSE scores a mask."
+        ),
+    },
+    "spatialdata": {
+        "spatialdata": (
+            "export_spatialdata.py's build_spatialdata assembles the SpatialData "
+            "object via a lazy `from spatialdata import SpatialData` -- this "
+            "container's whole reason to exist."
+        ),
+        "anndata": "the AnnData table assembly (build_spatialdata's live path) lazily imports anndata.",
+        "geopandas": "the mask-to-shapes conversion lazily imports geopandas (GeoParquet-backed shapes).",
+        "shapely": "the same mask-to-shapes conversion lazily imports shapely.geometry.Polygon.",
+        "dask": "the pyramid rechunk helpers lazily import dask.array for the lazy chunked pyramid read.",
+        "scipy": (
+            "the QC-residual -> cell_mask spatial join lazily imports "
+            "scipy.spatial.cKDTree, executed before its early-return guard."
+        ),
+    },
+    # Add any other container whose scripts genuinely execute a lazy import at runtime.
+    # Derive by reading the scripts, not by copying an old allowlist inverted -- every
+    # entry above was confirmed by finding the actual call site on that container's live
+    # path, not by assuming a nested import always runs.
 }
 
 
-def test_unreachable_import_exemptions_are_still_unreachable():
-    """The premise of every UNREACHABLE_IMPORTS entry, checked rather than trusted.
+@pytest.mark.parametrize(
+    "container,name",
+    sorted(
+        (container, name)
+        for container, imports in REQUIRED_RUNTIME_IMPORTS.items()
+        for name in imports
+    ),
+)
+def test_required_runtime_imports_are_actually_reached(container, name):
+    """The premise of every REQUIRED_RUNTIME_IMPORTS entry, checked rather than trusted.
 
-    An exemption that outlives its reason is worse than no exemption: it silently permits the
-    exact runtime ImportError the guard exists to catch. containers/segeval has already shipped
-    one of those -- matplotlib is imported on the live path by the same vendored file.
+    Walks WITH plain ``ast.walk`` (the traversal ``_third_party_imports`` deliberately no
+    longer performs) over every local file reachable from the container's scripts, looking
+    for a nested import of ``name``. An entry whose import no longer exists anywhere is
+    stale: it would silently let the container drop a dependency nothing in it needs any
+    more, and is exactly the shape of exemption-outliving-its-reason this file has
+    already shipped once (containers/segeval's aicsimageio, which was NEVER reached --
+    the opposite failure this test exists to catch on the other side).
     """
-    dead = ("get_voxel_volume", "get_pixel_area")
-    callers = []
-    for path in (REPO / "bin").rglob("*.py"):
-        for lineno, line in enumerate(path.read_text().splitlines(), 1):
-            code = line.split("#", 1)[0]
-            for fn in dead:
-                if f"{fn}(" in code and not code.lstrip().startswith("def "):
-                    callers.append(f"{path.relative_to(REPO)}:{lineno}")
-    assert not callers, (
-        "UNREACHABLE_IMPORTS exempts containers/segeval from installing aicsimageio because "
-        f"{' / '.join(dead)} are never called -- but they are, at {callers}. The lazy "
-        "`from aicsimageio import AICSImage` inside them now executes, so segeval must install "
-        "aicsimageio (or the call must go)."
+    scripts = sorted(_module_container_and_scripts().get(container, set()))
+    assert scripts, (
+        f"REQUIRED_RUNTIME_IMPORTS names {container!r}, which owns no scripts in "
+        "_module_container_and_scripts() -- nothing to check this exemption against."
     )
-
-
-def test_ome_io_reader_dispatch_is_unreachable_from_the_writer_only_scripts():
-    """The premise behind every (preprocess|tiled|merge|stardist|cellsam|instanseg|quantify,
-    bioio|h5py) exemption above.
-
-    Each script below imports something from bin/utils/ome_io.py -- directly (write_tiff)
-    or transitively, through image_utils.py's own `from ome_io import write_tiff` -- which
-    is the write seam, never the read one. That module's ONLY bioio/h5py imports are lazy,
-    inside its reader-dispatch functions (detect_reader/require_reader/read_info/read_plane
-    and the private helpers they call). If any of these scripts starts calling one of those
-    names, this fails and the exemption must be reconsidered rather than assumed to still
-    hold.
-
-    NOT checked here: utils/qc.py and generate_registration_qc.py. Plan 08's before/after
-    panel made create_registration_qc call read_info/read_plane directly for the native
-    plane, so the "never calls a reader-dispatch name" premise this test checks is no longer
-    true for those two -- see test_qc_reader_dispatch_stays_tifffile_only and
-    _QC_READER_DISPATCH_STAYS_TIFFFILE_ONLY for the (regqc, bioio) exemption's own, narrower
-    claim instead.
-    """
-    dispatch_names = ("detect_reader", "require_reader", "read_info", "read_plane")
-    writer_only_scripts = (
-        "apply_basic_profiles.py",
-        "tiled_stitch.py",
-        "merge_channels_pyramid.py",
-        "extract_mask_series.py",
-        "segment.py",
-        "segment_cellsam.py",
-        "segment_instantseg.py",
-        "split_multichannel.py",
-        "tile_for_basic.py",
-        "utils/image_utils.py",
-        # The three ENTRY scripts the quantify exemption comments above actually name as the
-        # reason (they reach ome_io only transitively, through utils/image_utils.py) --
-        # checked directly rather than assumed, so a dispatch call added straight to one of
-        # these would be caught here too, not just in the module it currently reaches ome_io
-        # through.
-        "quantify.py",
-        "export_geojson.py",
-        "extract_cell_properties.py",
+    all_files, seen_paths, local_files, local_pkgs = [], set(), {}, set()
+    for script in scripts:
+        files, local_files, local_pkgs = _reachable_local_files(script)
+        for path in files:
+            if path not in seen_paths:
+                seen_paths.add(path)
+                all_files.append(path)
+    reached = any(
+        name in _import_names(node, local_files, local_pkgs)
+        for path in all_files
+        for node in ast.walk(ast.parse(path.read_text()))
     )
-    callers = []
-    for rel in writer_only_scripts:
-        path = REPO / "bin" / rel
-        for lineno, line in enumerate(path.read_text().splitlines(), 1):
-            code = line.split("#", 1)[0]
-            for fn in dispatch_names:
-                if f"{fn}(" in code:
-                    callers.append(f"{rel}:{lineno} ({fn})")
-    assert not callers, (
-        "UNREACHABLE_IMPORTS exempts containers/preprocess, containers/tiled, "
-        "containers/merge, containers/stardist, containers/cellsam, containers/instanseg "
-        "and containers/quantify from installing bioio/h5py because none "
-        f"of {writer_only_scripts} call ome_io's reader-dispatch functions -- but they now "
-        f"do, at {callers}. The lazy bioio/h5py imports inside those functions now execute, "
-        "so the affected container must install bioio/h5py (or the call must go)."
+    assert reached, (
+        f"REQUIRED_RUNTIME_IMPORTS[{container!r}][{name!r}] names an import that no "
+        f"script in {scripts} (or a local module one of them imports) contains any "
+        "more -- the exemption has outlived its reason and must be removed."
     )
 
 
 def test_qc_reader_dispatch_stays_tifffile_only():
-    """The premise behind the (regqc, bioio) exemption -- see
-    _QC_READER_DISPATCH_STAYS_TIFFFILE_ONLY.
+    """Why containers/regqc needs no bioio even though bin/utils/qc.py CALLS ome_io's readers.
 
-    Unlike the writer-only scripts test_ome_io_reader_dispatch_is_unreachable_from_the_writer_
-    only_scripts checks, bin/utils/qc.py DOES call ome_io's reader-dispatch functions (plan
-    08's before/after panel reads the native pre-registration plane through
-    ome_io.read_info/read_plane). What keeps containers/regqc from needing bioio is narrower:
-    those two functions only reach _open_bioio (the lazy `import bioio`) for a path outside
-    ome_io._TIFFFILE_READABLE, and every path qc.py ever calls them with is one of this
-    pipeline's own .ome.tif/.ome.tiff intermediates. This test pins both halves of that claim
-    so a change to either -- qc.py OR generate_registration_qc.py calling a riskier dispatch
-    name, or the pipeline's own producers drifting off the .ome.tif convention -- fails here
-    rather than silently invalidating the exemption.
+    The module-scope walker never sees ome_io's lazy `import bioio` (it is inside
+    _open_bioio), and REQUIRED_RUNTIME_IMPORTS deliberately lists no bioio for regqc. That
+    is only right because of a narrower claim this test pins: qc.py's create_registration_qc
+    (plan 08's before/after panel) reaches read_info/read_plane, and those two reach
+    _open_bioio ONLY for a path outside ome_io._TIFFFILE_READABLE -- while every path qc.py
+    ever calls them with is one of this pipeline's own .ome.tif/.ome.tiff intermediates. Both
+    halves are asserted here so a change to either -- qc.py OR generate_registration_qc.py
+    calling a riskier dispatch name (require_reader), or the producers drifting off the
+    .ome.tif convention -- fails here rather than silently making the omission wrong.
 
     The dispatch-name scan covers BOTH bin/utils/qc.py and bin/generate_registration_qc.py:
-    the latter was dropped from test_ome_io_reader_dispatch_is_unreachable_from_the_writer_
-    only_scripts's writer_only_scripts tuple alongside qc.py (it imports qc.py, so the same
-    premise no longer holds for it either), but nothing else was scanning it for a dispatch
-    call added directly to the CLI script itself.
+    the CLI script imports qc.py, and nothing else scans it for a dispatch call added to the
+    CLI directly.
     """
     called = {}
     for rel in ("utils/qc.py", "generate_registration_qc.py"):
@@ -704,9 +808,9 @@ def test_qc_reader_dispatch_stays_tifffile_only():
                     found.add(fn)
         called[rel] = found
     assert called["utils/qc.py"], (
-        "qc.py no longer calls any ome_io reader-dispatch function -- the (regqc, bioio) "
-        "exemption should go back to _OME_IO_READER_DISPATCH_UNREACHABLE (the same claim as "
-        "the other seven containers), and this test (now vacuous) should be removed."
+        "qc.py no longer calls any ome_io reader-dispatch function -- regqc's bioio omission "
+        "is then covered by the module-scope walker alone, and this test (now vacuous) "
+        "should be removed."
     )
     # detect_reader is pure extension-sniffing (no import); require_reader is what a NEW,
     # riskier read path would call to force a specific backend. Neither is what
@@ -802,17 +906,19 @@ def test_tiled_container_torch_kornia_imports_are_confined_to_disk_lightglue():
     """torch/kornia must be imported ONLY inside ``_frontend_disk_lightglue``, never at module
     scope.
 
-    This began as the premise behind two now-deleted UNREACHABLE_IMPORTS entries (torch/kornia
-    used to ship in a separate image, so inside :tiled the import was meant to fail). :tiled
-    now installs both, and the rule survives that change on its own reasoning: ``import torch``
-    at module scope in ``coarse_align.py`` would make the module -- and therefore
-    ``bin/tiled_coarse.py`` -- UNIMPORTABLE anywhere torch is absent. That is not hypothetical.
-    ``coarse_align.py`` is imported by the tiled oracle (``bin/utils/tiled_pipeline.py``) and by
-    this test suite, and it must keep importing on a plain checkout with no ML stack, so that
-    ``estimate_transform_from_matches``, ``normalize_intensity``,
-    ``scale_transform_to_full_res`` and every test that does not touch DISK keep working. It is
-    also what turns a torch-less environment into an actionable RuntimeError at CALL time
-    instead of an ImportError at import time.
+    This began as the premise behind two exemptions from an older allowlist, back when
+    torch/kornia shipped in a separate image and the import inside :tiled was meant to fail.
+    :tiled now installs both (and ``REQUIRED_RUNTIME_IMPORTS["tiled"]`` declares them,
+    proven reached by ``test_required_runtime_imports_are_actually_reached`` above), but this
+    confinement rule survives that change on its OWN reasoning, independent of the walker
+    entirely: ``import torch`` at module scope in ``coarse_align.py`` would make the module --
+    and therefore ``bin/tiled_coarse.py`` -- UNIMPORTABLE anywhere torch is absent. That is not
+    hypothetical. ``coarse_align.py`` is imported by the tiled oracle
+    (``bin/utils/tiled_pipeline.py``) and by this test suite, and it must keep importing on a
+    plain checkout with no ML stack, so that ``estimate_transform_from_matches``,
+    ``normalize_intensity``, ``scale_transform_to_full_res`` and every test that does not touch
+    DISK keep working. It is also what turns a torch-less environment into an actionable
+    RuntimeError at CALL time instead of an ImportError at import time.
 
     The confinement is what lets ``_disk_models`` take the model classes as ARGUMENTS instead
     of importing them; see the comment above it in coarse_align.py.
@@ -838,16 +944,24 @@ def test_container_installs_what_its_scripts_import(container, scripts):
 
     A missing dependency here is invisible at build time and fails at gigapixel scale, after the
     scheduler has already granted the task its memory.
+
+    ``_third_party_imports`` only reports MODULE-SCOPE imports; a container's own lazy
+    (runtime-only) imports are declared in ``REQUIRED_RUNTIME_IMPORTS`` and unioned in here
+    -- attributed to that table rather than to a script, since a lazy import may live in a
+    module none of the container's entry scripts import at module scope either (that is
+    the whole reason it needs declaring instead of being discovered).
     """
     installed = set(_installed(container)) | BASE_IMAGE_PROVIDES.get(container, set())
     missing = {}
     for script in sorted(scripts):
         for name in sorted(_third_party_imports(script)):
-            if (container, name) in UNREACHABLE_IMPORTS:
-                continue
             dist = _IMPORT_TO_DIST.get(name, name).lower()
             if dist not in installed and name.lower() not in installed:
                 missing.setdefault(script, []).append(name)
+    for name in sorted(REQUIRED_RUNTIME_IMPORTS.get(container, {})):
+        dist = _IMPORT_TO_DIST.get(name, name).lower()
+        if dist not in installed and name.lower() not in installed:
+            missing.setdefault("REQUIRED_RUNTIME_IMPORTS", []).append(name)
     assert not missing, (
         f"containers/{container} does not install everything its scripts import: {missing}. "
         f"The script runs in this image, so the import fails at runtime."
