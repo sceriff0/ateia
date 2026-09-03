@@ -85,6 +85,13 @@ tests/test_no_dead_bin_modules.py::test_bin_utils_module_has_a_real_importer[reg
 # --- csbdeep lands in the CI set and this line is deleted, or the case is.
 tests/test_segment_lazy_dapi_read.py::test_segment_py_delegation_is_live_when_importable
 
+# --- R4 (1.0.0): params/test.json is the one preset allowed to bake in site
+# --- sizing -- it pins tiny self-contained ceilings (2 cpus / 6.GB / 6.h) so the
+# --- test suite does not depend on a developer's -c site.config. The other six
+# --- presets are checked by the same parametrised test; this is the one
+# --- permanent, deliberate skip.
+tests/test_param_presets_are_coherent.py::test_a_preset_does_not_bake_in_site_sizing[test.json]
+
 # --- ENVIRONMENT-CONDITIONAL (`?` prefix: suppressed when they fire, exempt from
 # --- the stale-entry check). These six skip in CI's python-tests job, which
 # --- deliberately does not install Nextflow, and do NOT skip on a developer

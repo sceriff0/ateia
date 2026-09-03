@@ -636,4 +636,25 @@
 # new with 4. `pytest --collect-only -q` reports "1820 tests collected", and a
 # full run with MIRAGE_STRICT_SKIPS=1 gives 1807 passed, 13 skipped, 0 failed --
 # 1807 + 13 = 1820. 1797 + 23 = 1820.
-1915
+
+#
+#
+#
+# RE-MEASURED 2026-09-03, release 1.0.0 plan 12 Task 1 (conf/site.config.template
+# becomes the owner of per-site sizing, R4) plus the fix round it triggered. 14
+# new cases: tests/test_site_config_template_sizes_a_run.py is new with 3;
+# tests/test_param_presets_are_coherent.py gained 8
+# (test_a_preset_does_not_bake_in_site_sizing parametrised over 7 presets,
+# test_the_site_sizing_exemption_is_not_stale, and
+# test_backend_prefixes_covers_exactly_the_schema_backends from the fix round's
+# M8); tests/test_parameters_doc_matches_schema.py gained 1
+# (test_every_literal_doc_default_matches_nextflow_config, I4);
+# tests/test_no_cli_boolean_params_in_docs.py gained 1
+# (test_the_detector_recognises_the_equals_form_too, M5).
+# test_a_preset_does_not_bake_in_site_sizing[test.json] is a deliberate,
+# permanent skip (params/test.json intentionally bakes in tiny self-contained
+# ceilings) and is listed in tests/expected_skips.txt so MIRAGE_STRICT_SKIPS
+# does not flag it. `pytest --collect-only -q` reports "1834 tests collected",
+# and a full run with MIRAGE_STRICT_SKIPS=1 gives 1820 passed, 14 skipped, 0
+# failed -- 1820 + 14 = 1834. 1820 + 14 = 1834.
+1929
