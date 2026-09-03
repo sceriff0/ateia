@@ -9,8 +9,10 @@ Creates realistic test data including:
 """
 
 import json
+import struct
 from pathlib import Path
 
+import h5py
 import numpy as np
 import tifffile
 
@@ -1430,6 +1432,120 @@ print("  Created fmt_float32.tiff (float32, single channel)")
     (OUT_DIR / "fmt_bigtiff.ome.tiff").read_bytes()[:100]
 )
 print("  Created fmt_truncated.ome.tiff (first 100 bytes of fmt_bigtiff)")
+
+# 11g. HDF5. bin/convert_image.py's read_image_h5 / _extract_h5_pixel_sizes have
+#      never been exercised by any test. The attribute names below are the ones
+#      that function actually looks for, in its own order of preference:
+#      element_size_um is tried first (the ilastik/Fiji convention, ZYX-ordered,
+#      so the LAST TWO entries are Y and X), and channel_names is read off either
+#      the dataset or the file root. A nested group is used deliberately:
+#      _find_first_image_dataset recurses, and a flat file would not test that.
+_fmt_h5 = np.stack(
+    [
+        _fmt_rng.integers(0, 3000, (64, 64)).astype(np.uint16),
+        _fmt_rng.integers(0, 3000, (64, 64)).astype(np.uint16),
+        _fmt_rng.integers(0, 3000, (64, 64)).astype(np.uint16),
+    ]
+)
+with h5py.File(OUT_DIR / "fmt_image.h5", "w") as _h5:
+    _grp = _h5.create_group("experiment")
+    _ds = _grp.create_dataset("image", data=_fmt_h5)
+    _ds.attrs["element_size_um"] = np.array([1.0, 0.5, 0.5])
+    _ds.attrs["channel_names"] = np.array(["DAPI", "PANCK", "SMA"], dtype=object)
+print("  Created fmt_image.h5 (nested group, element_size_um, channel_names)")
+
+# 11h. NDPI / NDPIS. bin/convert_image.py's parse_ndpis (hand-written INI
+#      parsing) and read_single_ndpi had ZERO tests, and could not have had one
+#      by renaming a TIFF: tifffile picks the NDPI 64-bit-offset format from the
+#      FILE EXTENSION alone (tifffile.py:4317), so a classic TIFF called .ndpi
+#      opens with zero pages and `tf.series[0]` raises IndexError. Measured
+#      2026-09-02.
+#
+#      What tifffile actually expects for an NDPI IFD (tifffile.py:7648-7656):
+#        2-byte tag count
+#        tagno x 12-byte CLASSIC entries
+#        8-byte next-IFD offset
+#        tagno x 4 bytes of value HIGH bits (one uint32 per tag)
+#      plus a 64-bit first-IFD offset in the header. Zeroing the high-bits table
+#      makes every value's 64-bit read equal its 32-bit low word, which is what
+#      makes a small hand-built file legal. Verified to read identically under
+#      tifffile 2024.12.12 (the format-tests env) and 2025.5.10 (the main env).
+#
+#      x_res_per_cm=20000 is exact as a rational and gives read_single_ndpi
+#      exactly 10000/20000 = 0.5 um. A float such as 30769.23 comes back as the
+#      rational (4294967295, 139586) and yields 0.3249978..., which would force
+#      every downstream assertion to be approximate for no reason.
+
+
+def write_minimal_ndpi(path, arr, x_res_per_cm=20000, y_res_per_cm=20000):
+    """Write a minimal single-strip NDPI (classic TIFF with 64-bit IFD offsets).
+
+    ``arr`` must be a 2-D uint16 array. Uncompressed, one strip, twelve tags,
+    all values inline except the two RATIONAL resolutions which sit after the
+    IFD. See the block comment above for the layout and why it cannot be a
+    renamed TIFF.
+    """
+    height, width = arr.shape
+    data = arr.tobytes()
+    data_off = 12  # 'II' + 42 (4 bytes) + an 8-byte first-IFD offset
+    ifd_off = data_off + len(data)
+    tags = [
+        (256, 3, 1, ("short", width)),  # ImageWidth
+        (257, 3, 1, ("short", height)),  # ImageLength
+        (258, 3, 1, ("short", 16)),  # BitsPerSample
+        (259, 3, 1, ("short", 1)),  # Compression = none
+        (262, 3, 1, ("short", 1)),  # PhotometricInterpretation = minisblack
+        (273, 4, 1, ("long", data_off)),  # StripOffsets
+        (277, 3, 1, ("short", 1)),  # SamplesPerPixel
+        (278, 4, 1, ("long", height)),  # RowsPerStrip
+        (279, 4, 1, ("long", len(data))),  # StripByteCounts
+        (282, 5, 1, ("ratx", 0)),  # XResolution
+        (283, 5, 1, ("raty", 0)),  # YResolution
+        (296, 3, 1, ("short", 3)),  # ResolutionUnit = centimetre
+    ]
+    n = len(tags)
+    ifd_size = 2 + n * 12 + 8 + 4 * n
+    ratx_off = ifd_off + ifd_size
+    raty_off = ratx_off + 8
+    entries = b""
+    for tag, typ, count, (kind, value) in tags:
+        if kind == "short":
+            packed = struct.pack("<HH", value, 0)
+        elif kind == "long":
+            packed = struct.pack("<I", value)
+        elif kind == "ratx":
+            packed = struct.pack("<I", ratx_off)
+        else:
+            packed = struct.pack("<I", raty_off)
+        entries += struct.pack("<HHI4s", tag, typ, count, packed)
+    ifd = struct.pack("<H", n) + entries + struct.pack("<Q", 0) + b"\x00" * (4 * n)
+    Path(path).write_bytes(
+        struct.pack("<2sH", b"II", 42)
+        + struct.pack("<Q", ifd_off)
+        + data
+        + ifd
+        + struct.pack("<II", x_res_per_cm, 1)
+        + struct.pack("<II", y_res_per_cm, 1)
+    )
+
+
+write_minimal_ndpi(
+    OUT_DIR / "fmt_cy5.ndpi", _fmt_rng.integers(0, 3000, (64, 64)).astype(np.uint16)
+)
+write_minimal_ndpi(
+    OUT_DIR / "fmt_tritc.ndpi", _fmt_rng.integers(0, 3000, (64, 64)).astype(np.uint16)
+)
+print("  Created fmt_cy5.ndpi and fmt_tritc.ndpi (0.5 um/px, RESUNIT.CENTIMETER)")
+
+# The NDPIS manifest. Its exact key shape ("Image<N>=<basename>") is what
+# parse_ndpis splits on, and the referenced files are resolved against the
+# manifest's own RESOLVED parent directory -- so basenames, never paths.
+with open(OUT_DIR / "fmt_set.ndpis", "w") as f:
+    f.write("[NanoZoomer Digital Pathology Image Set]\n")
+    f.write("NoImages=2\n")
+    f.write("Image0=fmt_cy5.ndpi\n")
+    f.write("Image1=fmt_tritc.ndpi\n")
+print("  Created fmt_set.ndpis (2-channel manifest)")
 
 
 print("\n" + "=" * 70)

@@ -196,6 +196,10 @@ tests/testdata/fmt_rgb.tiff
 tests/testdata/fmt_gray8.tiff
 tests/testdata/fmt_float32.tiff
 tests/testdata/fmt_truncated.ome.tiff
+tests/testdata/fmt_image.h5
+tests/testdata/fmt_cy5.ndpi
+tests/testdata/fmt_tritc.ndpi
+tests/testdata/fmt_set.ndpis
 .superpowers/
 
 # Internal architecture/audit reviews published as Claude Artifacts, not repo docs.

@@ -662,6 +662,29 @@ def _channel_names_from_ome(xml: Optional[str]) -> Optional[List[str]]:
     return named or None
 
 
+def _pixel_size_from_ndpi_resolution_tags(x_res, y_res, res_unit) -> Optional[float]:
+    """The classic-TIFF resolution convention NDPI actually carries, in µm.
+
+    Mirrors ``bin/convert_image.py::read_single_ndpi``'s conversion exactly (RESUNIT 2 =
+    inch, 3 = centimetre; anything else -- including the "no unit" default every plain
+    TIFF this repo writes carries -- means no usable scale). Only reached for
+    ``reader == "tifffile"`` (``.ndpi``/``.ndpis``), which has no OME header to answer
+    ``read_ome_pixel_size`` and no other convention available; see that function's
+    docstring for why it does not read these tags itself.
+    """
+    x_val = x_res[0] / x_res[1] if isinstance(x_res, tuple) else x_res
+    y_val = y_res[0] / y_res[1] if isinstance(y_res, tuple) else y_res
+    if not x_val or not y_val:
+        return None
+    if res_unit == 3:  # centimetre
+        px_x = 10000.0 / x_val
+    elif res_unit == 2:  # inch
+        px_x = 25400.0 / x_val
+    else:
+        return None
+    return px_x
+
+
 def _info_via_tifffile(path: Path, reader: str) -> ImageInfo:
     """``ImageInfo`` for anything opened directly with ``tifffile``, INCLUDING the S->C
     remap this pipeline's contract needs for an interleaved file (RGB and similar).
@@ -686,6 +709,21 @@ def _info_via_tifffile(path: Path, reader: str) -> ImageInfo:
         axes = getattr(series, "axes", None) or ""
         dtype = np.dtype(series.dtype)
         channels = _channel_names_from_ome(getattr(tf, "ome_metadata", None))
+        # NDPI (reader == "tifffile") carries no OME header, only the classic TIFF
+        # XResolution/YResolution/ResolutionUnit tags -- read the RAW values here,
+        # inside the file handle's lifetime, and convert after it closes.
+        resolution_values = None
+        if reader == "tifffile":
+            page0 = tf.pages[0]
+            x_res = page0.tags.get("XResolution")
+            y_res = page0.tags.get("YResolution")
+            res_unit = page0.tags.get("ResolutionUnit")
+            if x_res is not None and y_res is not None:
+                resolution_values = (
+                    x_res.value,
+                    y_res.value,
+                    getattr(res_unit, "value", None),
+                )
 
     channels_are_samples = False
     if "S" in axes and len(axes) == len(shape):
@@ -724,6 +762,8 @@ def _info_via_tifffile(path: Path, reader: str) -> ImageInfo:
 
     px_x, px_y = read_ome_pixel_size(path)
     pixel_size = px_x if px_x is not None else px_y
+    if pixel_size is None and resolution_values is not None:
+        pixel_size = _pixel_size_from_ndpi_resolution_tags(*resolution_values)
 
     return ImageInfo(
         path=path,

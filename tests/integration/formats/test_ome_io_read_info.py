@@ -111,3 +111,37 @@ def test_a_truncated_file_raises_rather_than_returning_a_partial_read():
     slide four processes later."""
     with pytest.raises(Exception):
         ome_io.read_info(_fixture("fmt_truncated.ome.tiff"))
+
+
+def test_an_hdf5_slide_reads_its_shape_channels_and_scale():
+    """read_image_h5 and _extract_h5_pixel_sizes had no test at all. The fixture
+    nests the dataset one group deep on purpose: _find_first_image_dataset
+    recurses, and a flat file would not exercise that."""
+    info = ome_io.read_info(_fixture("fmt_image.h5"))
+    assert info.reader == "hdf5"
+    assert info.shape_cyx == (3, 64, 64)
+    assert info.dtype == np.dtype("uint16")
+    assert list(info.channels) == ["DAPI", "PANCK", "SMA"]
+    # element_size_um is ZYX-ordered: [1.0, 0.5, 0.5] -> Y=0.5, X=0.5.
+    assert info.pixel_size_um == pytest.approx(0.5)
+
+
+def test_a_single_ndpi_reads_through_tifffile_with_its_scan_scale():
+    """.ndpi routes to tifffile, never bioio -- and it cannot be faked by
+    renaming a TIFF (tifffile picks the 64-bit-offset format from the extension
+    alone, giving zero pages). See the generator's write_minimal_ndpi."""
+    info = ome_io.read_info(_fixture("fmt_cy5.ndpi"))
+    assert info.reader == "tifffile"
+    assert info.shape_cyx == (1, 64, 64)
+    assert info.dtype == np.dtype("uint16")
+    # 20000 px/cm at RESUNIT.CENTIMETER -> 10000/20000 = 0.5 um, exactly.
+    assert info.pixel_size_um == pytest.approx(0.5)
+
+
+def test_an_ndpis_manifest_stacks_its_ndpi_files_into_channels():
+    """The manifest is the multi-channel Hamamatsu shape: one .ndpi per channel,
+    stacked into CYX. Its hand-written INI parsing had zero tests."""
+    info = ome_io.read_info(_fixture("fmt_set.ndpis"))
+    assert info.reader == "tifffile"
+    assert info.shape_cyx == (2, 64, 64)
+    assert info.pixel_size_um == pytest.approx(0.5)
