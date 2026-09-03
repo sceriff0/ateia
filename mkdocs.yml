@@ -124,6 +124,7 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Usage: usage.md
+  - Format validation: validation/format_validation.md
   - Pipeline: pipeline.md
   - Parameters: parameters.md
   - Inputs & outputs: outputs.md

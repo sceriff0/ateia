@@ -189,6 +189,14 @@ different kind of image:
 | `segmentation` | `registered_image` | `patient_id`, `is_reference`, `channels` | `<outdir>/csv/registered.csv` |
 | `postprocessing` | `registered_image` | `patient_id`, `is_reference`, `channels`, `cell_mask`, `nuclei_mask` | `<outdir>/csv/segmented.csv` |
 
+### Supported formats {: #supported-formats }
+
+Which formats this pipeline reads, and what each was verified against, is
+recorded in [Format validation](validation/format_validation.md) — synthesised
+fixtures for everything CI can generate (pyramidal OME-TIFF, BigTIFF, RGB,
+8-bit, float32, HDF5, NDPI/NDPIS), and a cluster run against real vendor files
+for the rest.
+
 Example raw samplesheet (`--start preprocessing`):
 
 ```csv

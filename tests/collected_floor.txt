@@ -611,4 +611,11 @@
 # with MIRAGE_STRICT_SKIPS=1 gives 1861 passed, 13 skipped, 0 failed --
 # 1861 + 13 = 1874, up from the prior entry's 1846 (within FLOOR_DRIFT (50),
 # re-ratcheted anyway per instruction rather than left riding inside the band).
-1881
+
+#
+#
+# RE-MEASURED after tests/test_validation_report_is_real.py (Task 14 Step 7):
+# 11 new cases (6 plain functions + the 5-way test_every_vendor_format_has_a_row
+# parametrisation). `pytest --collect-only -q` reports "1885 tests collected",
+# up from the prior entry's 1874. 1874 + 11 = 1885.
+1892

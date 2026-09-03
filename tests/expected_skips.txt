@@ -98,3 +98,17 @@ tests/test_segment_lazy_dapi_read.py::test_segment_py_delegation_is_live_when_im
 ?tests/test_cleanup_validation.py::test_an_unknown_level_names_the_valid_set
 ?tests/test_cleanup_validation.py::test_start_past_preprocessing_at_a_cleaning_level_says_something
 ?tests/test_cleanup_validation.py::test_the_default_path_still_launches
+
+# --- NOT environment-conditional (no `?`): these three skip because
+# --- docs/validation/format_validation.md is in the explicit, honest "pending"
+# --- state (RULING R3 -- the vendor formats need a cluster and private images
+# --- CI never has). That is a property of the REPO's content, the exact case
+# --- this file's own docstring says an unconditional entry is for. Once
+# --- tests/cluster/validate_formats.sh's real output is copied over that file
+# --- (Task 14 Steps 5-7 / tests/cluster/README.md), these three stop skipping
+# --- and start running for real -- at which point these lines match nothing
+# --- and the stale-entry check fails, on purpose, so landing the real evidence
+# --- forces this file to be cleaned up in the same commit.
+tests/test_validation_report_is_real.py::test_the_report_names_the_commit_it_was_produced_from
+tests/test_validation_report_is_real.py::test_the_report_names_the_container_the_probe_ran_in
+tests/test_validation_report_is_real.py::test_the_report_records_at_least_one_successful_conversion
