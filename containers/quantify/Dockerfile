@@ -1,6 +1,11 @@
 
 # Option 1: NVIDIA CUDA base (most reliable)
-FROM nvidia/cuda:12.2.2-devel-ubuntu22.04
+# DIGEST-PINNED (ruling R6). The tag stays for readability; the digest is what makes the
+# build reproducible -- a version tag is republished, so rebuilding from the tag alone can
+# produce a different image than the one that generated the published results. Resolved
+# 2026-09-02; Dependabot updates the digest in place. Guarded by
+# tests/test_base_images_are_digest_pinned.py.
+FROM nvidia/cuda:12.2.2-devel-ubuntu22.04@sha256:ae8a022c02aec945c4f8c52f65deaf535de7abb58e840350d19391ec683f4980
 
 # Install Python and essential tools
 # procps is not optional. Nextflow's task-metrics wrapper hard-exits BEFORE the script

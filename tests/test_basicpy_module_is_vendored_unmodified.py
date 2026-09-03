@@ -49,8 +49,16 @@ import pytest
 MODULE_DIR = Path(__file__).resolve().parent.parent / "modules" / "nf-core" / "basicpy"
 
 # sha256 of the file as vendored. See the provenance note above before changing either.
+#
+# main.nf's digest moved once, deliberately, on 2026-09-02: ruling R6 requires every
+# external runtime `container` directive to be digest-pinned (see
+# tests/test_base_images_are_digest_pinned.py), and this is one of only two such sites
+# outside modules/local/. That is the one exception to "nothing here is patched" this
+# file's own docstring anticipates for "a legitimate upstream re-sync" -- it is not a
+# re-sync, but the same discipline applies: the digest below was updated deliberately,
+# in the same commit as the edit, not drifted into.
 VENDORED_DIGESTS = {
-    "main.nf": "4563de4d07aca2c47f0b0a121dd06e3de4c9b94153a854d7f0636f7d494db025",
+    "main.nf": "1561d5fe21d68eefd34040cccd683a40187089d46d77cb61962bd57d533e3869",
     "meta.yml": "836af09031cba3c0a3c922975cd658d31b302b8a4150ccfc38035d6054feaf8a",
 }
 

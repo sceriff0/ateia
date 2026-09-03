@@ -1,4 +1,9 @@
-FROM ubuntu:22.04
+# DIGEST-PINNED (ruling R6). The tag stays for readability; the digest is what makes the
+# build reproducible -- a version tag is republished, so rebuilding from the tag alone can
+# produce a different image than the one that generated the published results. Resolved
+# 2026-09-02; Dependabot updates the digest in place. Guarded by
+# tests/test_base_images_are_digest_pinned.py.
+FROM ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc
 
 LABEL maintainer="mirage team"
 LABEL description="Docker image for mirage image conversion and illumination-correction tiling"

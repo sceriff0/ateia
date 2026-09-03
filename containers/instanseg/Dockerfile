@@ -1,5 +1,10 @@
 # torch 2.6.0 carries the CVE-2025-32434 fix; cuda11.8 is unchanged.
-FROM pytorch/pytorch:2.6.0-cuda11.8-cudnn9-runtime
+# DIGEST-PINNED (ruling R6). The tag stays for readability; the digest is what makes the
+# build reproducible -- a version tag is republished, so rebuilding from the tag alone can
+# produce a different image than the one that generated the published results. Resolved
+# 2026-09-02; Dependabot updates the digest in place. Guarded by
+# tests/test_base_images_are_digest_pinned.py.
+FROM pytorch/pytorch:2.6.0-cuda11.8-cudnn9-runtime@sha256:2428b92ebbaeceba5572b98c18c8a94e43162bead6e88588ad54471147c58a20
 
 LABEL maintainer="MIRAGE Pipeline"
 LABEL description="InstanSeg segmentation container (PyTorch 2.5.1 + CUDA 12.4)"

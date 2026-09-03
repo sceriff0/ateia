@@ -13,9 +13,13 @@ process REGISTER {
     // patient_id is the grouping key; all_metas carries the per-slide metadata list.
     tag "${patient_id}"
 
-    // VALIS uses the maintained upstream image (linux/amd64); we do not rebuild
-    // it (its from-source libvips build is heavy and not vendored). See containers/README.md.
-    container 'cdgatenbee/valis-wsi:1.0.0'
+    // VALIS uses the maintained upstream image (linux/amd64); we do not rebuild it (its
+    // from-source libvips build is heavy and not vendored). See containers/README.md.
+    // DIGEST-PINNED (ruling R6), digest only and no tag: Apptainer documents an image
+    // reference as NAME[:TAG|@DIGEST] and has known bugs with the combined form, and the
+    // cluster pulls through Singularity. The digest below is cdgatenbee/valis-wsi:1.0.0
+    // as resolved 2026-09-02, and it is the SAME image containers/merge builds FROM.
+    container 'cdgatenbee/valis-wsi@sha256:eac27cc599ae0e54aa01c1bef97538301994ce1abd4da44be3f3130ab85a40e6'
 
     input:
     // Use stageAs to avoid filename collision when reference is included in preproc_files

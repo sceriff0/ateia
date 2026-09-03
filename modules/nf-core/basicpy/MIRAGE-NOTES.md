@@ -3,6 +3,15 @@
 This directory is nf-core/modules' `basicpy` module, copied verbatim. `main.nf` and
 `meta.yml` are byte-for-byte upstream; nothing here is patched.
 
+**One deliberate exception, 2026-09-02: the `container` line's digest.** Ruling R6
+requires every external runtime `container` directive to be pinned by content digest
+(`docker.io/labsyspharm/basicpy-docker-mcmicro@sha256:…`, no tag — see
+`tests/test_base_images_are_digest_pinned.py`), so `main.nf`'s container line carries a
+digest upstream's own file does not. The tag it pins (`1.2.0-patch5`) is unchanged; only
+the digest was added, in a comment-preceded edit, and `tests/test_basicpy_module_is_vendored_unmodified.py`'s
+pinned sha256 for `main.nf` was updated in the same commit. Every other line remains
+byte-for-byte upstream.
+
 Two tests hold that, and it is worth knowing which does what:
 
 * `tests/test_basicpy_module_is_vendored_unmodified.py` pins the **sha256 of each file**,

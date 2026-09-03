@@ -55,8 +55,9 @@ class WarpBackends {
     private static final Map<String, Map> BACKENDS = [
         valis: [
             // Same image as REGISTER's classic path, so the registrar pickle loads and
-            // scikit-image/scipy are present.
-            container   : 'cdgatenbee/valis-wsi:1.0.0',
+            // scikit-image/scipy are present. DIGEST-PINNED (R6) to the same digest
+            // modules/local/register.nf uses: cdgatenbee/valis-wsi:1.0.0 @ 2026-09-02.
+            container   : 'cdgatenbee/valis-wsi@sha256:eac27cc599ae0e54aa01c1bef97538301994ce1abd4da44be3f3130ab85a40e6',
             stages      : ['native', 'rigid', 'non_rigid', 'micro'],
             versionTools: ['valis', 'skimage', 'scipy'],
             flags       : { ctx ->

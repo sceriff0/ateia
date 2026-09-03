@@ -1,7 +1,12 @@
 # torch 2.6.0 is the first release carrying the fix for CVE-2025-32434 (torch.load RCE);
 # cellSAM downloads model weights, so that path is reachable. cuda12.1 is not published for
 # 2.6.0 -- 12.4 is the nearest tag.
-FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
+# DIGEST-PINNED (ruling R6). The tag stays for readability; the digest is what makes the
+# build reproducible -- a version tag is republished, so rebuilding from the tag alone can
+# produce a different image than the one that generated the published results. Resolved
+# 2026-09-02; Dependabot updates the digest in place. Guarded by
+# tests/test_base_images_are_digest_pinned.py.
+FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime@sha256:77f17f843507062875ce8be2a6f76aa6aa3df7f9ef1e31d9d7432f4b0f563dee
 
 # procps is not optional. Nextflow's task-metrics wrapper hard-exits BEFORE the script
 # block when `ps` is absent, and params.enable_trace defaults to true, so every task in

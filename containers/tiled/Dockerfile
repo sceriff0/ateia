@@ -26,7 +26,12 @@
 # TILED_COARSE, and the CPU path must stay correct since the default deployment exercises
 # nothing else. `torch.cuda.is_available()` must report False out of this image; True means
 # the wrong (CUDA) wheel got installed, and the final verification RUN below asserts it.
-FROM python:3.11-slim
+# DIGEST-PINNED (ruling R6). The tag stays for readability; the digest is what makes the
+# build reproducible -- a version tag is republished, so rebuilding from the tag alone can
+# produce a different image than the one that generated the published results. Resolved
+# 2026-09-02; Dependabot updates the digest in place. Guarded by
+# tests/test_base_images_are_digest_pinned.py.
+FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534
 
 # scikit-image / scipy import cleanly on slim with no extra *Python-facing* system libs, but
 # `procps` is not optional: Nextflow's task-metrics wrapper hard-exits BEFORE the script block

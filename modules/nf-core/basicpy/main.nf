@@ -2,7 +2,10 @@ process BASICPY {
     tag "$meta.id"
     label 'process_single'
 
-    container "docker.io/labsyspharm/basicpy-docker-mcmicro:1.2.0-patch5"
+    // DIGEST-PINNED (ruling R6). This is the vendored nf-core module's own
+    // mcmicro-maintained image, docker.io/labsyspharm/basicpy-docker-mcmicro:1.2.0-patch5
+    // as resolved 2026-09-02. Digest only, no tag — see modules/local/register.nf.
+    container "docker.io/labsyspharm/basicpy-docker-mcmicro@sha256:355b14e2ec80b7b152272f333afd47234f007d0d37633b3ec948e87ec2c8e9b4"
 
     input:
     tuple val(meta), path(image)

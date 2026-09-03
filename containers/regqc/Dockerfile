@@ -1,5 +1,10 @@
 # Base image: CUDA 12.2.2 + cuDNN8 + Ubuntu 22.04
-FROM nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04
+# DIGEST-PINNED (ruling R6). The tag stays for readability; the digest is what makes the
+# build reproducible -- a version tag is republished, so rebuilding from the tag alone can
+# produce a different image than the one that generated the published results. Resolved
+# 2026-09-02; Dependabot updates the digest in place. Guarded by
+# tests/test_base_images_are_digest_pinned.py.
+FROM nvidia/cuda:12.2.2-cudnn8-devel-ubuntu22.04@sha256:217134b60289ced62b47463be32584329baf35cb55a9ccda6626b91bd59803be
 
 # Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive

@@ -1,4 +1,9 @@
-FROM tensorflow/tensorflow:2.15.0-gpu-jupyter
+# DIGEST-PINNED (ruling R6). The tag stays for readability; the digest is what makes the
+# build reproducible -- a version tag is republished, so rebuilding from the tag alone can
+# produce a different image than the one that generated the published results. Resolved
+# 2026-09-02; Dependabot updates the digest in place. Guarded by
+# tests/test_base_images_are_digest_pinned.py.
+FROM tensorflow/tensorflow:2.15.0-gpu-jupyter@sha256:2de4ac3c6e8360a1e57b7dc4fca8d061daf7c58b61de31da1f0aca11c18bab32
 
 WORKDIR /workspace
 

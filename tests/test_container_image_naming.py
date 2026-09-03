@@ -49,8 +49,8 @@ PREFIX = "mirage-"
 # hard-exited before the script block and the process failed on every real run. It now uses
 # bolt3x/mirage-preprocess, which six other modules already pull.
 EXTERNAL_ALLOWED = {
-    "cdgatenbee/valis-wsi:1.0.0",
-    "docker.io/labsyspharm/basicpy-docker-mcmicro:1.2.0-patch5",
+    "cdgatenbee/valis-wsi@sha256:eac27cc599ae0e54aa01c1bef97538301994ce1abd4da44be3f3130ab85a40e6",
+    "docker.io/labsyspharm/basicpy-docker-mcmicro@sha256:355b14e2ec80b7b152272f333afd47234f007d0d37633b3ec948e87ec2c8e9b4",
 }
 
 # The retired single-repository name. Nothing may reference it again.

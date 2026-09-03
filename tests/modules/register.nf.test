@@ -409,7 +409,9 @@ nextflow_process {
                 { assert rendered.every { !it.contains('-exec stat -L --printf') },
                     "rendered command still uses the hand-written find: " + rendered.join(' --- ') },
                 // Ruling R6: the image is recorded by the run itself, not only by the trace.
-                { assert rendered.every { it.contains('    container: cdgatenbee/valis-wsi:1.0.0') },
+                // Digest-pinned, no tag (Apptainer/Singularity: NAME[:TAG|@DIGEST], never both) --
+                // see tests/test_base_images_are_digest_pinned.py.
+                { assert rendered.every { it.contains('    container: cdgatenbee/valis-wsi@sha256:eac27cc599ae0e54aa01c1bef97538301994ce1abd4da44be3f3130ab85a40e6') },
                     "rendered command: " + rendered.join(' --- ') },
                 { assert rendered.every { it.contains('valis: $(python -c "import valis;') },
                     "rendered command: " + rendered.join(' --- ') }

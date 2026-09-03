@@ -12,7 +12,12 @@
 # No python-bioformats / javabridge / scyjava — both Glencoe tools are
 # shaded JVM zips; install is `unzip` + symlink, no native compilation.
 
-FROM eclipse-temurin:21-jre-jammy
+# DIGEST-PINNED (ruling R6). The tag stays for readability; the digest is what makes the
+# build reproducible -- a version tag is republished, so rebuilding from the tag alone can
+# produce a different image than the one that generated the published results. Resolved
+# 2026-09-02; Dependabot updates the digest in place. Guarded by
+# tests/test_base_images_are_digest_pinned.py.
+FROM eclipse-temurin:21-jre-jammy@sha256:eebd356ad7358b7094758e5787a6726f332917cfd56feab6457c56dab895cdbf
 
 LABEL maintainer="mirage WSI pipeline"
 LABEL description="Bioformats CONVERT_IMAGE: bioformats2raw + raw2ometiff + tifffile reorder"
