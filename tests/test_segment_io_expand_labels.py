@@ -32,10 +32,17 @@ sys.path.insert(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "utils"
     ),
 )
-pytest.importorskip("dask.array")
-segmentation = pytest.importorskip("skimage.segmentation")
+# "skimage", not "skimage.segmentation": the requirements-guard scan
+# (tests/test_ci_stack_pinned.py) matches importorskip names against DISTRIBUTION names
+# via an exact-string lookup, and a submodule-qualified name matches nothing a
+# requirements file declares -- silently deselecting this whole file in CI. dask needs no
+# importorskip at all: it is installed UNCONDITIONALLY there (see
+# tests/test_convert_lazy_read.py's docstring), and segment_io.py already imports it at
+# module scope, so its absence would be a loud ImportError, not a silent skip.
+pytest.importorskip("skimage")
 
 from segment_io import expand_labels_tiled  # noqa: E402
+from skimage import segmentation  # noqa: E402
 
 
 def _labels(h=64, w=64, n=7, seed=3):
