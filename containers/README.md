@@ -81,8 +81,8 @@ gh workflow run containers.yml --ref <branch> -f version=<tag> -f only=segeval
 > by content digest (`@sha256:…`) as of 2026-09-02 — ruling R6, guarded by
 > `tests/test_base_images_are_digest_pinned.py`. The first-party images themselves are pinned
 > by tag, because a digest cannot exist before `release.yml` has pushed them; their published
-> digests are recorded in the table above so a checkout can be tied to the exact bytes that
-> produced a result.
+> digests are recorded in this table by the release step (`release.yml` → plan 14) once the
+> images are pushed; until then the tag is the identifier.
 
 ## Image mapping
 

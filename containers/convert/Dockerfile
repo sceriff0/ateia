@@ -109,15 +109,13 @@ ENV BIOFORMATS_VERSION=ome:formats-gpl:8.1.1
 # way bin/utils/jvm_cache.py's docstring records: jgo's os.makedirs($HOME/.jgo) raising
 # OSError [Errno 30] Read-only file system.
 #
-# NO CJDK REDIRECT IS NEEDED HERE. scyjava can fetch its own Java runtime through cjdk
-# into ~/.cache/cjdk when no usable JVM is found, but this base already IS a JRE with
-# JAVA_HOME=/opt/java/openjdk set (see the header above), which scyjava's JVM discovery
-# finds and uses directly -- cjdk's fetch path is not expected to run in this image at
-# all, so there is nothing to point at a writable/world-readable location and no
-# `test -d /root/.cache/cjdk` assertion below. If scyjava's discovery order ever changes
-# and cjdk does fire anyway, its cache still lands under $HOME (this bake's HOME=/root)
-# and is still covered by the `chmod -R a+rX /root` below -- just unverified by name,
-# the way /root/.jgo and /root/.m2 are.
+# CJDK DOES FIRE DURING THIS BAKE, MEASURED, DESPITE THE BASE ALREADY HAVING A JRE.
+# JAVA_HOME=/opt/java/openjdk is set (see the header above), and scyjava's JVM discovery
+# finds and uses it directly at runtime -- but Task 13's real build observed cjdk fetching
+# a zulu-jre into ~/.cache/cjdk during the bake step below anyway. That fetched JRE is dead
+# weight at runtime (the base image's own JDK is what actually runs), but it still sits
+# under $HOME (this bake's HOME=/root, so /root/.cache/cjdk), and is covered like
+# /root/.jgo and /root/.m2 by the `chmod -R a+rX /root` below.
 #
 # HOME=/root is the whole mechanism, and it needs no configuration API: scyjava computes
 # its jgo cache_dir and m2_repo from pathlib.Path.home() at import time, so running the

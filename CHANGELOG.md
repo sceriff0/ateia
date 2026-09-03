@@ -472,6 +472,29 @@ after that doc and is detailed inline below:
   TIFF now carry a stamped pixel size (ImageJ `unit=um` metadata on the former,
   OME `PhysicalSizeX/Y` in µm on the latter via `bin/generate_registration_qc.py
   --pixel-size-um`), so a viewer's scale bar on either output is real.
+- **Every `FROM` in `containers/`, and both external runtime images the pipeline pulls
+  (`cdgatenbee/valis-wsi`, `labsyspharm/basicpy-docker-mcmicro`), are pinned by content
+  digest** (R6) — the basicpy digest lives in `conf/modules.config`'s
+  `withName: 'BASICPY'` block; the vendored `modules/nf-core/basicpy` module itself is
+  untouched.
+- **`AGGREGATE_SIZE_LOGS` now runs in `bolt3x/mirage-preprocess`**, replacing a bare
+  `ubuntu:22.04` container.
+- **Every first-party image now installs `procps`.**
+- **`containers/regqc` is stripped to what `GENERATE_REGISTRATION_QC` actually
+  executes** — TensorFlow, StarDist, Miniconda and `bftools` are gone. Dead installs
+  were removed across the other images too, and StarDist's accelerators
+  (`gputools`/`edt`) are pinned.
+- **`containers/convert` installs `bioio-bioformats`, with the Bio-Formats jars baked
+  at build time and the JVM cache redirected off a read-only `$HOME`** on the
+  pipeline's own read path (R2) — `.svs`/`.qptiff`/`.vsi`/`.scn`/`.mrxs`/`.bif`/`.ims`
+  now convert offline.
+- **`requirements/spatialdata.txt` is locked to exact versions resolved on
+  linux/amd64.**
+- **All 11 first-party images carry OCI provenance labels.**
+- **`containers/README.md` is rewritten and pinned to the Dockerfiles by a guard.**
+- **The container-requirements guards now derive from module-scope imports plus a
+  positive `REQUIRED_RUNTIME_IMPORTS` table** — the 16-entry unreachable-import
+  allowlist is gone — and a reverse rule now forbids installing what nothing reaches.
 
 ### Fixed
 - **The resource report is found where Nextflow wrote it.** `main.nf` resolved
@@ -958,6 +981,10 @@ after that doc and is detailed inline below:
   (`tests/test_no_dead_bin_modules.py::test_bin_utils_module_has_a_real_importer[reg_benchmark.py]`,
   `tests/expected_skips.txt`) rather than deleted, since it is still imported by
   `tests/test_reg_benchmark.py` and `tests/test_tiled_fanout.py`.
+- **`segeval_tag` parameter — removed.** The segeval image now follows `manifest.version`
+  like every other first-party image, so there is no separate tag to override. An old
+  `-params-file` that still carries the key now fails schema validation at launch; delete
+  the key rather than updating its value.
 
 ## [1.0.0] - 2026-07-29
 

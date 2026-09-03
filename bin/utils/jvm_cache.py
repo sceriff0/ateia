@@ -5,14 +5,21 @@ valis install, and so it can be called from any entrypoint before the JVM starts
 
 Why this exists
 ---------------
-The distributed registration image pins ``scyjava<1.11`` (see containers/valis/Dockerfile).
-That scyjava computes its jgo ``cache_dir`` and Maven ``m2_repo`` from ``pathlib.Path.home()``
-at *import time* and passes them **explicitly** into ``jgo.resolve_dependencies``
-(in scyjava's config and _jvm modules). It never consults the ``JGO_CACHE_DIR`` / ``M2_REPO``
-environment variables — so setting those (e.g. the Dockerfile ENV) has no effect on where the
-JVM cache lands. On an HPC compute node ``$HOME`` (e.g. ``/hpcnfs/...``) is a read-only mount, so
-jgo's first-run ``os.makedirs($HOME/.jgo)`` dies with ``OSError [Errno 30] Read-only file system``
-before the JVM can start — the REG_PREP / REG_MICRO_PREP / REG_FINALIZE crash.
+Two real consumers pin scyjava for two different reasons. The VALIS runtime path
+(``bin/utils/valis_config.py``, running in the external ``cdgatenbee/valis-wsi`` image) pins
+``scyjava<1.11``: that scyjava computes its jgo ``cache_dir`` and Maven ``m2_repo`` from
+``pathlib.Path.home()`` at *import time* and passes them **explicitly** into
+``jgo.resolve_dependencies`` (in scyjava's config and _jvm modules). It never consults the
+``JGO_CACHE_DIR`` / ``M2_REPO`` environment variables — so setting those (e.g. the Dockerfile ENV)
+has no effect on where the JVM cache lands. On an HPC compute node ``$HOME`` (e.g.
+``/hpcnfs/...``) is a read-only mount, so jgo's first-run ``os.makedirs($HOME/.jgo)`` dies with
+``OSError [Errno 30] Read-only file system`` before the JVM can start — the REG_PREP /
+REG_MICRO_PREP / REG_FINALIZE crash.
+
+The convert path (``bin/utils/ome_io._open_bioio`` / ``bin/convert_image.py``,
+``containers/convert``) runs scyjava 1.12.5 instead, where
+``scyjava.config.set_cache_dir``/``set_m2_repo`` are verified present — confirmed by the Task 13
+build — so the same timing-immune lever below applies to both consumers despite the version gap.
 
 The timing-immune lever is ``scyjava.config.set_cache_dir`` / ``set_m2_repo``: they overwrite the
 frozen module globals that ``get_cache_dir()`` returns, regardless of when scyjava was imported.

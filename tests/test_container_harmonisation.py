@@ -78,7 +78,7 @@ def _read_constraints(path=CONSTRAINTS):
     """
     out = {}
     for raw in path.read_text().splitlines():
-        line = raw.split("#", 1)[0].strip()
+        line = strip_line_comment(raw).strip()
         if not line or line.startswith("-"):
             continue
         parsed = _parse_req(line)
@@ -240,7 +240,7 @@ def _dockerfile_pip_tokens(text):
 def _requirements_tokens(path):
     tokens = []
     for line in path.read_text().splitlines():
-        stripped = line.split("#")[0].split(";")[0].strip()
+        stripped = strip_line_comment(line).split(";")[0].strip()
         if stripped:
             tokens.append(stripped)
     return tokens
@@ -345,6 +345,8 @@ def test_no_forbidden_package_reappears(container):
     # EXPLAINING why a package was removed -- quoting the import line it used to have -- reads as
     # a reinstall and fails the guard. That is backwards: it pressures the next person to delete
     # the rationale rather than keep it. Both Dockerfiles and requirements files comment with `#`.
+    # Deliberately the naive split, not `strip_line_comment`: a NEGATIVE rule stays comment-visible
+    # (CLAUDE.md verification-reality item 7's `test_ci_stack_pinned.py` exception), unlike item 4's swap above.
     text = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
     back = sorted(
         {f for f in FORBIDDEN if re.search(rf"(?m)^\s*{f}\b|[\s\\]{f}[=\s\\]", text)}
