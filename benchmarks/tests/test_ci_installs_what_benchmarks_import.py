@@ -14,10 +14,11 @@ ONE LEG now: benchmarks/ itself, TOP-LEVEL imports only. An import inside a func
 deliberate optional dependency (bin/utils/coarse_align.py's torch/kornia block is the
 pattern) and is allowed to be absent; a top-level one kills collection.
 
-There used to be a SECOND leg -- bin/tiled_{coarse,reg_tile,solve}.py, which
-stare_bench/run_unit.py shelled out to, scanned at EVERY import level because those
-scripts were EXECUTED BARE IN CI. It went with that rung; see the long note above
-_installed_distributions for why re-pointing it at benchmarks/run_ashlar_arm.sh is wrong,
+There used to be a SECOND leg -- bin/tiled_{coarse,reg_tile,solve}.py, which the
+deleted synthetic ground-truth rung's run script shelled out to, scanned at EVERY
+import level because those scripts were EXECUTED BARE IN CI. It went with that
+rung; see the long note above _installed_distributions for why re-pointing it
+at benchmarks/run_ashlar_arm.sh is wrong,
 and for the zarr failure that makes the every-level scan worth restoring if a benchmarks/
 test ever executes a bin/ script in CI again.
 """
@@ -158,11 +159,11 @@ def _bin_module_path(name: str) -> Path | None:
 
 # THE SUBPROCESS LEG IS GONE, AND MUST NOT BE RE-ADDED IN THIS SHAPE.
 #
-# It scanned bin/tiled_{coarse,reg_tile,solve}.py -- the pipeline entry points
-# stare_bench/run_unit.py (since deleted) shelled out to -- at EVERY import level, because
-# those scripts were EXECUTED BARE IN CI and bin/utils/tiled_io.py imports zarr inside a
-# function. That premise died with the stare_bench rung: nothing under benchmarks/ runs a
-# pipeline entry point in CI any more.
+# It scanned bin/tiled_{coarse,reg_tile,solve}.py -- the pipeline entry points the
+# deleted synthetic ground-truth rung's run script (since deleted) shelled out to --
+# at EVERY import level, because those scripts were EXECUTED BARE IN CI and
+# bin/utils/tiled_io.py imports zarr inside a function. That premise died with the
+# rung's removal: nothing under benchmarks/ runs a pipeline entry point in CI any more.
 #
 # The one remaining subprocess caller is benchmarks/run_ashlar_arm.sh (warp_seg_qc.py),
 # and it runs ON THE CLUSTER, INSIDE CONTAINERS -- QC_EXEC selects the pipeline's tiled

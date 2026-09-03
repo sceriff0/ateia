@@ -17,8 +17,14 @@ as tests/test_no_legacy_frontends.py.
 NARROW, in one specific way: `acrobat` is NOT forbidden as a bare word.
 `bin/utils/coarse_align.py` describes DISK+LightGlue as "the learned matcher
 VALIS and the ACROBAT winners use" -- correct provenance for the front-end that
-actually ships, and CHANGELOG.md repeats it. What is forbidden is a PATH into a
-deleted harness, and the two dataset names as a source of data.
+actually ships, and CHANGELOG.md repeats it. What IS forbidden: a PATH into a
+deleted harness; the two dataset names as a source of data; and, WIDENED from a
+path-only check, a bare (word-bounded) reference to either harness by name
+(`registration_eval`, `stare_bench`) or to `registration_eval`'s own tools
+(`aggregate_eval`, `prepare_pairs.py`, `run_registration.sh`) -- a prose sentence
+naming one of these without the `benchmarks/` path prefix used to slip past the
+path-only PATTERN, which is exactly how a LIVE instruction ("registration_eval
+reads the registered slides...") survived in benchmarks/configs/sweep.yaml.
 """
 
 import re
@@ -27,10 +33,17 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 
-# A path into a deleted harness, or a dataset named as a data source.
+# A path into a deleted harness, a bare reference to either deleted harness or
+# its scripts (aggregate_eval.py, prepare_pairs.py, run_registration.sh --
+# registration_eval's own tools), or a dataset named as a data source.
 PATTERN = re.compile(
     r"benchmarks/registration_eval"
     r"|benchmarks/stare_bench"
+    r"|\bregistration_eval\b"
+    r"|\bstare_bench\b"
+    r"|\baggregate_eval\b"
+    r"|\bprepare_pairs\.py"
+    r"|\brun_registration\.sh"
     r"|(?<![A-Za-z0-9])anhir(?![A-Za-z0-9])"
     r"|(?:ANHIR\s*/\s*ACROBAT)",
     re.I,

@@ -19,7 +19,7 @@
 # scored by the PIPELINE'S OWN reg_qc=2 seg-overlap scorer, on the SAME nuclei,
 # into the SAME tree. Same metric family, same columns, one layout. Scored any
 # other way it lands in a different metric family that shares no column with the
-# arm table, which is what the deleted stare_bench rung did.
+# arm table, which is what the deleted synthetic ground-truth rung did.
 #
 # THE NUCLEI ARE REUSED, NOT RE-SEGMENTED. seg_qc.nf segments the NATIVE slides,
 # so its geojsons are identical across registration arms sharing a seg_method.

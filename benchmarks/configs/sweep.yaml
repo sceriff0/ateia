@@ -219,8 +219,9 @@ baseline:
                                       # 'segmentation' is an INTERMEDIATE kind (Layout.FINAL_KINDS),
                                       # so at the shipped default those masks are never published and
                                       # the cell-count metric silently returns no rows while every run
-                                      # exits 0. registration_eval reads the registered slides for the
-                                      # same reason. Sweeping this would not measure a cheaper
+                                      # exits 0. The (now-removed) ground-truth registration-accuracy
+                                      # harness read the registered slides for the same reason.
+                                      # Sweeping this would not measure a cheaper
                                       # pipeline, it would measure a broken analysis.
                                       #
                                       # The publish I/O 'final' saves is real and worth measuring one

@@ -44,8 +44,8 @@ concurrency:
 jobs:
   benchmarks:
     runs-on: ubuntu-latest
-    # 15, down from 60. The 60 was sized for the stare_bench unit rung, which ran the
-    # DISK+LightGlue COARSE front-end on CPU (23m33s locally). That rung is deleted; what
+    # 15, down from 60. The 60 was sized for the deleted synthetic ground-truth unit
+    # rung, which ran the DISK+LightGlue COARSE front-end on CPU (23m33s locally). What
     # remains is the plan/analysis layer on tiny synthetic fixtures, ~5s locally. Left
     # well above the measured time so an under-provisioned runner does not flake, but low
     # enough that a hang fails in minutes instead of an hour.
@@ -62,10 +62,11 @@ jobs:
       # `-r segeval.txt`, and the guard named in the header keeps them in step.
       #
       # torch + kornia + zarr/numcodecs/imagecodecs are not needed here -- they went
-      # with the stare_bench rung, which drove bin/tiled_*.py IN-PROCESS, outside any
-      # container. Nothing under benchmarks/ executes a pipeline entry point in CI any
-      # more. benchmarks/run_ashlar_arm.sh does, but it runs on the cluster inside the
-      # images that already carry those deps -- see the note in the test file.
+      # with the deleted synthetic ground-truth rung, which drove bin/tiled_*.py
+      # IN-PROCESS, outside any container. Nothing under benchmarks/ executes a
+      # pipeline entry point in CI any more. benchmarks/run_ashlar_arm.sh does, but
+      # it runs on the cluster inside the images that already carry those deps --
+      # see the note in the test file.
       # (requirements/ci.txt pulls zarr in anyway via `-r tiled.txt`; that is the cost
       # of reading one shared file instead of maintaining a seventh pin list.)
       - name: Install

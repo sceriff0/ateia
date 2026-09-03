@@ -150,8 +150,8 @@ def _external_arms(cfg: dict) -> list[dict]:
     ihc_method's readers pick it up with no path added.
 
     That is strictly stronger than scoring it in its own harness against synthetic
-    ground truth, which is what the deleted stare_bench rung did: those numbers shared
-    no column with this table and could not be ranked against it.
+    ground truth, which is what the deleted synthetic ground-truth rung did: those
+    numbers shared no column with this table and could not be ranked against it.
 
     THE ROWS CARRY NO PIPELINE PARAMS. registration_method/memory_mode/reg_micro_reg/
     reg_tiled_mode are all blank, because nothing here reaches validateParameters() --
