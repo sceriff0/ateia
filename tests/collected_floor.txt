@@ -682,4 +682,14 @@
 # coherence, parameters.md-vs-schema), the cases widening the CLI-boolean
 # guard to configs and to the bare form, and one BLOCKING_CHECKS
 # parametrisation for the mkdocs job.
-1934
+#
+# RE-MEASURED 2026-09-04, release 1.0.0 plan 14 Task 2 (collapse the two 1.0.0
+# CHANGELOG.md sections into one dated release). Four new cases, all in the new
+# tests/test_changelog_is_release_shaped.py (test_no_version_has_two_sections,
+# test_the_manifest_version_has_a_dated_section, test_an_unreleased_section_exists,
+# test_every_heading_has_a_link_definition); no deletions, no other test count
+# moved. Measured after generating the fixtures, with the suite's standard
+# exclusions: `pytest --collect-only -q` reports "1938 tests collected", and a
+# full run with MIRAGE_STRICT_SKIPS=1 gives 1921 passed, 17 skipped, 0 failed --
+# 1921 + 17 = 1938. 1934 + 4 = 1938.
+1938

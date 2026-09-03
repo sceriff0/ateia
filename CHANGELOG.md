@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.0.0] - 2026-09-04
+
 ### Migration — read before comparing any output across this release
 
 Seven changes alter what a run produces or what its outputs MEAN, and every one of
@@ -1075,13 +1079,7 @@ after that doc and is detailed inline below:
   already holds. `.gitignore` keeps the filename listed so a stray re-creation cannot
   become a tracked figure by accident.
 
-## [1.0.0] - 2026-07-29
-
-First public release. End-to-end multiplex WSI processing: preprocessing, registration,
-segmentation, per-cell quantification, and QuPath-compatible GeoJSON + pyramidal
-OME-TIFF export.
-
-### Added
+### The 1.0.0 feature set
 - **Preprocessing** — BaSiC illumination correction with FOV tiling; Bio-Formats/ND2 →
   OME-TIFF conversion; multi-channel parallel processing.
 - **Registration** — two backends selected by `--registration_method`:
@@ -1091,14 +1089,15 @@ OME-TIFF export.
     (`reg_tiled_*` params), usable on a laptop.
 - **Staged registration QC** (`reg_qc` = 0/1/2) — DAPI overlay plus segmentation-overlap
   dice/displacement attributed per registration stage.
-- **Segmentation** — three backends via `--seg_method`: StarDist (default), InstanSeg,
+- **Segmentation** — three backends via `--seg_method`: InstanSeg (default), StarDist,
   and CellSAM; GPU or CPU; configurable nuclei→whole-cell expansion.
 - **Quantification** — per-cell morphology and per-channel intensity; optional
   per-compartment (Nucleus / Cytoplasm / Cell) signal and expanded Mean/Sum statistics.
 - **Reference-free segmentation-quality evaluation** — CellSegmentationEvaluator
   `QualityScore` with a `cse_max_pixels` downsample cap.
 - **Export** — QuPath-compatible `cells.geojson` and pyramidal OME-TIFF; configurable
-  contour simplification (`simplify_tolerance`) and coordinate precision.
+  contour simplification (`simplify_tolerance`) and coordinate precision; an additive
+  scverse-native SpatialData `.zarr` store, written by default.
 - **Incremental cyclic-IF** (`--mode add_cycle`) — fold a new imaging cycle into a
   completed patient run, reusing the prior reference, segmentation mask, and old-marker
   quantification; recomputes only the new cycle.
@@ -1110,4 +1109,5 @@ OME-TIFF export.
 - Per-process version tracking, aggregated QC report, and computational-resource report.
 - JSON-schema parameter definitions plus Groovy validation utilities.
 
+[Unreleased]: https://github.com/sceriff0/mirage/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/sceriff0/mirage/releases/tag/v1.0.0
