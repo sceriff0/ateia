@@ -280,6 +280,29 @@ run_test \
     "" \
     --start preprocessing
 
+# Test 3.7: the warning half of Test 3.6. Accepting an unknown column silently is
+# the failure this pair exists to close, so "it ran" is not the assertion --
+# "the operator was told which columns are ignored" is. run_test's grep is for
+# FAILURE cases only, so this one greps the log directly.
+TESTS_TOTAL=$((TESTS_TOTAL + 1))
+echo -e "${YELLOW}[TEST $TESTS_TOTAL]${NC} Unknown extra columns are NAMED in a warning"
+warn_log="$OUTPUT_DIR/test_${TESTS_TOTAL}.log"
+cd "$PROJECT_ROOT"
+nextflow run main.nf \
+    -params-file "$PARAMS_FILE" \
+    --input "$TESTDATA_DIR/extra_column_input.csv" \
+    --outdir "$OUTPUT_DIR/test_${TESTS_TOTAL}" \
+    --start preprocessing \
+    > "$warn_log" 2>&1 || true
+if grep -q "operator, scan_date" "$warn_log"; then
+    echo -e "${GREEN}✓ PASS${NC} - Unknown columns named in the log"
+    TESTS_PASSED=$((TESTS_PASSED + 1))
+else
+    echo -e "${RED}✗ FAIL${NC} - The run did not name the ignored columns"
+    echo "  Log: $warn_log"
+    TESTS_FAILED=$((TESTS_FAILED + 1))
+fi
+
 echo ""
 echo "=========================================="
 echo "Test Suite: Checkpoint CSV Validation"

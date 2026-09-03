@@ -480,6 +480,46 @@ def checkRegBackends() {
     assert regTableImmutable : 'RegBackends.BACKENDS must be immutable'
 }
 
+// CsvUtils.unknownColumns — report, never reject. Out-of-band like the other
+// check*() functions above: the workflow{} block is already within ~160 bytes
+// of DSL2's 65535-UTF-16-code-unit single-String-constant ceiling (see the file
+// header note), so a new assertion block cannot be inlined there.
+def checkCsvUtilsUnknownColumns() {
+    def unkCsv = File.createTempFile('unknowncols', '.csv')
+    unkCsv.text = '''patient_id,path_to_file,is_reference,channels,operator,scan_date
+P1,/x/a.tiff,true,DAPI|CD3,AB,2026-01-31
+'''
+    assert CsvUtils.unknownColumns(unkCsv.path, 'preprocessing') == ['operator', 'scan_date'] :
+        'unknownColumns must report the unknown columns in header order'
+
+    // A legitimate CHECKPOINT header must warn about nothing: a csv/registered.csv
+    // read by --start segmentation carries id and pixel_size beyond that step's
+    // four required columns. Rejecting -- or even warning about -- those would make
+    // every re-entry noisy, which is how a real warning stops being read.
+    def ckptCsv = File.createTempFile('ckptcols', '.csv')
+    ckptCsv.text = '''patient_id,id,registered_image,is_reference,channels,pixel_size
+P1,P1_ref,/x/a.tiff,true,DAPI|CD3,0.325
+'''
+    assert CsvUtils.unknownColumns(ckptCsv.path, 'segmentation') == [] :
+        'a legitimate checkpoint header must produce no unknown columns'
+
+    // The typo case this exists for: `channles` is unknown, and `channels` being
+    // absent is validateInputCSV's job -- two different messages for two different
+    // mistakes.
+    def typoCsv = File.createTempFile('typocols', '.csv')
+    typoCsv.text = '''patient_id,path_to_file,is_reference,channles
+P1,/x/a.tiff,true,DAPI|CD3
+'''
+    assert CsvUtils.unknownColumns(typoCsv.path, 'preprocessing') == ['channles'] :
+        'unknownColumns must name a mistyped column'
+
+    // An empty file is not a crash: validateInputCSV owns that error.
+    def emptyCsv = File.createTempFile('emptycols', '.csv')
+    emptyCsv.text = ''
+    assert CsvUtils.unknownColumns(emptyCsv.path, 'preprocessing') == [] :
+        'unknownColumns must tolerate an empty file rather than throwing over it'
+}
+
 workflow {
 
     // ------------------------------------------------------------------ //
@@ -1509,6 +1549,10 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     // RegBackends — the registration backend's identity, in one table.
     // See checkRegBackends() above the workflow block.
     checkRegBackends()
+
+    // CsvUtils.unknownColumns — report, never reject.
+    // See checkCsvUtilsUnknownColumns() above the workflow block.
+    checkCsvUtilsUnknownColumns()
 
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info

@@ -833,6 +833,35 @@ class CsvUtils {
     }
 
     /**
+     * Header columns this pipeline does not read, for a run entering at `step`.
+     *
+     * REPORTED, NEVER REJECTED, and the distinction is load-bearing. A checkpoint
+     * CSV legitimately carries columns the entry step does not read -- a
+     * csv/registered.csv read by `--start segmentation` has `id` and `pixel_size`
+     * beyond that step's four required columns, and a segmented.csv has five more.
+     * Rejecting an unknown column would break re-entry by construction.
+     *
+     * Accepting them SILENTLY is the other failure, and it is the one that bites:
+     * validateInputCSV asserts the required columns are present and ignores
+     * everything else, so a mistyped `channles` sits unnoticed beside a missing
+     * `channels` and the run dies much later, somewhere else, on a null.
+     *
+     * The known set is the union of the entry step's required columns and EVERY
+     * checkpoint step's columns, derived from ParamUtils.STEPS and
+     * Checkpoint.STEPS rather than restated -- so a new column added to either
+     * table stops being "unknown" without anything here changing.
+     *
+     * @return the unknown columns, in header order (empty when there are none)
+     */
+    static List<String> unknownColumns(def csv, String step) {
+        def known = (ParamUtils.requiredColumnsForStep(step) +
+                     Checkpoint.STEPS.collectMany { it.columns }) as Set
+        def lines = readCsvLines(csv)
+        if (lines.isEmpty()) return []
+        return parseCsvLine(lines[0]).findAll { it && !(it in known) }
+    }
+
+    /**
      * Fail-fast semantic validation of the whole samplesheet, run at parse
      * time (and therefore visible under --dry_run). Complements the per-row
      * checks that otherwise only fire later during channel construction.

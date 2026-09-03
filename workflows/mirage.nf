@@ -228,6 +228,17 @@ workflow MIRAGE {
         ParamUtils.requiredColumnsForStep(params.start)
     )
 
+    // Unknown columns are ACCEPTED -- a checkpoint CSV legitimately carries
+    // columns the entry step does not read -- but never silently: a mistyped
+    // 'channles' beside a missing 'channels' otherwise surfaces much later, as a
+    // null, somewhere else. CsvUtils.unknownColumns derives the known set from
+    // ParamUtils.STEPS + Checkpoint.STEPS, so a legitimate checkpoint header
+    // warns about nothing. `log` is bound HERE and nowhere in lib/ or conf/.
+    def unknown_columns = CsvUtils.unknownColumns(params.input, params.start)
+    if (unknown_columns)
+        log.warn "Samplesheet column(s) this pipeline does not read, and will ignore: " +
+                 "${unknown_columns.join(', ')} (in ${params.input})"
+
     // Fail-fast semantic validation (per-row format + per-patient reference
     // counts + file existence). Runs here so it is also exercised by --dry_run.
     // false: on the linear path a patient MUST declare its reference. There is no
