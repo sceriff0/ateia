@@ -147,19 +147,28 @@ If that completes without `FAILED` processes, your installation is sound. (You'l
 
 ## Pre-pulling container images (optional)
 
-The first real run downloads each tool's image, which can take several minutes. Pull them ahead of time to make that first run snappy. MIRAGE uses these images:
+The first real run downloads each tool's image, which can take several minutes. Pull them ahead of time to make that first run snappy. MIRAGE runs eleven first-party images plus one upstream image:
 
 | Image | Used for |
 |---|---|
-| `bolt3x/mirage-*` | preprocessing, segmentation, quantification, export |
-| `cdgatenbee/valis-wsi:1.0.0` | VALIS registration |
+| `bolt3x/mirage-convert:1.0.0` | `CONVERT_IMAGE` (format conversion) |
+| `bolt3x/mirage-preprocess:1.0.0` | illumination correction, preprocessing/postprocessing QC, size-log aggregation |
+| `bolt3x/mirage-quantify:1.0.0` | quantification, property extraction, GeoJSON export, postprocessing QC |
+| `bolt3x/mirage-stardist:1.0.0` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method stardist` |
+| `bolt3x/mirage-instanseg:1.0.0` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method instantseg` (default) |
+| `bolt3x/mirage-cellsam:1.0.0` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method cellsam` |
+| `bolt3x/mirage-merge:1.0.0` | `MERGE_AND_PYRAMID`, `EXTRACT_MASK_SERIES` |
+| `bolt3x/mirage-regqc:1.0.0` | `GENERATE_REGISTRATION_QC` |
+| `bolt3x/mirage-tiled:1.0.0` | the `tiled` (STARE) registration backend, and `WARP_SEG_QC`'s tiled path |
+| `bolt3x/mirage-spatialdata:1.0.0` | `EXPORT_SPATIALDATA` |
+| `bolt3x/mirage-segeval:1.0.0` | `SEG_QUALITY_EVAL`, `MERGE_SEG_EVAL` (opt-in) |
+| `cdgatenbee/valis-wsi@sha256:eac27cc…` (upstream, not vendored) | `REGISTER`, and `WARP_SEG_QC`'s VALIS path |
 
 === "Docker"
 
     ```bash
     docker pull cdgatenbee/valis-wsi:1.0.0
-    # pull the mirage-<component> image your config pins (check conf/modules.config)
-    docker pull bolt3x/mirage-<component>:1.0.0
+    docker pull bolt3x/mirage-<component>:1.0.0   # e.g. convert, preprocess, quantify, tiled...
     ```
 
 === "Singularity / Apptainer"
@@ -169,8 +178,23 @@ The first real run downloads each tool's image, which can take several minutes. 
     singularity pull docker://bolt3x/mirage-<component>:1.0.0
     ```
 
-!!! note "Where tags live"
-    The exact `bolt3x/mirage-<component>` image and version are pinned per-process in `modules/local/*.nf` (and resource overrides in `conf/modules.config`). MIRAGE never uses `:latest`. Each image has its own Docker Hub repository and an immutable version tag matching `manifest.version` (currently `1.0.0`) — see [`containers/README.md`](https://github.com/sceriff0/mirage/blob/main/containers/README.md).
+!!! note "Where tags live, and what they pin"
+    Image names live in `modules/local/*.nf`'s `container` directive and in
+    `lib/SegBackends.groovy` / `lib/WarpBackends.groovy`; `conf/modules.config`
+    owns resources, not images. MIRAGE never uses `:latest`. Every `FROM` inside
+    `containers/*/Dockerfile` is **digest-pinned** (`FROM <base>@sha256:...`), so
+    an image rebuilt a year from now still starts from the same base bytes.
+
+    The eleven first-party images themselves are pinned by **version tag**
+    (`bolt3x/mirage-<component>:<manifest.version>`), because a digest cannot
+    exist before `release.yml` has pushed them. The two externals
+    (`cdgatenbee/valis-wsi`, `docker.io/labsyspharm/basicpy-docker-mcmicro`) are
+    referenced by content digest directly. Every task's `versions.yml` records
+    `container:` as `task.container` resolved it — a tag for a first-party image
+    today, a digest for an external one — so a result can already be traced to
+    the exact bytes an external tool ran; the first-party images' *published*
+    digests land in [`containers/README.md`](https://github.com/sceriff0/mirage/blob/main/containers/README.md)'s
+    image-mapping table once a release has pushed them.
 
 ## GPU notes
 
@@ -208,7 +232,14 @@ Profiles are defined in `nextflow.config` and combined with commas. Pick one **e
 | `conda` | container | Run with Conda-managed environments (no containers). |
 | `slurm` | executor | Submit each process as a SLURM job. |
 | `local` | executor | Local executor with conservative caps (4 CPU / 16 GB). |
-| `ieo` | site | IEO cluster profile (gitignored; site-specific). |
+
+!!! note "Your own site profile"
+    There is no shipped site profile. Copy `conf/site.config.template` to
+    `site.config` and layer it with `-c site.config` — see
+    [Make a site config](installation.md#size-your-run). A named profile is
+    possible too (`profiles { mysite { includeConfig 'conf/mysite.config' } }`),
+    but note that a profile body is evaluated while `nextflow.config` is parsed,
+    whereas a `-c` file is layered afterwards and wins on params.
 
 !!! example "Common combinations"
     - Laptop demo: `-profile test,docker`

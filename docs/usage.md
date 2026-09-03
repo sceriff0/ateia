@@ -304,9 +304,16 @@ Profiles are defined in `nextflow.config` and combine with commas — pick one
 | `conda` | container | Conda-managed environments (no containers). |
 | `local` | executor | Local executor with conservative caps (4 CPU / 16 GB). |
 | `slurm` | executor | Submit each process as a SLURM job. |
-| `ieo` | site | IEO cluster profile (site-specific). |
 | `test` / `test_full` | data + caps | Bundled synthetic datasets, small resource caps, CPU segmentation. |
 | `instantseg_test` / `cellsam_test` | data + caps | Test profiles exercising those segmentation backends. |
+
+!!! note "Your own site profile"
+    There is no shipped site profile. Copy `conf/site.config.template` to
+    `site.config` and layer it with `-c site.config` — see
+    [Make a site config](installation.md#size-your-run). A named profile is
+    possible too (`profiles { mysite { includeConfig 'conf/mysite.config' } }`),
+    but note that a profile body is evaluated while `nextflow.config` is parsed,
+    whereas a `-c` file is layered afterwards and wins on params.
 
 ```bash
 # Laptop demo
@@ -523,9 +530,12 @@ key grammar is a cross-repository contract — see
     `--memory_mode low` and lower `--reg_max_image_dim`.
 
 ??? failure "The run seems to hang at startup"
-    Usually Nextflow pulling large container images on first run. Pre-pull once:
-    `docker pull cdgatenbee/valis-wsi:1.0.0` (and the `bolt3x/mirage-*`
-    tag pinned in `conf/modules.config`), or the `singularity pull` equivalents.
+    Usually Nextflow pulling large container images on first run. Every image is
+    named in `modules/local/*.nf`'s `container` directive, or — for the
+    per-backend images — in `lib/SegBackends.groovy` / `lib/WarpBackends.groovy`;
+    resource overrides live in `conf/modules.config`, image names do not.
+    Pre-pull them once with the list in
+    [Installation → Pre-pulling container images](installation.md#pre-pulling-container-images-optional).
 
 ??? failure "Singularity: `FATAL: ... permission denied`"
     The cache isn't writable. Point it at a path you own:
