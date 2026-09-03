@@ -32,8 +32,15 @@ numcodecs==0.13.1
 pandas==2.3.3
 scikit-image==0.25.2
 scipy==1.15.3
-csbdeep==0.8.2
 dask==2026.7.1
+
+# csbdeep USED TO BE HERE and is not any more. It is installed by exactly ONE image now --
+# containers/stardist, which pins it inline at 0.8.0's successor 0.8.2 because
+# bin/segment.py does `from csbdeep.utils import normalize`. containers/regqc installed it
+# too until 2026-09-02, as part of a TensorFlow/StarDist stack that image never ran.
+# tests/test_ci_stack_pinned.py::test_every_constrained_package_is_installed_by_more_than_
+# one_image is what forced the move: this file is for SHARED packages, and a solo pin
+# belongs in the one image's own file.
 
 # opencv, BOTH distribution names, same release. `containers/regqc` and `containers/merge`
 # install `opencv-python` (they have the display libs); CI installs `opencv-python-headless`
@@ -60,10 +67,11 @@ opencv-python-headless==4.10.0.82
 # authority file is the same file CI installs, so there is still only one copy.
 #
 #   matplotlib  -> requirements/segeval.txt (3.8.4), the image that runs the vendored CSE
-#                  evaluator. It DIVERGES on purpose: containers/quantify and
-#                  containers/regqc pin 3.9.2 for plotting that has no version
-#                  sensitivity, while segeval's is load-bearing for QualityScore. A single
-#                  constraint could not satisfy both and would fail two image builds.
+#                  evaluator. It DIVERGES on purpose: containers/quantify pins 3.9.2 for
+#                  plotting that has no version sensitivity, while segeval's is
+#                  load-bearing for QualityScore. A single constraint could not satisfy
+#                  both and would fail two image builds. (containers/regqc pinned 3.9.2
+#                  too until 2026-09-02, when the unimported dependency was removed.)
 #
 #   scikit-learn-> requirements/segeval.txt (1.5.2). The vendored CSE subset assigns fitted
 #                  PCA attributes by hand, so it is valid only against the sklearn internal

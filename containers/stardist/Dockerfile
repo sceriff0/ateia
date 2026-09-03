@@ -40,6 +40,11 @@ COPY requirements/constraints.txt /tmp/requirements/constraints.txt
 # in this Dockerfile names is invisible to tests/test_container_harmonisation.py's
 # "installs what it imports" guard -- and to anyone reading this file to see what the
 # script actually needs.
+#
+# csbdeep is ALSO the reason this line is now the pin's only home: containers/regqc
+# installed csbdeep too until 2026-09-02, so it lived in requirements/constraints.txt.
+# With one installer left, constraints.txt is the wrong place (it is for SHARED packages)
+# and the pin lives here.
 RUN pip install --no-cache-dir -c /tmp/requirements/constraints.txt \
     stardist==0.9.1 \
     csbdeep==0.8.2 \
