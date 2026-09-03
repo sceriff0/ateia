@@ -316,6 +316,72 @@ def checkRegisteredMatch() {
     assert dupFileSig.startsWith('RegisteredMatch: unmatched') : "got: ${dupFileSig}"
 }
 
+/**
+ * Checkpoint — requireColumns, the drift guard three readers copied.
+ *
+ * Lives outside `workflow { ... }` deliberately: see "THE WORKFLOW BLOCK HAS A HARD
+ * SIZE CEILING" above. Called once from the workflow block, before the final println.
+ */
+def checkCheckpoint() {
+    // ------------------------------------------------------------------ //
+    // Checkpoint — requireColumns, the drift guard three readers copied
+    // ------------------------------------------------------------------ //
+    // Three readers each carried a hand-copied 7-line `.each { col -> if (!(col in
+    // Checkpoint.columns(...))) throw ... }` block: add_cycle.nf twice and
+    // segmentation.nf once. Three copies of one rule, each free to word its message
+    // differently and to fall behind. This is that rule, once.
+    //
+    // `assert cond : 'msg'`, never `assert cond, 'msg'`, and `closure.call(x)`, never
+    // `closure(x)` — the second spelling of each does not parse under Nextflow 26 and
+    // silently skipped every assertion in this file in CI's latest-everything leg.
+    // Guarded by tests/test_lib_probe_parses_on_nf26.py.
+
+    // The satisfied case returns quietly.
+    Checkpoint.requireColumns('registered', ['patient_id', 'registered_image', 'channels'])
+    Checkpoint.requireColumns('postprocessed', ['patient_id', 'merged_csv', 'cell_mask', 'pyramid'])
+
+    // A column the step does not declare must throw, and the message must name BOTH the
+    // missing column and what IS declared — a reader that indexes a column the writer
+    // stopped emitting reads an empty field, which is a path that does not resolve.
+    def missingCol = false
+    def missingColMsg = ''
+    try {
+        Checkpoint.requireColumns('registered', ['patient_id', 'no_such_column'])
+    } catch (IllegalStateException e) {
+        missingCol = true
+        missingColMsg = e.message
+    }
+    assert missingCol : 'Checkpoint.requireColumns must reject a column the step does not declare'
+    assert missingColMsg.contains('no_such_column') : 'the message must name the missing column'
+    assert missingColMsg.contains('registered') : 'the message must name the step'
+    assert missingColMsg.contains('patient_id') : 'the message must list the declared columns'
+
+    // Every missing column at once, not just the first: a reader that lost two columns
+    // should learn both in one run rather than one per edit-and-rerun cycle.
+    def bothNamed = ''
+    try {
+        Checkpoint.requireColumns('registered', ['alpha_gone', 'beta_gone'])
+    } catch (IllegalStateException e) {
+        bothNamed = e.message
+    }
+    assert bothNamed.contains('alpha_gone') && bothNamed.contains('beta_gone') :
+        'Checkpoint.requireColumns must name every missing column, not only the first'
+
+    // An unknown STEP is Checkpoint's own exception type, not the missing-column one:
+    // a caller can tell "this schema changed" from "this step never existed".
+    def badCkptStep = false
+    try { Checkpoint.requireColumns('nonsense', ['patient_id']) }
+    catch (Checkpoint.UnknownStepException ignored) { badCkptStep = true }
+    assert badCkptStep : 'Checkpoint.requireColumns must reject an unknown step'
+
+    // An empty request is a caller that checks nothing, which is worse than no call at
+    // all — it reads as covered.
+    def emptyCols = false
+    try { Checkpoint.requireColumns('registered', []) }
+    catch (IllegalArgumentException ignored) { emptyCols = true }
+    assert emptyCols : 'Checkpoint.requireColumns must reject an empty column list'
+}
+
 workflow {
 
     // ------------------------------------------------------------------ //
@@ -1336,6 +1402,10 @@ P9,cyc2.tiff,CELLTOX|CELLTOX,false
     // RegisteredMatch — pairing VALIS's outputs back to their slide metas.
     // See checkRegisteredMatch() above the workflow block.
     checkRegisteredMatch()
+
+    // Checkpoint.requireColumns — the drift guard three readers copied.
+    // See checkCheckpoint() above the workflow block.
+    checkCheckpoint()
 
     // println, NOT log.info: nf-test's underlying `nextflow ... -quiet` run
     // suppresses log.info from stdout entirely (observed directly: a log.info
