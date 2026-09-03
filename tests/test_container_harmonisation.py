@@ -34,6 +34,7 @@ from pathlib import Path
 import pytest
 from packaging.requirements import InvalidRequirement, Requirement
 
+from tests.ci_actions import strip_line_comment
 from tests.nfmodel import processes, strip_comments
 
 REPO = Path(__file__).resolve().parent.parent
@@ -694,7 +695,10 @@ def test_qc_reader_dispatch_stays_tifffile_only():
         path = REPO / "bin" / rel
         found = set()
         for line in path.read_text().splitlines():
-            code = line.split("#", 1)[0]
+            # strip_line_comment, not `line.split("#", 1)[0]`: CLAUDE.md's "Verification
+            # reality" #7 forbids a private comment-stripping regex, and the naive cut
+            # truncates any line whose `#` is inside a string literal.
+            code = strip_line_comment(line)
             for fn in ("detect_reader", "require_reader", "read_info", "read_plane"):
                 if f"{fn}(" in code:
                     found.add(fn)
