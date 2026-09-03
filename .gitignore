@@ -43,6 +43,11 @@ traces/
 conf/ieo.config
 conf/*_site.config
 
+# A site's own copy of conf/site.config.template. It carries cluster paths,
+# account names and node sizes; docs/installation.md tells every reader to make
+# one at the repository root.
+site.config
+
 # Generated docs
 site/
 
