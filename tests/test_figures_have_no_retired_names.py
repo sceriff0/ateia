@@ -82,15 +82,19 @@ RETIRED = {
         "as anhir -- except as DISK+LightGlue provenance, which no figure writes",
         "same",
     ),
-    r"(?<![A-Za-z0-9])landmark(?![A-Za-z0-9])": (
+    r"(?:public|external|ANHIR|ACROBAT)[^<\n]{0,25}landmark": (
         "the ANHIR/ACROBAT landmark harness is deleted -- no figure may claim an "
         "external landmark dataset backs any accuracy signal",
         "benchmarks/registration_eval/ exists on no branch; benchmarks/README.md "
-        "section B is its removal record. 'ground truth for that slide' in "
-        "registration-schematic.html's reg_qc=2 panel is a distinct, legitimate "
-        "sense of the word -- same-slide segmentation used as a LOCAL reference, "
-        "not an external dataset -- which is why this pattern is scoped to "
-        "'landmark', not 'ground truth'.",
+        "section B (on the benchmarking branch) is its removal record. 'ground "
+        "truth for that slide' in registration-schematic.html's reg_qc=2 panel is "
+        "a distinct, legitimate sense of the word -- same-slide segmentation used "
+        "as a LOCAL reference, not an external dataset. Scoped to the CLAIMING "
+        "context (a trigger word ahead of 'landmark' on the same line), not the "
+        "bare word, so a figure may still say plainly that no such dataset backs "
+        "any measure here -- narrowed 2026-09-03 after the bare pattern forced "
+        "accuracy-schematic.html's honest-limits panel to cite this very test file "
+        "as evidence instead of stating the fact directly.",
     ),
     # ashlar ONLY where it reads as a selectable backend. See the module docstring.
     r"registration_method[^<\n]{0,40}ashlar": (
