@@ -203,7 +203,14 @@ tests/testdata/shipped_defaults_input.csv
 /stare-accuracy-roadmap.html
 /PERF-PLAN.md
 
-# Draft figure, not part of the published supplementary set (docs/figures/*.html).
+# Draft figure, DELIBERATELY not part of the published supplementary set. Resolved
+# 2026-09-02 (release 1.0.0, spec Phase 6, plan 11 Task 1) after the figure audit:
+# it is linked from no docs page and from no sibling figure's `figset` nav, and it
+# claims "Supplementary Figure S4", a number zarr-schematic.html already holds. The
+# local copy was deleted. This line stays so a stray re-creation does not become a
+# tracked fifth figure by accident -- and because docs/figures/*.html is globbed off
+# the FILESYSTEM by tests/test_figures_match_the_pipeline.py, so an untracked file
+# there fails the guard locally while CI stays green.
 docs/figures/failure-schematic.html
 
 # Research notes and literature reviews (analysis inputs, not pipeline docs).
