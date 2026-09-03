@@ -53,7 +53,7 @@ include { ASSEMBLE_EXPORT          } from './assemble_export'
 // ParamUtils.validateAddCycle requires both of Layout.ADD_CYCLE_CHECKPOINTS, and
 // without this call cycle 3 refused at launch with "required checkpoint
 // 'csv/postprocessed.csv' not found". Same repair, one step later, as
-// registered_checkpoint.nf.
+// register_patient.nf's CHECKPOINT_WRITER call.
 include { POSTPROCESSED_CHECKPOINT } from './postprocessed_checkpoint'
 
 workflow ADD_CYCLE {

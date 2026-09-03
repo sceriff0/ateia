@@ -83,31 +83,21 @@ def _reachable_from(entry: Path):
     return seen
 
 
+# `CHECKPOINT_WRITER(Layout.<CONST>, ...)` -- the call that commits a file to writing a
+# given manifest. Before subworkflows/local/checkpoint_writer.nf existed this was found
+# by looking for a `collectFile(` and a `Layout.checkpointCsvName(Layout.<CONST>)` in the
+# SAME file, because every writer carried both. Now exactly one file carries the
+# collectFile and it takes the step as a parameter, so what identifies a writer is the
+# call site that names the step.
+_CKPT_CALL = re.compile(r"CHECKPOINT_WRITER\s*\(\s*Layout\.(\w+)")
+
+
 def _writers():
-    """constant name -> the .nf files that write a manifest for it.
-
-    Two shapes count as "writing" a step's manifest:
-
-    1. The direct shape: a file collectFile()s a checkpoint named via
-       `Layout.checkpointCsvName(Layout.<CONST>)` -- what every checkpoint writer
-       looked like before subworkflows/local/checkpoint_writer.nf existed, and
-       what subworkflows/local/registered_checkpoint.nf still looks like.
-    2. The delegated shape: a file calls `CHECKPOINT_WRITER(Layout.<CONST>, ...)`.
-       CHECKPOINT_WRITER's OWN collectFile() names its checkpoint through a
-       `step` variable, never a literal `Layout.<CONST>` -- by design, since it is
-       one subworkflow serving four steps -- so shape 1 alone would report NO
-       writer for every step migrated onto it, which is a false "unreachable"
-       exactly like the one this file's docstring found in 2026-08-25. Crediting
-       the CALLER (which does name the literal constant) is what keeps this
-       guard seeing through the indirection.
-    """
+    """constant name -> the .nf files that commission a manifest for it."""
     out = {}
     for f in sorted(ROOT.rglob("*.nf")):
         src = strip_comments(f.read_text())
-        if "collectFile(" in src:
-            for const in re.findall(r"Layout\.checkpointCsvName\(Layout\.(\w+)\)", src):
-                out.setdefault(const, set()).add(f.resolve())
-        for const in re.findall(r"CHECKPOINT_WRITER\(\s*Layout\.(\w+)", src):
+        for const in _CKPT_CALL.findall(src):
             out.setdefault(const, set()).add(f.resolve())
     return out
 
@@ -128,8 +118,8 @@ def test_add_cycle_writes_every_checkpoint_a_follow_on_cycle_requires():
             )
     assert not missing, "\n".join(missing) + (
         "\n\nMake the writer mode-independent and call it from add_cycle.nf -- "
-        "see subworkflows/local/registered_checkpoint.nf and "
-        "postprocessed_checkpoint.nf, which exist for exactly this."
+        "see subworkflows/local/register_patient.nf and postprocessed_checkpoint.nf, "
+        "which call CHECKPOINT_WRITER for exactly this reason."
     )
 
 
@@ -163,8 +153,11 @@ def test_the_scan_is_not_vacuous():
         "no checkpoint writers found anywhere -- the collectFile scan is stale"
     )
     # And the transitive walk really is transitive: add_cycle.nf does not include
-    # registered_checkpoint.nf directly. If this stops holding, the walk has
-    # silently become one-level and would report a false pass.
+    # checkpoint_writer.nf directly -- it reaches it through REGISTER_PATIENT and
+    # through POSTPROCESSED_CHECKPOINT, both of which it does include. If this stops
+    # holding, the walk has silently become one-level and would report a false pass.
+    # (The anchor used to be registered_checkpoint.nf, which was deleted once the write
+    # moved into checkpoint_writer.nf and it had nothing left to own.)
     direct = {
         (SUBWORKFLOWS / "add_cycle.nf")
         .parent.joinpath(rel)
@@ -174,8 +167,8 @@ def test_the_scan_is_not_vacuous():
             strip_comments((SUBWORKFLOWS / "add_cycle.nf").read_text())
         )
     }
-    reg_writer = (SUBWORKFLOWS / "registered_checkpoint.nf").resolve()
-    assert reg_writer not in direct and reg_writer in reachable, (
-        "registered_checkpoint.nf is now a DIRECT include of add_cycle.nf, so the "
+    ckpt_writer = (SUBWORKFLOWS / "checkpoint_writer.nf").resolve()
+    assert ckpt_writer not in direct and ckpt_writer in reachable, (
+        "checkpoint_writer.nf is now a DIRECT include of add_cycle.nf, so the "
         "transitive walk is no longer exercised by this repo's own layout"
     )

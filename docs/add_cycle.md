@@ -117,7 +117,8 @@ table and pyramid are rebuilt over ALL cycles seen so far -- so the newest
 
 `--prior_outdir` must contain both `csv/registered.csv` and
 `csv/postprocessed.csv` (`Layout.ADD_CYCLE_CHECKPOINTS`). add_cycle writes both:
-the first via `REGISTERED_CHECKPOINT`, the second via `POSTPROCESSED_CHECKPOINT`.
+the first via `REGISTER_PATIENT`'s `CHECKPOINT_WRITER` call, the second via
+`POSTPROCESSED_CHECKPOINT`.
 Neither costs a recomputation -- add_cycle already produces every artifact those
 manifests name, and until 2026-08-25 it simply had no writer for the second, so
 cycle 3 failed launch validation with *"required checkpoint

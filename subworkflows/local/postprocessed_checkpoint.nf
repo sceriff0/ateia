@@ -7,8 +7,9 @@
     patient result consists of.
 
     WHY THIS IS ITS OWN FILE — the second half of the same repair
-    subworkflows/local/registered_checkpoint.nf describes. That file was split
-    out because subworkflows/local/registration.nf owned the only writer of the
+    subworkflows/local/register_patient.nf's CHECKPOINT_WRITER call describes.
+    That write briefly lived in a file of its own because
+    subworkflows/local/registration.nf owned the only writer of the
     Layout.REGISTERED manifest, so an add_cycle run — which never goes through
     REGISTRATION — wrote none. Exactly the same was true here, one step later:
     subworkflows/local/postprocess.nf owned the only writer of the

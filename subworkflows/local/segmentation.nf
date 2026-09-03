@@ -109,10 +109,10 @@ workflow SEGMENTATION {
     // column per row.
     //
     // registered_image's published path uses publishedOrAsIs, not the plain
-    // is_passthrough branch subworkflows/local/registered_checkpoint.nf uses for
-    // csv/registered.csv. registered_checkpoint.nf's ch_registered is ALWAYS a fresh
-    // channel from THIS run's own REGISTRATION (it is only ever called from inside
-    // registration.nf), so a bare is_passthrough check is enough there. This file's
+    // is_passthrough branch register_patient.nf's CHECKPOINT_WRITER call uses for
+    // csv/registered.csv. That ch_registered is ALWAYS a fresh channel from THIS
+    // run's own REGISTER_PATIENT invocation, so a bare is_passthrough check is
+    // enough there. This file's
     // ch_registered is not: at `--start segmentation`, it is INPUT_CHECK.out.samples
     // reading csv/registered.csv back -- ALREADY an absolute published path from a
     // prior run -- and INPUT_CHECK never sets meta.is_passthrough (only

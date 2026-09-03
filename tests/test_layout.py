@@ -209,10 +209,12 @@ def test_the_unregistered_slide_path_has_its_own_owner():
 
     The writer moved out of registration.nf into its own subworkflow so the
     add_cycle path could share it (an add_cycle run used to write no
-    csv/registered.csv at all). The property is unchanged; only its owner moved."""
-    writer = (ROOT / "subworkflows" / "local" / "registered_checkpoint.nf").read_text()
+    csv/registered.csv at all), and then back into register_patient.nf once the
+    WRITE itself moved to checkpoint_writer.nf and the separate file had nothing
+    left to own. The property is unchanged; only its owner moved, twice."""
+    writer = (ROOT / "subworkflows" / "local" / "register_patient.nf").read_text()
     assert "Layout.passthroughPath(" in writer, (
-        "the registered-checkpoint writer no longer routes unregistered slides "
+        "the registered-checkpoint row builder no longer routes unregistered slides "
         "through Layout.passthroughPath — see tests/checkpoint_manifest.nf.test"
     )
     assert "is_passthrough" in writer

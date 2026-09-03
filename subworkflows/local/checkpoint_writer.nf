@@ -13,11 +13,12 @@
                      storeDir: Layout.checkpointDir(params.outdir),
                      seed: Checkpoint.header(<STEP>))
 
-    -- in preprocess.nf, registered_checkpoint.nf, segmentation.nf and
-    postprocessed_checkpoint.nf. Three of them additionally carried the SAME eight-line
-    "sort: true is load-bearing" comment, word for word. Four copies of one mechanism is
-    four chances for one of them to lose the cleanup gate, or the sort, or the seed --
-    and each loss is silent: the run stays green and the manifest is wrong or missing.
+    -- in preprocess.nf, registration.nf (via a since-deleted registered_checkpoint.nf),
+    segmentation.nf and postprocessed_checkpoint.nf. Three of them additionally carried
+    the SAME eight-line "sort: true is load-bearing" comment, word for word. Four copies
+    of one mechanism is four chances for one of them to lose the cleanup gate, or the
+    sort, or the seed -- and each loss is silent: the run stays green and the manifest
+    is wrong or missing.
 
     WHAT STAYS WITH THE CALLERS, and why. The ROW is built by the caller, because
     building it is where the real per-step knowledge lives: which Layout `kind` an

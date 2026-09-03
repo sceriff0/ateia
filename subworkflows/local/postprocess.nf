@@ -17,9 +17,9 @@ include { MERGE_SEG_EVAL           } from '../../modules/local/merge_seg_eval'
 include { QUANTIFY_MARKERS; groupTiffsByPatient } from './quantify_markers'
 include { ASSEMBLE_EXPORT          } from './assemble_export'
 // The checkpoint writer is shared with add_cycle.nf, the same way
-// registered_checkpoint.nf is shared with it. This file used to own the only copy,
-// so an add_cycle run wrote no csv/postprocessed.csv and could never be the
-// --prior_outdir of a second cycle.
+// register_patient.nf's CHECKPOINT_WRITER call is shared with it. This file used
+// to own the only copy, so an add_cycle run wrote no csv/postprocessed.csv and
+// could never be the --prior_outdir of a second cycle.
 include { POSTPROCESSED_CHECKPOINT } from './postprocessed_checkpoint'
 
 /*

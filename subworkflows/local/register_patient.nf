@@ -43,7 +43,7 @@
         images_multi     [meta, file] — the native (pre-registration) slides of
                                         multi-slide patients only; seg-QC input
         checkpoint_csv   the registration checkpoint manifest (see
-                         REGISTERED_CHECKPOINT / Layout)
+                         CHECKPOINT_WRITER / Layout)
         transform          [patient_id, registrar.pickle | manifest] — seg-QC warper
         transform_by_slide [meta, manifest] — one per moving slide (empty under VALIS)
         stage_checkpoint   [patient_id, reg_stage_checkpoint/] (VALIS, reg_qc>=2 only)
@@ -57,9 +57,9 @@
 ========================================================================================
 */
 
-include { VALIS_ADAPTER         } from './adapters/valis_adapter'
-include { TILED_ADAPTER         } from './adapters/tiled_adapter'
-include { REGISTERED_CHECKPOINT } from './registered_checkpoint'
+include { VALIS_ADAPTER     } from './adapters/valis_adapter'
+include { TILED_ADAPTER     } from './adapters/tiled_adapter'
+include { CHECKPOINT_WRITER } from './checkpoint_writer'
 
 workflow REGISTER_PATIENT {
     take:
@@ -139,12 +139,50 @@ workflow REGISTER_PATIENT {
     // ========================================================================
     // CHECKPOINT
     // ========================================================================
-    REGISTERED_CHECKPOINT(ch_registered)
+    // The manifest is not a nicety of the linear path: it is the file
+    // `--start postprocessing` reads, and the file `mode='add_cycle'` reads out of
+    // `--prior_outdir` to recover the frozen reference. It used to be owned by
+    // subworkflows/local/registration.nf alone, so an add_cycle run -- which never goes
+    // through REGISTRATION -- wrote none at all, and its `--outdir` could therefore
+    // never be a second add_cycle's `--prior_outdir`. Writing it HERE, in the one
+    // registration core both modes go through, is what closes that; it briefly lived in
+    // a file of its own for the same reason, which stopped being necessary once the
+    // WRITE itself moved to CHECKPOINT_WRITER.
+    //
+    // The row format is the contract with every reader (add_cycle.nf's `ch_prior_ref`,
+    // CsvUtils' checkpoint validation, the `--start` samplesheet parser). It is owned by
+    // lib/Checkpoint.groovy -- the columns are named nowhere here, they are asked for.
+    ch_checkpoint_rows = ch_registered
+        .map { meta, file ->
+            // Where the file WILL be published. This must agree with REGISTER's /
+            // TILED_*'s publishDir in conf/modules.config, including the producer
+            // subdirectory those blocks' `pattern:` carries along ('registered_slides/'
+            // for VALIS, 'registered/' for tiled). Both rules live in Layout.
+            //
+            // A passthrough slide was never registered, so no registration process
+            // published it and <pid>/registered/ may not even exist; Layout.passthroughPath
+            // records where it actually is instead.
+            def published_path = meta.is_passthrough
+                ? Layout.passthroughPath(params.outdir, meta.patient_id, file)
+                : Layout.publishedPath(params.outdir, meta.patient_id, Layout.REGISTERED, file)
+            [
+                patient_id      : meta.patient_id,
+                // RULING R17: carried forward from meta, never re-derived from
+                // registered_image's basename below -- see lib/Checkpoint.groovy.
+                id              : meta.id,
+                registered_image: published_path,
+                is_reference    : meta.is_reference,
+                channels        : meta.channels.join('|'),
+                pixel_size      : meta.pixel_size,
+            ]
+        }
+
+    CHECKPOINT_WRITER(Layout.REGISTERED, ch_checkpoint_rows)
 
     emit:
     registered         = ch_registered
     images_multi       = ch_images_multi
-    checkpoint_csv     = REGISTERED_CHECKPOINT.out.csv
+    checkpoint_csv     = CHECKPOINT_WRITER.out.csv
     // Straight through from the adapter, under the adapter's own names — see the header.
     transform          = ch_adapter.transform
     transform_by_slide = ch_adapter.transform_by_slide

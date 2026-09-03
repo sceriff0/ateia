@@ -244,7 +244,7 @@ workflow REGISTRATION {
     // ========================================================================
     // STEP 4: CHECKPOINT
     // ========================================================================
-    // Written by REGISTER_PATIENT (via REGISTERED_CHECKPOINT), so the add_cycle path
+    // Written by REGISTER_PATIENT (via CHECKPOINT_WRITER), so the add_cycle path
     // — which does not come through here — produces the identical manifest.
     ch_checkpoint_csv = REGISTER_PATIENT.out.checkpoint_csv
 
