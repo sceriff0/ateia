@@ -83,14 +83,37 @@ from bioio_bioformats import Reader
 print('Bio-Formats reads with no HOME (production redirect):',
       Reader('/tmp/smoke-probe.tif').dims)"
 
+# Clean up the probe file. Left behind, it bakes into the image as a root-owned,
+# mode-644 file (this RUN executes as root at build time) -- and a LATER run of this
+# same script under an unprivileged runtime uid (Task 13's `-u 1000:1000` check, the
+# exact condition nextflow.config's docker profile uses) then fails on
+# `tifffile.imwrite`'s open-for-write with a plain PermissionError on /tmp/smoke-probe.tif,
+# before the redirect this leg exists to prove is even reached. /tmp itself is
+# world-writable (sticky bit), so a FRESH file here is never the problem -- a STALE
+# one owned by a different uid is. Measured red/green while building convert 2026-09-03.
+rm -f /tmp/smoke-probe.tif
+
 # NEGATIVE LEG: the same read, same HOME=/nonexistent, but WITHOUT the guard and
 # dropped to an unprivileged UID first -- must FAIL. set +e/-e brackets the one command
 # allowed to return non-zero.
 set +e
 HOME=/nonexistent "$PY" -c "
 import os
-os.setgid(65534)
-os.setuid(65534)
+# Drop privilege only when we STARTED as root (the Dockerfile's build-time RUN). When
+# this script is instead invoked at RUNTIME already under a non-root uid -- Task 13's
+# \`docker run -u 1000:1000\` check, and nextflow.config's own \`-u \$(id -u):\$(id -g)\` --
+# os.setgid/os.setuid(65534) would try to change to a DIFFERENT non-root uid, which
+# needs CAP_SETUID and raises a plain PermissionError (EPERM) on its own, before the
+# JVM-cache path below is ever reached. That EPERM still makes this leg exit non-zero,
+# so the smoke test stays green -- but for the wrong reason: it stops proving the
+# read-only-\$HOME guard is load-bearing and starts merely proving setuid(other-uid)
+# is refused. Any already-non-root uid IS the unprivileged condition this leg wants
+# (mkdir under /, root-owned mode 755, refuses every non-root uid alike), so there is
+# nothing left to drop. Measured red (EPERM at this line) under \`-u 1000:1000\` before
+# this guard, green (the intended EACCES/read-only chain) after, 2026-09-03.
+if os.getuid() == 0:
+    os.setgid(65534)
+    os.setuid(65534)
 import numpy, tifffile
 tifffile.imwrite('/tmp/smoke-noguard-probe.tif', numpy.zeros((8, 8), 'uint16'))
 from bioio_bioformats import Reader
@@ -103,6 +126,13 @@ if [ "$noguard_status" -eq 0 ]; then
     exit 1
 fi
 echo "convert image OK: Bio-Formats read correctly FAILS (exit $noguard_status) with no jvm-cache redirect -- the positive leg's redirect above is load-bearing, not decorative"
+
+# Same reason as the positive leg's cleanup above: this file was written by UID 65534
+# (the leg drops privilege before writing it), so left behind it bakes into the image
+# owned by 65534 and blocks a later rerun under any OTHER uid, including root's own
+# `docker run` default. rm runs here as the still-root outer shell (only the inner
+# python -c dropped privilege), so it can remove a 65534-owned file with no DAC issue.
+rm -f /tmp/smoke-noguard-probe.tif
 
 # procps supplies `ps`. Nextflow's task-metrics wrapper hard-exits BEFORE the script
 # block when it is absent, and params.enable_trace defaults to true, so every task in
