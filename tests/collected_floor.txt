@@ -657,4 +657,19 @@
 # does not flag it. `pytest --collect-only -q` reports "1834 tests collected",
 # and a full run with MIRAGE_STRICT_SKIPS=1 gives 1820 passed, 14 skipped, 0
 # failed -- 1820 + 14 = 1834. 1820 + 14 = 1834.
-1929
+
+#
+#
+#
+# RE-MEASURED 2026-09-03, release 1.0.0 plan 12 Task 2 (every documented
+# `nextflow run` command must actually launch, R4). Five new cases, all in the
+# new tests/test_documented_commands_are_runnable.py
+# (test_every_documented_command_would_launch,
+# test_the_profiles_this_guard_trusts_really_pin_what_it_claims,
+# test_the_extractor_joins_continuations_and_skips_prose,
+# test_the_detector_recognises_the_command_that_actually_fails,
+# test_the_detector_leaves_the_working_forms_alone); no deletions, no other
+# test count moved. `pytest --collect-only -q` reports "1839 tests collected",
+# and a full run with MIRAGE_STRICT_SKIPS=1 gives 1825 passed, 14 skipped, 0
+# failed -- 1825 + 14 = 1839. 1834 + 5 = 1839.
+1934
