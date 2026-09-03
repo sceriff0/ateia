@@ -185,6 +185,34 @@ after that doc and is detailed inline below:
   checked against `RegBackends.methods()` so the shipped registration-backend names (currently
   `valis`, `tiled`) are exactly what the figure set advertises — no deleted backend lingering in
   prose, no shipped backend the figures never mention.
+- **A samplesheet with a mistyped or extra column now warns, naming it.**
+  `validateInputCSV` only ever asserted the *required* columns were present and said
+  nothing about the rest, so `channles` sitting beside a missing `channels` failed
+  later, elsewhere, on a null. Rejecting unknown columns outright would be wrong — a
+  `csv/registered.csv` read back by `--start segmentation` legitimately carries `id`
+  and `pixel_size` beyond that step's four required columns — so
+  `CsvUtils.unknownColumns` (known set = `ParamUtils.requiredColumnsForStep(step)` ∪
+  `Checkpoint.STEPS.collectMany { it.columns }`) reports the extras and
+  `workflows/mirage.nf` warns once, by name, on **both** the linear `--start`/`--stop`
+  path and the `--mode add_cycle` path (the latter added in a review follow-up — it
+  shares the same `validateInputCSV` call but had no warning at all until then). A
+  legitimate checkpoint header warns about nothing.
+- **The format matrix, and the cluster kit that validates the formats CI cannot
+  synthesise.** `tests/integration/formats/` now exercises pyramidal OME-TIFF,
+  BigTIFF, interleaved RGB, 8-bit, float32, HDF5 and NDPI/NDPIS on real bytes in
+  their own `format-tests` CI job (`requirements/format-tests.txt`, pinned to
+  `containers/convert`'s own reader stack -- it cannot coexist with the harmonised
+  set). `.czi`, `.nd2`, `.lif`, `.ndpi` and `.svs` cannot be synthesised at all
+  (RULING R3: no vendor fixture may be committed), so `tests/cluster/` ships a kit -- a
+  samplesheet template, a probe script run inside the convert container, and a
+  driver -- an operator runs by hand against private images to produce
+  `docs/validation/format_validation.md`, the evidence committed in place of the
+  data. That page ships with this phase in an explicit `kit-validated: pending`
+  state; `tests/test_validation_report_is_real.py` guards it in both states -- it
+  must never regress to the template or to a page claiming success no run
+  produced, and once a real run lands it must name the commit, the probe
+  container, and carry at least one successful row for one of the five vendor
+  formats.
 
 ### Changed
 - **The resource report is plots, not tables.** The per-process rollup,
@@ -896,6 +924,27 @@ after that doc and is detailed inline below:
   of the same commit could produce differently-ordered (though content-identical) CSVs. Rows are
   now sorted (`sort: true`, patient ID then path). **Published-output change (explicitly
   authorised):** row order in the three manifests changes; contents and column order do not.
+- **A quoted samplesheet path (e.g. a filename with a space) was silently read wrong.**
+  `subworkflows/local/input_check.nf`'s `.splitCsv(header: true)` had no `quote:`
+  option, so a quoted field came back with its surrounding quote characters still
+  attached; `file()` then saw a value not starting with `/`, treated it as relative,
+  and staged a symlink to nothing. Fixed with `quote: '"'`. Even with that fixed,
+  `modules/local/preflight_scale.nf`'s rendered command built its `--images` list via
+  an unquoted `$(find ... | sort)` command substitution, which word-splits on every
+  space in a staged filename — fixed by reading `find`'s NUL-delimited output into a
+  bash array by hand (`while read -r -d ''`, not bash 4's `mapfile -d ''`: this script
+  runs unchanged under the container-less local stub loop, and macOS ships bash 3.2).
+  Both surfaced from a new nf-test exercising real-world samplesheet shapes (CRLF, a
+  UTF-8 BOM, a quoted path with a space, a non-ASCII filename), not from a synthetic
+  probe.
+- **`bin/utils/qc.py`'s `create_registration_qc` silently fell back to channel 0 when no
+  configured nuclear/fiducial marker matched a slide's OME channel names** — at all three
+  sites (reference, registered, and native), with only a `logger.warning`. It now raises
+  `ValueError` instead. The old behaviour was correct only by accident (channel 0 happens
+  to be `CONVERT_IMAGE`'s reserved nuclear slot); the dangerous case is a real
+  misregistration silently rendered as an apparently-aligned QC overlay. See
+  [`docs/registration_qc.md`](docs/registration_qc.md) for the one-line note on the
+  channel-selection contract.
 
 ### Removed
 - **The `ashlar` registration backend is removed; v1.0.0 ships exactly two, `valis` and

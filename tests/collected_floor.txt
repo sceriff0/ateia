@@ -596,4 +596,19 @@
 # 2026-09-03, plan 07 Tasks 0-6: the real-suite string-vs-path guard, ome_io's dispatch
 # table test, the synthesised-format read_info/read_plane suite, the end-to-end
 # convert_image format tests and the converter's refusal tests. No deletions, no skips.
-1853
+
+#
+#
+# RE-MEASURED after phase 07 (formats-and-tests). Added: the ome_io dispatch
+# table, the convert-image refusals, three bin/ script behaviour files, three
+# bin/utils behaviour files, the format-env/convert-image pin guard, and the
+# validation-report guard. tests/integration/formats/ is NOT in this count --
+# it is excluded from the standard invocation and runs in its own CI job
+# (requirements/format-tests.txt).
+#
+# Measured after generating the fixtures, with the suite's standard exclusions:
+# `pytest --collect-only -q` reports "1874 tests collected", and a full run
+# with MIRAGE_STRICT_SKIPS=1 gives 1861 passed, 13 skipped, 0 failed --
+# 1861 + 13 = 1874, up from the prior entry's 1846 (within FLOOR_DRIFT (50),
+# re-ratcheted anyway per instruction rather than left riding inside the band).
+1881

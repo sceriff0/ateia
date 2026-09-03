@@ -53,6 +53,11 @@ and cropping preserve every pixel's original position in the reference frame,
 which is what a reader of the figure is entitled to assume they are seeing.
 (`bin/utils/qc.py:compose_on_reference_canvas`.)
 
+**Channel selection is fail-fast.** The nuclear/fiducial channel in every panel is
+resolved from `nuclear_markers` (`metadata.pick_nuclear_index`); if no configured
+marker matches a slide's OME channel names, `create_registration_qc` raises rather
+than silently falling back to channel 0.
+
 The published names are unchanged —
 `<outdir>/<patient>/qc/registration/<slide>_QC_RGB.png`, `_QC_RGB.tif` and
 `_QC_RGB_fullres.tif` — so `GENERATE_QC_REPORT` and anything reading the output

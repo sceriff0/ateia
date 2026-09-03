@@ -42,6 +42,12 @@ The MIRAGE testing infrastructure includes:
 
 ## Test Types
 
+!!! note "There are two test documents, and this is the long one"
+    `tests/TESTING_QUICK_REFERENCE.md` is the command cheat-sheet — what to run
+    before a PR, and how to run one file. This file explains what each kind of
+    test *is*, where it runs, and why. When they disagree about a command, this
+    file is wrong: the quick reference is the one people actually copy from.
+
 ### 1. Python Unit Tests
 
 **Purpose**: Test individual Python script functions in isolation
@@ -52,7 +58,7 @@ The MIRAGE testing infrastructure includes:
 
 **Example**:
 ```python
-# tests/test_quantify.py
+# tests/unit/test_quantify.py
 def test_compute_cell_intensities_simple():
     mask = np.array([[0, 1, 1], [0, 2, 2]], dtype=np.int32)
     channel = np.array([[0, 5, 7], [0, 3, 9]], dtype=np.float32)
