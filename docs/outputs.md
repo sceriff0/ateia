@@ -304,8 +304,15 @@ consume, a single key grammar:
 | `<Compartment>` | `Nucleus`, `Cytoplasm`, `Cell` | `--quantify_compartments` — when `false`, only `Cell` is produced |
 | `<Statistic>` | `Median`, `Mean`, `Sum` | `Median` is **always** produced; `--expanded_quantification` adds `Mean` and `Sum` |
 
-So a default run (`quantify_compartments=true`, `expanded_quantification=true`)
-emits nine keys per marker:
+So a **default** run (`quantify_compartments=true`, `expanded_quantification=false`)
+emits three keys per marker:
+
+```text
+CD3: Nucleus: Median      CD3: Cytoplasm: Median      CD3: Cell: Median
+```
+
+Turning `expanded_quantification` on (in a `-params-file`; it requires
+`quantify_compartments`) adds Mean and Sum in each compartment, for nine:
 
 ```text
 CD3: Nucleus: Median      CD3: Nucleus: Mean      CD3: Nucleus: Sum
@@ -313,8 +320,9 @@ CD3: Cytoplasm: Median    CD3: Cytoplasm: Mean    CD3: Cytoplasm: Sum
 CD3: Cell: Median         CD3: Cell: Mean         CD3: Cell: Sum
 ```
 
-Plus one **bare** column per marker (`CD3`), which is the whole-cell *mean*,
-kept for backward compatibility with FlowPath's bare-key fast path.
+Plus one **bare** column per marker (`CD3`), which is the whole-cell *mean* and is
+written in every mode — FlowPath's bare-key fast path is hard-wired to
+(whole cell, Mean), so it stays a mean even when Mean is not otherwise emitted.
 
 !!! danger "Do not change this format"
     The grammar is **case- and space-sensitive** and is consumed by the sibling

@@ -190,7 +190,7 @@ Chips give real defaults. Every process runs in a pinned container and emits
         <div class="x">Per-cell marker intensity against the mask, one task per channel, merged
           per patient by <code>MERGE_QUANT_CSVS</code>. Median always; Mean/Sum added by
           <code>expanded_quantification</code>.</div>
-        <div class="pp"><span>compartments <b>true</b></span><span>expanded <b>true</b></span></div></div>
+        <div class="pp"><span>compartments <b>true</b></span><span>expanded <b>false</b></span></div></div>
       <div class="mod"><div class="n">EXPORT_GEOJSON</div>
         <div class="x">QuPath / FlowPath <code>cells.geojson</code> with raw per-marker
           measurements, plus a lighter whole-cell-only variant.</div>

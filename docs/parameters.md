@@ -254,7 +254,7 @@ Per-cell marker intensity.
 | Parameter | Default | Description |
 |---|---|---|
 | `quantify_compartments` | `true` | Emit per-compartment signal (Nucleus / Cytoplasm / Cell) by routing the nuclear mask into quantification. |
-| `expanded_quantification` | `true` | Also emit Mean and Sum per compartment (per-compartment Median is always emitted). **Requires** `quantify_compartments=true`. |
+| `expanded_quantification` | `false` | Also emit Mean and Sum per compartment (per-compartment Median is always emitted). **Requires** `quantify_compartments=true`. Off by default: Median is the statistic FlowPath's selector defaults to, and Mean+Sum triple the column count of every quantification table for a statistic most gating never reads. |
 
 !!! danger "Validation rule"
     Setting `expanded_quantification = true` without `quantify_compartments = true`
@@ -370,9 +370,9 @@ Per-process requests, resource labels, retry policy and containers:
 | `slurm_account` | `null` | SLURM account (`--account`). |
 | `slurm_qos` | `null` | SLURM QoS (`--qos`). |
 | `gpu_type` | `1` | GRES string for GPU jobs (`--gres=gpu:<value>`). Bare `1` = any one GPU, which is portable; set a typed string (e.g. `nvidia_a100:1`) in your site config to match `sinfo -o "%G"`. |
-| `max_memory` | `700.GB` | Global memory ceiling. Clamps every process's request via `process.resourceLimits`. |
-| `max_cpus` | `128` | Global CPU ceiling. |
-| `max_time` | `240.h` | Global walltime ceiling. |
+| `max_memory` | *(required, no default)* | Global memory ceiling. Clamps every process's request via `process.resourceLimits`. Declared `null` in `nextflow.config` on purpose — a default here would be a guess about someone else's machine — and marked `required` in the schema, so a run that omits it is refused at launch. Set it in your `site.config`. |
+| `max_cpus` | *(required, no default)* | Global CPU ceiling. Same rule as `max_memory`: required, no default, set it in your `site.config`. |
+| `max_time` | `240.h` | Global walltime ceiling. This one keeps a real default: overshooting a walltime ceiling costs a queue slot, not a dead run. |
 | `concurrency` | `5` | The one knob to tune: drives both `max_forks` and `queue_size` together, preserving the shipped 5:20 ratio. |
 | `max_forks` | `null` | Max concurrent tasks **per process**. `null` = derive from `concurrency`; also an upper bound on every per-process `maxForks`, so lowering it throttles every module. |
 | `queue_size` | `null` | Max concurrent tasks across the **whole pipeline** (`executor.queueSize`). `null` = derive from `concurrency` (`concurrency * 4`). Normally the binding constraint. |
@@ -495,8 +495,9 @@ Full walkthrough: [Incremental cycles](add_cycle.md).
 
 !!! warning "`add_cycle` prerequisites"
     `embed_masks` defaults to `false`, so a default run is **not** add_cycle-extendable.
-    Set `embed_masks = true` (together with `quantify_compartments` and
-    `--expanded_quantification`, both on by default) to make a run extendable.
+    Set `embed_masks = true` (together with `quantify_compartments`, which is on
+    by default, and `expanded_quantification`, which is **not** — set it in your
+    `-params-file`) to make a run extendable.
     `embed_masks = true` with either sibling off is rejected **at launch**
     (`ParamUtils.validateCompartmentQuant`) rather than silently producing a
     plain pyramid, so a prior run either failed to launch with `embed_masks=true`

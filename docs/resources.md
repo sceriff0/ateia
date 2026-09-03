@@ -310,32 +310,48 @@ parameters:
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `max_cpus` | `128` | Upper bound on any process's `cpus` |
-| `max_memory` | `700.GB` | Upper bound on any process's `memory` |
+| `max_cpus` | *(required, no default)* | Upper bound on any process's `cpus` |
+| `max_memory` | *(required, no default)* | Upper bound on any process's `memory` |
 | `max_time` | `240.h` | Upper bound on any process's `time` |
 
-Profiles override these:
+`max_cpus` and `max_memory` are declared `null` in `nextflow.config` and marked
+`required` in `nextflow_schema.json`, so a run that sets neither is refused at
+launch. Supply them from a `site.config` (`-c site.config`, copied from
+`conf/site.config.template`) or from a profile that pins them:
 
 | Profile | `max_cpus` | `max_memory` | `max_time` |
 |---|---|---|---|
-| *(none)* | `128` | `700.GB` | `240.h` |
+| *(none)* | — required — | — required — | `240.h` |
 | `local` | `4` | `16.GB` | `72.h` |
 | `ieo` | `128` | `700.GB` | `240.h` |
-| `test` | see `conf/test.config` | | |
+| `test` | `2` | `6.GB` | `1.h` |
+| `test_full` | `8` | `32.GB` | `6.h` |
+| `shipped_defaults_test` | `2` | `6.GB` | `1.h` |
 
-!!! warning "`resourceLimits` is a closure for a reason"
+!!! warning "`-profile slurm` freezes the ceiling; `-c site.config` does not reach it"
     The top-level `process.resourceLimits` in `nextflow.config` is a **closure**,
-    not a plain map, so it is evaluated at task-submission time — *after* the
-    whole profile stack has merged. A plain map would eagerly capture
-    `params.max_*` as they stand at that point in the file (128 / 700 GB / 240 h),
-    silently ignoring a profile's override and *raising* the ceiling instead of
-    enforcing it.
+    so it is evaluated at task-submission time — after the whole profile stack has
+    merged, and after a `-c` file has been layered. That is what makes
+    `-c site.config` work: the closure reads `params.max_*` back lazily.
 
-    The `slurm` profile is the one exception: it assigns `resourceLimits` as a
-    plain map, which shadows the closure and freezes the values. Combining
-    `-profile slurm,ieo` therefore will **not** pick up `ieo`'s pinned `max_*`.
-    Today the two coincide, so there is no observed bug — but no documented
-    invocation combines `slurm` with another profile that sets `max_*`.
+    The `slurm` profile is the one exception. It assigns `resourceLimits` as a
+    **plain map** (`nextflow.config:719`), evaluated eagerly while
+    `nextflow.config` is parsed — before any `-c` file exists. Measured with
+    `nextflow config`:
+
+    ```text
+    resourceLimits = [cpus:null, memory:null, time:'240.h']   # -profile slurm -c site.config
+    resourceLimits = [cpus:null, memory:null, time:'240.h']   # -profile slurm,ieo
+    ```
+
+    So with `-profile slurm`, the ceiling is frozen at whatever `params.max_*`
+    were at that line, and neither `-c site.config` nor a second profile changes
+    it. Since `max_cpus`/`max_memory` have **no default**, that frozen map is the
+    reason to prefer `-profile slurm,singularity -c site.config` together with a
+    site config that is layered for the *params* while the executor comes from the
+    profile — and the reason not to rely on `-profile slurm,<site>` picking up the
+    site's ceiling. Fix, if ever needed: make line 719 a closure, matching the
+    top-level default.
 
 ---
 
