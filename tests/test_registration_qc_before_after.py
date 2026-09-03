@@ -192,3 +192,75 @@ def test_cyx_to_bgr_reorders_for_opencv():
     assert (bgr[:, :, 0] == 30).all()  # OpenCV channel 0 is blue
     assert (bgr[:, :, 1] == 20).all()
     assert (bgr[:, :, 2] == 10).all()
+
+
+def _write_triplet(tmp_path, h=48, w=40):
+    """A reference, a native moving slide and its registered counterpart, all
+    OME-TIFF with the nuclear marker deliberately NOT at channel 0 so the test
+    exercises pick_nuclear_index rather than the channel-0 fallback."""
+    sys.path.insert(0, UTILS_DIR)
+    from ome_io import write_ome_tiff
+
+    def _stack(seed):
+        return np.stack([_plane(seed, h, w), _plane(seed + 100, h, w)])
+
+    paths = {}
+    for name, seed in (("reference", 11), ("native", 22), ("registered", 33)):
+        p = tmp_path / f"{name}.ome.tiff"
+        write_ome_tiff(p, _stack(seed), channels=["SMA", "DAPI"], pixel_size_um=0.5)
+        paths[name] = p
+    return paths
+
+
+def test_create_registration_qc_with_a_native_writes_a_two_panel_preview(tmp_path):
+    p = _write_triplet(tmp_path)
+    out = tmp_path / "P001_mov1_QC_RGB.tif"
+
+    qc.create_registration_qc(
+        reference_path=p["reference"],
+        registered_path=p["registered"],
+        output_path=out,
+        scale_factor=1.0,
+        save_fullres=True,
+        save_png=True,
+        save_tiff=True,
+        native_path=p["native"],
+    )
+
+    preview = tifffile.imread(str(out))
+    fullres = tifffile.imread(str(tmp_path / "P001_mov1_QC_RGB_fullres.tif"))
+    png = cv2.imread(str(tmp_path / "P001_mov1_QC_RGB.png"))
+
+    # 40-wide reference -> two 40-wide panels plus the 8px separator.
+    assert preview.shape == (3, 48, 88)
+    assert fullres.shape == (3, 48, 88)
+    assert png.shape == (48, 88, 3)
+
+
+def test_create_registration_qc_without_a_native_stays_single_panel(tmp_path):
+    p = _write_triplet(tmp_path)
+    out = tmp_path / "P001_mov1_QC_RGB.tif"
+
+    qc.create_registration_qc(
+        reference_path=p["reference"],
+        registered_path=p["registered"],
+        output_path=out,
+        scale_factor=1.0,
+        save_fullres=False,
+        save_png=False,
+        save_tiff=True,
+    )
+
+    assert tifffile.imread(str(out)).shape == (3, 48, 40)
+
+
+def test_create_registration_qc_rejects_a_missing_native(tmp_path):
+    p = _write_triplet(tmp_path)
+
+    with pytest.raises(FileNotFoundError, match="Native image not found"):
+        qc.create_registration_qc(
+            reference_path=p["reference"],
+            registered_path=p["registered"],
+            output_path=tmp_path / "x_QC_RGB.tif",
+            native_path=tmp_path / "does_not_exist.ome.tiff",
+        )

@@ -40,7 +40,7 @@ import numpy as np
 from logger import get_logger
 from metadata import extract_channel_names_from_ome, pick_nuclear_index
 from numpy.typing import NDArray
-from ome_io import write_tiff
+from ome_io import read_info, read_plane, write_tiff
 from registration_utils import autoscale
 from skimage.transform import rescale
 from tiled_io import decimation_factor, open_lazy, read_decimated
@@ -350,6 +350,7 @@ def create_registration_qc(
     save_png: bool = True,
     save_tiff: bool = True,
     nuclear_markers=None,
+    native_path: str | Path | None = None,
 ) -> None:
     """Create QC visualizations for registration assessment.
 
@@ -380,6 +381,13 @@ def create_registration_qc(
         names by ``metadata.pick_nuclear_index``, the same rule
         ``lib/MarkerUtils.groovy`` and ``split_multichannel.py`` use. Defaults to
         ``metadata.DEFAULT_NUCLEAR_MARKERS`` so the script stays usable by hand.
+    native_path : str or Path, optional
+        The moving slide's image BEFORE registration -- exactly what entered the
+        registration step. When given, the output is a TWO-panel figure: left
+        *Before* (reference + native), right *After* (reference + registered),
+        both on the reference canvas. When omitted, only the "after" panel is
+        rendered, which is what this function produced before the before/after
+        change and keeps it usable by hand on a plain pair.
 
     Returns
     -------
@@ -436,6 +444,10 @@ def create_registration_qc(
         raise FileNotFoundError(f"Reference image not found: {reference_path}")
     if not registered_path.exists():
         raise FileNotFoundError(f"Registered image not found: {registered_path}")
+
+    native_path = Path(native_path) if native_path is not None else None
+    if native_path is not None and not native_path.exists():
+        raise FileNotFoundError(f"Native image not found: {native_path}")
 
     # Resolve the nuclear/fiducial channel from OME metadata (convert_image guarantees
     # OME-XML is always present) BEFORE touching pixel data, so a malformed/missing
@@ -539,20 +551,31 @@ def create_registration_qc(
         if reg_close is not None:
             reg_close()
 
-    # Save full-resolution QC (compressed)
+    # The native (pre-registration) plane, read through the ome_io seam that owns every
+    # image read added after plan 05 (read_info/read_plane). Its channel index is resolved
+    # the same way the reference's and the registered slide's are -- pick_nuclear_index
+    # over the OME channel names, never a literal "DAPI" test -- because the native slide
+    # of a CELLTOX-only panel is as supported an input as any other.
+    native_nuc = None
+    if native_path is not None:
+        native_info = read_info(native_path)
+        native_channels = list(native_info.channels or [])
+        native_nuc_idx = pick_nuclear_index(native_channels, nuclear_markers)
+        if native_nuc_idx is None:
+            logger.warning(
+                f"No nuclear/fiducial channel found in native image "
+                f"{native_path.name} (channels: {native_channels}, markers: "
+                f"{list(nuclear_markers) if nuclear_markers else 'default'}). "
+                f"Falling back to channel 0."
+            )
+            native_nuc_idx = 0
+        native_nuc = read_plane(native_path, native_nuc_idx, lazy=True)
+
+    # Save full-resolution QC (compressed). scale_factor=1.0 means no rescale.
     if save_fullres:
-        ref_nuc_scaled = autoscale_for_display(ref_nuc, method="minmax")
-        reg_nuc_scaled = autoscale_for_display(reg_nuc, method="minmax")
-
-        rgb_stack_full = np.stack(
-            [
-                reg_nuc_scaled,  # Red channel (registered)
-                ref_nuc_scaled,  # Green channel (reference)
-                np.zeros_like(ref_nuc_scaled, dtype=np.uint8),  # Blue channel
-            ],
-            axis=0,
+        rgb_stack_full = render_before_after(
+            ref_nuc, native_nuc, reg_nuc, scale_factor=1.0
         )
-
         fullres_output_path = output_path.with_name(output_path.stem + "_fullres.tif")
         write_tiff(
             str(fullres_output_path),
@@ -564,15 +587,15 @@ def create_registration_qc(
         logger.info(f"  Saved full-res QC TIFF: {fullres_output_path}")
         del rgb_stack_full
 
-    # Create downsampled overlay
-    rgb_bgr, rgb_cyx = create_nuclear_overlay(
-        ref_nuc, reg_nuc, scale_factor=scale_factor
+    # Downsampled preview, same panel(s) as the full-res write above.
+    preview_cyx = render_before_after(
+        ref_nuc, native_nuc, reg_nuc, scale_factor=scale_factor
     )
 
     # Save PNG (OpenCV uses BGR order)
     if save_png:
         png_output_path = output_path.with_suffix(".png")
-        cv2.imwrite(str(png_output_path), rgb_bgr)
+        cv2.imwrite(str(png_output_path), cyx_to_bgr(preview_cyx))
         logger.info(f"  Saved QC PNG: {png_output_path}")
 
     # Save TIFF (ImageJ-compatible, CYX order)
@@ -580,7 +603,7 @@ def create_registration_qc(
         tiff_output_path = output_path.with_suffix(".tif")
         write_tiff(
             str(tiff_output_path),
-            rgb_cyx,
+            preview_cyx,
             ome=True,
             bigtiff=True,
             metadata={"axes": "CYX", "mode": "composite"},
