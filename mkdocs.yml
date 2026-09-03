@@ -136,15 +136,14 @@ nav:
   - Registration QC: registration_qc.md
   - SpatialData & FlowPath: spatialdata.md
   - Citation: citation.md
-  # NOTE (plan 12, 2026-09-02): the brief for this phase also specifies
-  # `- Supported formats: validation/format_validation.md` and
-  # `- Developing: developing.md` here. Neither target exists on this branch --
-  # plan 03 (docs/developing.md) and plan 07 (docs/validation/format_validation.md,
-  # itself gated on a user cluster run) have not merged. Adding either entry now
-  # would fail `mkdocs build --strict` on `nav.not_found` for a page that does not
-  # exist, which is worse than the orphan-page warning this phase exists to fix.
-  # Add both lines above `- Citation:` in the same commit that lands whichever of
-  # 03/07 lands second.
+  # NOTE (plan 12, 2026-09-02; trimmed 2026-09-03): the brief for this phase
+  # also specifies `- Developing: developing.md` here. That target does not
+  # exist on this branch -- plan 03 (docs/developing.md) has not merged. Adding
+  # the entry now would fail `mkdocs build --strict` on `nav.not_found` for a
+  # page that does not exist, which is worse than the orphan-page warning this
+  # phase exists to fix. Add the line above `- Citation:` in the commit that
+  # lands plan 03.
+  # (Format validation is already navigated above, at `validation/format_validation.md`.)
 
 # ---------------------------------------------------------------------------
 # Appearance extras

@@ -344,7 +344,7 @@ launch. Supply them from a `site.config` (`-c site.config`, copied from
     `-c site.config` work: the closure reads `params.max_*` back lazily.
 
     The `slurm` profile is the one exception. It assigns `resourceLimits` as a
-    **plain map** (`nextflow.config:719`), evaluated eagerly while
+    **plain map** (`nextflow.config:724`), evaluated eagerly while
     `nextflow.config` is parsed — before any `-c` file exists. Measured with a
     `site.config` that actually sets a ceiling (`max_cpus = 64`,
     `max_memory = '300.GB'`), so the comparison is not against two `null`s:

@@ -10,11 +10,11 @@ Include in your methods section:
 - The specific version: use a tagged release (e.g. `v1.0.0`) or the commit SHA from `git rev-parse HEAD`
 - The repository URL: <https://github.com/sceriff0/mirage>
 
-Each tagged release is archived and given a DOI; cite the DOI for the version you
-ran. It is recorded in [`CITATION.cff`](https://github.com/sceriff0/mirage/blob/main/CITATION.cff)
-at the repository root and shown on the README badge. If you ran an untagged
-commit, cite the commit SHA from `git rev-parse HEAD` — that is the only thing
-that makes an untagged run reproducible.
+Each tagged release is archived and given a DOI. Once a release is archived, its
+DOI appears in [`CITATION.cff`](https://github.com/sceriff0/mirage/blob/main/CITATION.cff)
+at the repository root and on the README badge; cite the DOI for the version you
+ran. If you ran an untagged commit, cite the commit SHA from `git rev-parse HEAD`
+— that is the only thing that makes an untagged run reproducible.
 
 ## Tool citations
 

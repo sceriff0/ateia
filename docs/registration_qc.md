@@ -65,7 +65,7 @@ caller who omits it gets the old single "after" panel
 (`bin/generate_registration_qc.py:151-158`, `bin/utils/qc.py`'s `native_nuc`
 guarded on `if native_path is not None`, ~line 599) — that flexibility exists
 because the same script also has callers outside this process. But
-`GENERATE_REGISTRATION_QC` (`modules/local/generate_registration_qc.nf:38,60`)
+`GENERATE_REGISTRATION_QC` (`modules/local/generate_registration_qc.nf:38,64`)
 declares `native_image` as a **required** path in its input tuple and always
 passes `--native ${native_image}`, so a pipeline run never takes the
 single-panel branch. If the file that path names does not resolve,

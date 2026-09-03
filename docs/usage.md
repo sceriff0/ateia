@@ -552,7 +552,7 @@ key grammar is a cross-repository contract — see
     export SINGULARITY_CACHEDIR=$HOME/.singularity_cache
     ```
 
-??? failure "`--expanded_quantification requires --quantify_compartments`"
+??? failure "`expanded_quantification requires quantify_compartments to also be true`"
     Expanded output depends on compartments. Both are booleans, so set them in a
     `-params-file`: either add `"quantify_compartments": true` alongside
     `"expanded_quantification": true`, or drop `expanded_quantification` for a

@@ -152,7 +152,7 @@ The first real run downloads each tool's image, which can take several minutes. 
 | Image | Used for |
 |---|---|
 | `bolt3x/mirage-convert:1.0.0` | `CONVERT_IMAGE` (format conversion) |
-| `bolt3x/mirage-preprocess:1.0.0` | illumination correction, preprocessing/postprocessing QC, size-log aggregation |
+| `bolt3x/mirage-preprocess:1.0.0` | `SPLIT_CHANNELS`, `PREFLIGHT_SCALE`, `TILE_FOR_BASIC` / `APPLY_PROFILES` (illumination correction around `BASICPY`), `GENERATE_PREPROCESS_QC`, `GENERATE_QC_REPORT`, `AGGREGATE_SIZE_LOGS` |
 | `bolt3x/mirage-quantify:1.0.0` | quantification, property extraction, GeoJSON export, postprocessing QC |
 | `bolt3x/mirage-stardist:1.0.0` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method stardist` |
 | `bolt3x/mirage-instanseg:1.0.0` | `SEGMENT` / `SEG_QC_SEGMENT` when `--seg_method instantseg` (default) |
