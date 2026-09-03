@@ -34,6 +34,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import tifffile
 
 # `ome_io` is a bin/utils module importing its siblings flat, so both `bin` and
 # `bin/utils` must be on sys.path -- matching tests/test_ome_io.py.
@@ -324,7 +325,7 @@ def test_a_truncated_slide_fails_at_the_read_rather_than_hanging_or_returning_ze
     )
 
     started = time.monotonic()
-    with pytest.raises(Exception):
+    with pytest.raises((tifffile.TiffFileError, ValueError, OSError)):
         ome_io.read_info(truncated)
     elapsed = time.monotonic() - started
     assert elapsed < 10.0, (

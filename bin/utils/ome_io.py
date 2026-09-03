@@ -1028,6 +1028,8 @@ def read_plane(path, channel: int, *, lazy: bool = True):
             key = tuple(channel if axis == s_idx else slice(None) for axis in range(3))
 
         if lazy:
+            # `key` must stay a plain 3-tuple (c, ys, xs): tiled_io.open_lazy's
+            # `_CHW.__getitem__` unpacks it positionally (`c, ys, xs = key`), not by name.
             view, _dtype, close = open_lazy(str(path))
             try:
                 return np.array(view[key], copy=True)

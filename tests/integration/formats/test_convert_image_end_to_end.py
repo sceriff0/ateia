@@ -26,7 +26,11 @@ for flag: --input_file, --output_dir, --patient_id, --channels, --pixel_size,
 --nuclear-markers. The process passes --nuclear-markers unconditionally (through
 MarkerUtils, for the reason its own comment records), so `_convert` does too --
 relying on argparse's default here would exercise an argv shape the pipeline
-never renders.
+never renders. The one deliberate exception is --channels: the three cases
+parametrized with channels=None (fmt_pyramid, fmt_bigtiff, fmt_image.h5) omit
+it on purpose, to exercise convert_image.py's channel_names_from_file fallback
+-- the path a real run takes whenever the samplesheet's `channels` column is
+absent and the reader's own metadata must supply the names instead.
 """
 
 from __future__ import annotations

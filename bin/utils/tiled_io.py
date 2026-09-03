@@ -79,6 +79,8 @@ def open_lazy(path):
             self.dtype = z.dtype
 
         def __getitem__(self, key):
+            # Positional unpack, not by name: ome_io.py's read_plane is the caller that
+            # matters here, and it builds `key` as a plain (channel, :, :)-shaped 3-tuple.
             c, ys, xs = key
             return self._z[ys, xs] if self._2d else self._z[c, ys, xs]
 
