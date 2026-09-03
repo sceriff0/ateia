@@ -1,3 +1,12 @@
+> **SUPERSEDED — historical record, 2026-09-02 (MIRAGE v1.0.0, release plan 13).**
+> This document plans the `paper_data/` deliverable and mentions, as an input, the
+> ANHIR/ACROBAT landmark harness (`benchmarks/registration_eval/`) and the synthetic
+> ground-truth rung that replaced it (`benchmarks/stare_bench/`); both were deleted and
+> exist on no branch. `benchmarks/README.md` section B is the removal record. Nothing
+> below is runnable; it is kept because it is the dated record of a decision that was
+> actually taken. Do not edit the body — a July plan rewritten to describe a September
+> tree is a lie about its own date.
+
 # Benchmark → method-paper DATA (post-main reconciliation)
 
 **Date:** 2026-07-24

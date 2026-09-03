@@ -1,3 +1,11 @@
+> **SUPERSEDED — historical record, 2026-09-02 (MIRAGE v1.0.0, release plan 13).**
+> The ANHIR/ACROBAT landmark harness this document plans (`benchmarks/registration_eval/`)
+> and the synthetic ground-truth rung that replaced it (`benchmarks/stare_bench/`) were
+> both deleted and exist on no branch. `benchmarks/README.md` section B is the removal
+> record. Nothing below is runnable; it is kept because it is the dated record of a
+> decision that was actually taken. Do not edit the body — a June plan rewritten to
+> describe a September tree is a lie about its own date.
+
 # Benchmarking Foundation Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
