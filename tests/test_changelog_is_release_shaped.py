@@ -47,7 +47,8 @@ def test_no_version_has_two_sections():
     names = [name for name, _ in _headings()]
     duplicates = sorted({n for n in names if names.count(n) > 1})
     assert not duplicates, (
-        "CHANGELOG.md has more than one section for " + ", ".join(duplicates)
+        "CHANGELOG.md has more than one section for "
+        + ", ".join(duplicates)
         + ". A reader looking up what is in a version finds whichever comes first, "
         "and nothing says which one is right."
     )
