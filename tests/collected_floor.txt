@@ -692,4 +692,8 @@
 # exclusions: `pytest --collect-only -q` reports "1938 tests collected", and a
 # full run with MIRAGE_STRICT_SKIPS=1 gives 1921 passed, 17 skipped, 0 failed --
 # 1921 + 17 = 1938. 1934 + 4 = 1938.
-1938
+# RE-MEASURED 2026-09-04 on release/p14-release after rebasing onto dev@8a0801e
+# (the documented-commands leg became its own CI job, adding one
+# BLOCKING_CHECKS parametrisation in tests/test_release_workflow_graph.py):
+# 1938 + 1 = 1939.
+1939
