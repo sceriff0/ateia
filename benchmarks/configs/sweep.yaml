@@ -241,8 +241,6 @@ axes:
   skip_preprocessing:         [false, true]       # true skips BaSiC entirely (conversion still runs):
                                                   # prices the WHOLE PREPROCESS stage in one axis, the
                                                   # way skip_spatialdata_export prices EXPORT_SPATIALDATA
-  preproc_tile_size:          [1024, 1950, 3000]  # BaSiC tile size — illumination-fit cost vs field size
-  preproc_skip_nuclear:       [true, false]       # false puts the nuclear/fiducial channels through
                                                   # BaSiC too: more PREPROCESS work, and it changes the
                                                   # very channel the downstream chain (registration +
                                                   # segmentation) consumes — a cost AND quality axis
@@ -252,25 +250,14 @@ axes:
   quantify_compartments:      [false, true]
   expanded_quantification:    [false, true]       # valid because baseline quantify_compartments=true
   # --- SpatialData export ---
-  skip_spatialdata_export:    [false, true]       # cost of the whole EXPORT_SPATIALDATA stage
   spatialdata_include_image:  [false, true]       # writes the full pyramid into the zarr store: the
                                                   # dominant output-size axis (duplicates the largest
                                                   # artifact the pipeline produces)
   # --- OME-TIFF / GeoJSON export (output size + write time; quantification is mask-derived, so the
   #     GeoJSON geometry knobs cannot change any measurement) ---
-  compression:                [zstd, lzw, none]   # OME-TIFF codec. NB: 'none' inflates every downstream
-                                                  # stage's INPUT bytes, so it shifts the memory
-                                                  # regression's x-axis — read it as an I/O axis, not as
-                                                  # a free comparison against the zstd runs.
-  pyramid_resolutions:        [4, 8]              # pyramid level count
-  pyramid_scale:              [2, 4]              # downsample factor between levels — with the level
                                                   # count above, the other half of pyramid total size
   tilex:                      [256, 512, 1024]    # OME-TIFF tile size (write pattern / random-access cost)
-  simplify_tolerance:         [0.0, 1.0, 2.0]     # display-only
-  geojson_coord_precision:    [1, 2, 3]           # display-only
   # --- MEASUREMENT SETTINGS (these change what is measured, so runs are NOT comparable across values;
-  #     swept to price the QC itself, never to compare quality between values) ---
-  qc_scale_factor:            [0.25, 0.5]         # registration-QC render downsampling. Pure QC render
                                                   # cost; changes no measured quantity.
   reg_qc:                     [0, 1, 2]           # CAVEAT: reg_qc<2 emits NO staged accuracy metric, so
                                                   # those runs are absent from registration_accuracy.csv.
