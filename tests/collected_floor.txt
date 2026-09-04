@@ -699,4 +699,6 @@
 # RE-MEASURED 2026-09-04, release 1.0.0 plan 03 Task 2 (tests/test_no_todo_author_markers.py,
 # four cases: the tree-wide placeholder scan, its scope floor, a detector self-test
 # and the TODO(release) exclusion). 1926 passed + 17 skipped = 1943 = 1939 + 4.
-1943
+# RE-MEASURED 2026-09-04, release 1.0.0 plan 14 Task 3
+# (tests/test_citation_metadata_matches_the_manifest.py, three cases). 1943 + 3 = 1946.
+1946
