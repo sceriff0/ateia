@@ -696,4 +696,7 @@
 # (the documented-commands leg became its own CI job, adding one
 # BLOCKING_CHECKS parametrisation in tests/test_release_workflow_graph.py):
 # 1938 + 1 = 1939.
-1939
+# RE-MEASURED 2026-09-04, release 1.0.0 plan 03 Task 2 (tests/test_no_todo_author_markers.py,
+# four cases: the tree-wide placeholder scan, its scope floor, a detector self-test
+# and the TODO(release) exclusion). 1926 passed + 17 skipped = 1943 = 1939 + 4.
+1943
