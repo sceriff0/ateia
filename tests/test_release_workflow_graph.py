@@ -736,6 +736,15 @@ BLOCKING_CHECKS = [
     # mkdocs.yml. `--strict` is the whole point of the needle -- `mkdocs build`
     # without it exits 0 on every warning this check exists to catch.
     ("mkdocs strict site build", "mkdocs build --strict"),
+    # Added 2026-09-04. The execution counterpart to the documented-command
+    # static guard: every `nextflow run` a doc page shows is actually launched
+    # under --dry_run. It ran as the last step of nextflow-stub from plan 12 and
+    # now has its own job, so a deleted step would otherwise have no symptom
+    # beyond a faster build.
+    (
+        "documented commands launch (execution leg)",
+        "tests/documented_commands_launch.sh",
+    ),
 ]
 
 
@@ -1496,6 +1505,9 @@ GATE_MEMBERSHIP = {
     "_test-suite.yml": {
         "python-tests",
         "nextflow-stub",
+        # Split out of nextflow-stub on 2026-09-04: 31 serial `nextflow run`
+        # launches were ~400 s of that job and made it the gate's long pole.
+        "documented-commands",
         "nf-test-stub",
         "security-tests",
         "format-tests",
