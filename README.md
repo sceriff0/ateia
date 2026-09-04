@@ -212,8 +212,7 @@ mkdocs serve
 
 ## Credits
 
-<!-- TODO(author): replace with the real author/maintainer name(s) and contact before publication. -->
-MIRAGE was developed by TODO(author).
+MIRAGE was developed by Valerio Fassi and Yinxiu Zhan at the Istituto Europeo di Oncologia. Questions and bug reports: the [GitHub issue tracker](https://github.com/sceriff0/mirage/issues).
 
 ## Citations
 

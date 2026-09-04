@@ -8,7 +8,10 @@ repository-code: "https://github.com/sceriff0/mirage"
 url: "https://mirage-pipeline.readthedocs.io/"
 type: software
 authors:
-  # TODO(author): replace with the real author(s). Use family-names/given-names for
-  # people, or `name:` for an organization. Add `orcid:` where available.
-  - name: "TODO(author)"
+  - family-names: "Fassi"
+    given-names: "Valerio"
+    affiliation: "Istituto Europeo di Oncologia"
+  - family-names: "Zhan"
+    given-names: "Yinxiu"
+    affiliation: "Istituto Europeo di Oncologia"
 # TODO(release): add `doi:` here once the tagged release is archived (e.g. via Zenodo).
