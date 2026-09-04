@@ -1,6 +1,8 @@
 """No tracked file may carry the author placeholder.
 
-WHAT THIS IS FOR. Eight `TODO(author)` markers survived into a 1.0.0 tree, across
+WHAT THIS IS FOR. Eight author-placeholder markers (the MARKER constant below;
+spelled in two halves everywhere in this file so the scan cannot find itself --
+which it did, in CI, the first time) survived into a 1.0.0 tree, across
 six files: LICENSE, CITATION.cff (twice), README.md (twice), mkdocs.yml (twice)
 and nextflow.config. A placeholder in a LICENSE is not a cosmetic defect -- it is
 a licence with no grantor -- and one in CITATION.cff propagates into every
