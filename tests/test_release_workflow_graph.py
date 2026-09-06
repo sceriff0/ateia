@@ -704,6 +704,11 @@ BLOCKING_CHECKS = [
     # nowhere. It ran nowhere -- it was named in the developer notes as "the
     # behavioural resume check" and appeared in no workflow file.
     ("resume determinism (behavioural)", "tests/resume_check.sh"),
+    # Added 2026-09-06. Same class again: whether a cleanup_level pin REACHES the
+    # publish gates is an evaluation-order outcome that `nextflow config` reports
+    # wrongly (it prints the pinned value while the gates are already frozen), so
+    # only a run can observe it.
+    ("cleanup_level pin reaches the gates (behavioural)", "tests/cleanup_level_pin.sh"),
     ("shipped-defaults stub run", "-profile shipped_defaults_test"),
     ("DEEPCELL token-leak guard", "tests/modules/segment_deepcell_token.nf.test"),
     ("token-guard collection assertion", "--dry-run"),

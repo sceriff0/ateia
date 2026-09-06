@@ -7,7 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+- **`cleanup_level` set in a profile or a `-c` site config was silently ignored by
+  the publish gates.** Each intermediate `publishDir` gated on a plain
+  `enabled: params.cleanup_level == 'none'` boolean, which Nextflow evaluates at the
+  line it appears on — and `nextflow.config` includes `conf/modules.config` before it
+  declares `profiles {}`, and before any `-c` file is merged. The gates therefore
+  froze against the shipped `'final'`, while the resolved config still printed the
+  pinned `'none'`. Measured on a stub run: a `params { cleanup_level = 'none' }` pin
+  passed via `-c site.config` (the operator route README.md documents) published
+  **32** files, the same as `'final'`; only the CLI flag or a `-params-file` gave
+  **64**. Since `none` is what makes `--start <step>` and `add_cycle` re-entry
+  possible, a site config that pinned it produced a tree with no intermediates and
+  no checkpoint manifest, after the full run. The gate is now the same predicate
+  inside each entry's `saveAs:` closure, which is resolved per file at publish time
+  against the final merged params; the published layout at either level is
+  byte-for-byte unchanged (`64` / `32` files, same paths). Guarded statically by
+  `tests/test_cleanup_publish_gates.py` (an `enabled:` gate in either form now
+  fails) and behaviourally by the new `tests/cleanup_level_pin.sh` — three stub runs
+  through the test profile's own pin, a `-c` pin, and a `-c` override — which has
+  its own step in the blocking suite. `-profile test` alone now publishes the full
+  tree, which is what `conf/test.config`'s comment always said it did.
 
 ## [1.0.0] - 2026-09-04
 

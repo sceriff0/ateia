@@ -390,6 +390,15 @@ jobs:
         run: |
           bash tests/cleanup_work.sh
 
+      - name: Verify a cleanup_level pin reaches the publish gates (behavioural)
+        # Same class as cleanup_work.sh: an evaluation-order OUTCOME only a run
+        # can observe. `nextflow config` prints the pinned value even when the
+        # gates froze before the pin was merged, so neither a static guard nor
+        # the resolved config can stand in for this. Three container-free stub
+        # runs: the test profile's own pin, a `-c` pin, and a `-c` override.
+        run: |
+          bash tests/cleanup_level_pin.sh
+
       - name: Verify -resume reuses the cache (behavioural)
         # The behavioural counterpart to tests/test_resume_determinism.py, and like
         # tests/cleanup_work.sh it needs its own step or it runs nowhere: it is

@@ -121,7 +121,7 @@ def test_every_intermediate_publish_is_gated():
                 f"intermediate '{leaf}' ({path_expr}) with no cleanup gate"
             )
     assert not ungated, "\n".join(ungated) + (
-        f"\n\nAdd `enabled: {{ {GATE} }}` to that publishDir entry. "
+        f"\n\nAdd `saveAs: {{ fn -> {GATE} ? fn : null }}` to that publishDir entry. "
         "Layout.FINAL_KINDS decides which leaves are final."
     )
 
@@ -172,17 +172,16 @@ def test_the_gate_text_is_identical_everywhere():
     only thing standing between them and drift is that they are compared -- a
     site that read `!= 'final'` would behave identically today and differently
     the moment a third level is added."""
-    # Only the CLEANUP gates. `publishDir = [ enabled: false ]` appears seven
-    # times as a deliberate "this process publishes nothing" marker (SEG_QC's
-    # per-slide masks, the solve steps' intermediates) and predates all of this;
-    # folding those in would make this assertion about something else entirely.
+    # Every occurrence of the predicate, wherever it sits. `publishDir =
+    # [ enabled: false ]` appears as a deliberate "this process publishes
+    # nothing" marker (SEG_QC's per-slide masks, the solve steps'
+    # intermediates) and never names cleanup_level, so it is not matched.
     variants = {
-        " ".join(v.split()).rstrip("]").strip()
+        " ".join(v.split())
         for v in re.findall(
-            r"enabled:\s*([^,\n]+)",
+            r"params\.cleanup_level\s*[!=]=\s*'[^']*'",
             strip_comments((REPO_ROOT / "conf" / "modules.config").read_text()),
         )
-        if "cleanup_level" in v
     }
     assert variants, "no cleanup gate found in conf/modules.config at all"
     assert variants == {GATE}, (
@@ -190,63 +189,57 @@ def test_the_gate_text_is_identical_everywhere():
     )
 
 
-def test_no_gate_is_written_as_a_closure():
-    """`enabled: { ... }` is silently WRONG, and this is the only thing that
-    would catch it.
+def test_the_gate_is_lazy_never_an_eager_enabled_boolean():
+    """The gate must be evaluated PER FILE, at publish time -- inside `saveAs:`
+    -- never as an `enabled:` boolean computed when the config is parsed.
 
-    Nextflow does not resolve a closure in publishDir's `enabled:` option the
-    way it resolves one in `path:` or `saveAs:`. The closure OBJECT is coerced
-    instead, and it coerces to false -- so every gated publish is dropped at
-    EVERY level, including --cleanup_level=none.
+    `enabled:` cannot be right in either form:
 
-    Measured 2026-08-25 on NXF_VER=26.04.6, stub, one patient:
+      * `enabled: { ... }` (a closure) is not resolved the way `path:`/`saveAs:`
+        closures are; the closure OBJECT is coerced and comes out false, so every
+        gated publish is dropped at EVERY level. Measured 2026-08-25 on
+        NXF_VER=26.04.6: 30 files at both levels.
+      * `enabled: params.cleanup_level == 'none'` (a plain boolean) is evaluated
+        EAGERLY at the line it appears on, and nextflow.config includes
+        conf/modules.config BEFORE it declares `profiles {}` and before any `-c`
+        file is merged. So the gate freezes against the SHIPPED 'final' and no
+        profile or site-config pin ever reaches it -- while the resolved config
+        prints `cleanup_level = 'none'` and every static guard passes. Measured
+        2026-09-06 on main @ c201f443, stub, one patient:
 
-        enabled: { params.cleanup_level == 'none' }   ->  30 files at BOTH levels
-        enabled: params.cleanup_level == 'none'       ->  30 at final, 62 at none
+            -profile test                    (conf/test.config pins 'none') -> 32
+            -profile test -c site.config     (params { cleanup_level='none' }) -> 32
+            -profile test --cleanup_level none                                -> 64
 
-    62 is the pre-change baseline. The closure form silently made
-    `--cleanup_level=none` a no-op, which would have broken every `--start
-    <step>` and every add_cycle chain -- while all the static guards above, and
-    a normal `-profile test` run, passed. It is the form the plan specified,
-    which is why it is worth a test rather than a comment.
+        The README routes every external operator through `-c site.config`, and
+        'none' is what makes `--start` and add_cycle re-entry possible. That was
+        the plain-boolean form's price, and it was too high.
 
-    **How to reproduce those two numbers, and why a naive attempt does not.**
-    Re-measured 2026-09-01, same engine (NXF_VER=26.04.6), same stub, same one
-    patient. `git archive`-ing the tree at 4a6134e reproduces 30 / 62 exactly.
-    At HEAD the same two runs give **29 / 64**, and every file of that drift is
-    accounted for: `+P001_registrar.pickle` (6823d4b) and
-    `+qc/preflight_scale_report.json` (9d786bd) at both levels, and at `final`
-    the four `csv/*.csv` checkpoint manifests were replaced by the single
-    `csv/README.txt` once no manifest was written at a cleaning level
-    (30 + 2 - 4 + 1 = 29; 62 + 2 = 64). The numbers above are a dated record of
-    one commit, not a live assertion -- nothing here asserts a file count.
-
-    The trap, measured the same day and the reason a re-measurement looks like
-    a regression: **the level has to arrive on the command line or in a
-    -params-file. A profile pin does not reach these gates.**
-
-        -profile test                          (conf/test.config pins 'none') ->  32
-        -profile test --cleanup_level none                                    ->  64
-        -profile test -params-file {cleanup_level: none}                      ->  64
-        -profile test --cleanup_level final                                   ->  29
-
-    All four ran the same 35 tasks with the same effective `cleanup_level`.
-    `enabled:` is a plain boolean, so it is evaluated EAGERLY when
-    `conf/modules.config` is parsed -- and `nextflow.config` includes that file
-    (line 532) BEFORE it declares `profiles {}` (line 581), so a profile's
-    `params.cleanup_level` is not yet set and every gate freezes against the
-    shipped `'final'`. That is the price of the plain-boolean form the test
-    below enforces, and it is not a reason to go back: the closure form gates
-    nothing at all, at any level, by any route.
+    `saveAs:` is a closure Nextflow resolves per published file, in a context
+    where `params` is the FINAL merged map. `{ fn -> <GATE> ? fn : null }` keeps
+    the file at 'none' and skips it (null) at every other level, and it
+    composes with the existing versions.yml filter in the same closure. The
+    behavioural counterpart -- three stub runs through the profile, a `-c`
+    pin and a `-c` override -- is tests/cleanup_level_pin.sh.
     """
-    offenders = [
-        f"conf/modules.config: `enabled: {{{v.strip()}}}` is a closure and will "
-        f"coerce to false at every cleanup level"
-        for v in re.findall(
-            r"enabled:\s*\{([^}]*)\}",
-            strip_comments((REPO_ROOT / "conf" / "modules.config").read_text()),
-        )
+    config = strip_comments((REPO_ROOT / "conf" / "modules.config").read_text())
+    eager = [
+        f"conf/modules.config: `enabled: {v.strip()}` evaluates when the config "
+        "is parsed, before profiles and -c files merge -- the pin never reaches it"
+        for v in re.findall(r"enabled:\s*([^,\n]+)", config)
+        if "cleanup_level" in v
     ]
-    assert not offenders, "\n".join(offenders) + (
-        f"\n\nWrite it as a plain boolean expression: `enabled: {GATE}`"
+    assert not eager, "\n".join(eager) + (
+        f"\n\nMove the predicate into saveAs: `saveAs: {{ fn -> {GATE} ? fn : null }}`"
     )
+    not_lazy = []
+    for selector, line, path_expr, _leaf_, entry in _publish_entries():
+        if GATE not in entry:
+            continue
+        m = re.search(r"saveAs:\s*\{([^}]*)\}", entry)
+        if not m or GATE not in m.group(1):
+            not_lazy.append(
+                f"conf/modules.config:{line} withName: '{selector}' gates "
+                f"{path_expr} outside a saveAs closure"
+            )
+    assert not not_lazy, "\n".join(not_lazy)

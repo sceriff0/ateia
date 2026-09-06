@@ -968,11 +968,13 @@ DEFAULT_BAND_BYTES = 64 * 1024 * 1024    <span class="cm"># a BYTE budget, not a
       same set of files it did before. That count was <b>62</b> when this work landed; re-measured 2026-09-01
       on Nextflow 26.04.6 the same full-publish run gives <b>64</b> &mdash; the two files added since are
       <code>P001_registrar.pickle</code> and <code>qc/preflight_scale_report.json</code>, and nothing was lost.
-      Which number you get depends on how the cleanup level reaches the publish gates, because they are plain
-      booleans evaluated when <code>conf/modules.config</code> is parsed, before any profile has been applied:
-      <b>64</b> with <code>--cleanup_level none</code> on the command line or in a <code>-params-file</code>,
-      <b>29</b> with <code>--cleanup_level final</code>, and <b>32</b> for a bare <code>-profile test</code>,
-      whose pinned level never reaches them. That establishes the equivalence claims — byte-identical outputs and no
+      Until 2026-09-06 which number you got depended on how the cleanup level reached the publish gates, because
+      they were plain booleans evaluated when <code>conf/modules.config</code> was parsed, before any profile or
+      <code>-c</code> file had been applied: <b>64</b> with <code>--cleanup_level none</code> on the command line
+      or in a <code>-params-file</code>, <b>29</b> with <code>--cleanup_level final</code>, and <b>32</b> for a
+      bare <code>-profile test</code>, whose pinned level never reached them. The gates are now
+      <code>saveAs:</code> closures resolved per file at publish time, so every route gives <b>64</b> at
+      <code>none</code> and <code>tests/cleanup_level_pin.sh</code> holds it there. That establishes the equivalence claims — byte-identical outputs and no
       whole-stack decode — SPLIT_CHANNELS on raw file bytes, registration QC and preprocess QC on
       <code>np.array_equal</code>, the convert on full file bytes with the OME UUID masked, and both BASICPY-path
       readers on the <i>size</i> of every array their lazy view hands back. It establishes <b>none</b> of the
