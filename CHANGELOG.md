@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`cleanup_level` set in a profile or a `-c` site config was silently ignored by
+  the publish gates.** Each intermediate `publishDir` gated on a plain
+  `enabled: params.cleanup_level == 'none'` boolean, which Nextflow evaluates at the
+  line it appears on — and `nextflow.config` includes `conf/modules.config` before it
+  declares `profiles {}`, and before any `-c` file is merged. The gates therefore
+  froze against the shipped `'final'`, while the resolved config still printed the
+  pinned `'none'`. Measured on a stub run: a `params { cleanup_level = 'none' }` pin
+  passed via `-c site.config` (the operator route README.md documents) published
+  **32** files, the same as `'final'`; only the CLI flag or a `-params-file` gave
+  **64**. Since `none` is what makes `--start <step>` and `add_cycle` re-entry
+  possible, a site config that pinned it produced a tree with no intermediates and
+  no checkpoint manifest, after the full run. The gate is now the same predicate
+  inside each entry's `saveAs:` closure, which is resolved per file at publish time
+  against the final merged params; the published layout at either level is
+  byte-for-byte unchanged (`64` / `32` files, same paths). Guarded statically by
+  `tests/test_cleanup_publish_gates.py` (an `enabled:` gate in either form now
+  fails) and behaviourally by the new `tests/cleanup_level_pin.sh` — three stub runs
+  through the test profile's own pin, a `-c` pin, and a `-c` override — which has
+  its own step in the blocking suite. `-profile test` alone now publishes the full
+  tree, which is what `conf/test.config`'s comment always said it did.
+
+## [1.0.0] - 2026-09-04
+
 ### Migration — read before comparing any output across this release
 
 Seven changes alter what a run produces or what its outputs MEAN, and every one of
@@ -1075,13 +1099,7 @@ after that doc and is detailed inline below:
   already holds. `.gitignore` keeps the filename listed so a stray re-creation cannot
   become a tracked figure by accident.
 
-## [1.0.0] - 2026-07-29
-
-First public release. End-to-end multiplex WSI processing: preprocessing, registration,
-segmentation, per-cell quantification, and QuPath-compatible GeoJSON + pyramidal
-OME-TIFF export.
-
-### Added
+### The 1.0.0 feature set
 - **Preprocessing** — BaSiC illumination correction with FOV tiling; Bio-Formats/ND2 →
   OME-TIFF conversion; multi-channel parallel processing.
 - **Registration** — two backends selected by `--registration_method`:
@@ -1091,14 +1109,15 @@ OME-TIFF export.
     (`reg_tiled_*` params), usable on a laptop.
 - **Staged registration QC** (`reg_qc` = 0/1/2) — DAPI overlay plus segmentation-overlap
   dice/displacement attributed per registration stage.
-- **Segmentation** — three backends via `--seg_method`: StarDist (default), InstanSeg,
+- **Segmentation** — three backends via `--seg_method`: InstanSeg (default), StarDist,
   and CellSAM; GPU or CPU; configurable nuclei→whole-cell expansion.
 - **Quantification** — per-cell morphology and per-channel intensity; optional
   per-compartment (Nucleus / Cytoplasm / Cell) signal and expanded Mean/Sum statistics.
 - **Reference-free segmentation-quality evaluation** — CellSegmentationEvaluator
   `QualityScore` with a `cse_max_pixels` downsample cap.
 - **Export** — QuPath-compatible `cells.geojson` and pyramidal OME-TIFF; configurable
-  contour simplification (`simplify_tolerance`) and coordinate precision.
+  contour simplification (`simplify_tolerance`) and coordinate precision; an additive
+  scverse-native SpatialData `.zarr` store, written by default.
 - **Incremental cyclic-IF** (`--mode add_cycle`) — fold a new imaging cycle into a
   completed patient run, reusing the prior reference, segmentation mask, and old-marker
   quantification; recomputes only the new cycle.
@@ -1110,4 +1129,5 @@ OME-TIFF export.
 - Per-process version tracking, aggregated QC report, and computational-resource report.
 - JSON-schema parameter definitions plus Groovy validation utilities.
 
+[Unreleased]: https://github.com/sceriff0/mirage/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/sceriff0/mirage/releases/tag/v1.0.0

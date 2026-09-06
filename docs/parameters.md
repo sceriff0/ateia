@@ -431,7 +431,11 @@ of `work/` for a file nobody reads.
 
 The surviving set has one owner, `Layout.FINAL_KINDS`; the gate at each
 `publishDir` is an inlined copy of one predicate, held to it by
-`tests/test_cleanup_publish_gates.py`.
+`tests/test_cleanup_publish_gates.py`. The predicate sits inside a `saveAs:`
+closure, which Nextflow resolves per file at publish time, so the level takes
+effect however it arrives — `--cleanup_level` on the command line, a
+`-params-file`, a profile, or a `-c site.config` (`tests/cleanup_level_pin.sh`
+runs all three of the latter against the stub).
 
 **No checkpoint manifest is written at `final`.** A manifest names *where* a step's
 artifacts landed, and at this level they landed nowhere — so every row would record

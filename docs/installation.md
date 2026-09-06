@@ -74,8 +74,9 @@ names never reach a commit. Every command on this site ends in `-c site.config`.
     goes further: it substitutes each command's placeholders for this repo's own
     fixtures and actually runs `nextflow -stub -params-file params/dry_run.json`
     against every one, so an unrecognised flag or a schema rejection fails CI too,
-    not just a missing `--outdir`. Both run in `_test-suite.yml`'s
-    `nextflow-stub` job.
+    not just a missing `--outdir`. Both run in `_test-suite.yml` — the static
+    check inside the Python suite, the launches in their own
+    `documented-commands` job.
 
 ## Choose a container backend
 

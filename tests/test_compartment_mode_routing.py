@@ -327,7 +327,10 @@ ALLOWED_LINES = {
         # `wc -l conf/modules.config` rose 1343 -> 1347 -> 1356. Re-pinned directly
         # from the merged file, not computed:
         #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1269
-        1269: (
+        # 1269 -> 1270 (2026-09-06): the cleanup-gate comment on CONVERT_IMAGE's
+        # publishDir grew by one line when the gate moved into `saveAs:`.
+        #   grep -n "params.expanded_quantification ?" conf/modules.config  ->  1270
+        1270: (
             "ext.args = { params.expanded_quantification ? '--expanded' : "
             "'' } -- conf/*.config closures cannot see lib/*.groovy classes, "
             "so ext.args must read params raw here."

@@ -390,6 +390,15 @@ jobs:
         run: |
           bash tests/cleanup_work.sh
 
+      - name: Verify a cleanup_level pin reaches the publish gates (behavioural)
+        # Same class as cleanup_work.sh: an evaluation-order OUTCOME only a run
+        # can observe. `nextflow config` prints the pinned value even when the
+        # gates froze before the pin was merged, so neither a static guard nor
+        # the resolved config can stand in for this. Three container-free stub
+        # runs: the test profile's own pin, a `-c` pin, and a `-c` override.
+        run: |
+          bash tests/cleanup_level_pin.sh
+
       - name: Verify -resume reuses the cache (behavioural)
         # The behavioural counterpart to tests/test_resume_determinism.py, and like
         # tests/cleanup_work.sh it needs its own step or it runs nowhere: it is
@@ -410,22 +419,6 @@ jobs:
         run: |
           bash tests/resume_check.sh 1
 
-      - name: Verify every documented nextflow command launches
-        # The execution counterpart to
-        # tests/test_documented_commands_are_runnable.py's static token check
-        # (Fix Round 1). That check is blind to anything only nf-schema itself
-        # can catch -- an unrecognised flag, a missing required parameter -- so
-        # this script actually runs `nextflow -stub -params-file
-        # params/dry_run.json -c <site.config>` for every documented command,
-        # substituted against this job's own fixtures. Needs its own step for
-        # the same reason cleanup_work.sh and resume_check.sh do: it is neither
-        # a pytest nor an nf-test, and `--dry_run` keeps it fast -- every
-        # command validates and exits before any process (therefore any
-        # container) is ever touched, so this belongs here rather than in the
-        # docker/singularity-pulling containers.yml job.
-        run: |
-          bash tests/documented_commands_launch.sh
-
       - name: Upload stub test results
         if: always()
         uses: actions/upload-artifact@v4
@@ -437,25 +430,82 @@ jobs:
             .nextflow.log
 
   # ============================================================================
-  # nf-test stub suite (fast, every push/PR) — SHARDED FOUR WAYS.
+  # Documented-command launch leg (blocking) — its OWN job, off the critical path.
   #
-  # Measured on CI run 33641966166 (branch release/p01-suite-truth, 2026-09-02):
-  # every other job in this file finishes in <= 5 min, but nf-test (stub) alone
-  # ran > 25 min over 214 tests, serially -- it IS the CI wall-clock. nf-test
-  # 0.9.0+ (the pinned NFTEST_VERSION) supports `--shard i/n` with
-  # `--shard-strategy round-robin`, so the suite is split into four parallel
-  # legs instead of run end to end on one machine. `round-robin` (rather than
-  # splitting by file) keeps the four shards close to even as tests are added
-  # or removed, without anyone having to rebalance a static list by hand.
+  # This used to be the last step of nextflow-stub. Measured on CI run
+  # 33788497145 (2026-09-03): 397 s of that job's 786 s were the 31 serial
+  # `nextflow run` launches this script performs, which made nextflow-stub the
+  # longest job in the blocking suite -- ahead of every nf-test shard -- and the
+  # whole gate's wall-clock. Running the launches in parallel does not help: a
+  # 4-vCPU runner is CPU-bound on JVM start-up (measured 402 s at 4 jobs vs 397 s
+  # serial, run 33819107201), and JVM flags (C1-only, serial GC) moved nothing
+  # locally either. What does help is the graph: as its own job this leg runs
+  # BESIDE the stub legs and the nf-test shards instead of after them, so the
+  # gate finishes when the slowest shard does. Same matrix as nextflow-stub, so
+  # every documented command still launches on both the floor and the edge
+  # Nextflow.
+  #
+  # It is the execution counterpart to tests/test_documented_commands_are_runnable.py's
+  # static token check. That check is blind to anything only nf-schema itself can
+  # catch -- an unrecognised flag, a missing required parameter -- so this script
+  # actually runs `nextflow -stub -params-file params/dry_run.json -c <site.config>`
+  # for every documented command, substituted against this job's own fixtures.
+  # `--dry_run` keeps it container-free: every command validates and exits before
+  # any process (therefore any container) is ever touched.
   # ============================================================================
-  nf-test-stub:
-    name: nf-test (stub, ${{ matrix.shard }}/4)
+  documented-commands:
+    name: Documented commands launch (NF ${{ matrix.nextflow-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        nextflow-version: ['25.04.0', 'latest-everything']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up Nextflow
+        uses: ./.github/actions/setup-nextflow
+        with:
+          nextflow-version: ${{ matrix.nextflow-version }}
+
+      - name: Generate test data
+        uses: ./.github/actions/generate-testdata
+
+      - name: Verify every documented nextflow command launches
+        run: |
+          bash tests/documented_commands_launch.sh
+
+  # ============================================================================
+  # nf-test stub suite (fast, every push/PR) — SHARDED SIX WAYS.
+  #
+  # Measured on CI run 33641966166 (branch release/p01-suite-truth, 2026-09-02):
+  # every other job in this file finishes in <= 5 min, but nf-test (stub) alone
+  # ran > 25 min over 214 tests, serially -- it IS the CI wall-clock. nf-test
+  # 0.9.0+ (the pinned NFTEST_VERSION) supports `--shard i/n` with
+  # `--shard-strategy round-robin`, so the suite is split into parallel legs
+  # instead of run end to end on one machine. `round-robin` (rather than
+  # splitting by file) keeps the shards close to even as tests are added or
+  # removed, without anyone having to rebalance a static list by hand.
+  #
+  # Four shards took 505-651 s each (run 33788497145, 2026-09-03, 240 stub
+  # tests); six is the next step once the documented-commands leg moved out of
+  # nextflow-stub and the shards became the gate's long pole again. Per-shard
+  # fixed cost (checkout, Nextflow + nf-test install, fixture generation) is
+  # about 60 s, so the returns diminish quickly past this.
+  # ============================================================================
+  nf-test-stub:
+    name: nf-test (stub, ${{ matrix.shard }}/6)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
 
     steps:
       - name: Checkout repository
@@ -480,7 +530,7 @@ jobs:
         # need no images. Real cases are tagged "real" and run in nightly.yml.
         run: |
           nf-test test --tag stub --profile test --verbose \
-            --shard ${{ matrix.shard }}/4 --shard-strategy round-robin
+            --shard ${{ matrix.shard }}/6 --shard-strategy round-robin
 
       - name: Upload nf-test results
         if: always()
@@ -773,7 +823,7 @@ jobs:
   # tests/test_release_workflow_graph.py asserts the list is complete.
   suite-gate:
     name: Suite gate
-    needs: [python-tests, nextflow-stub, nf-test-stub, security-tests, format-tests, ruff, docs]
+    needs: [python-tests, nextflow-stub, documented-commands, nf-test-stub, security-tests, format-tests, ruff, docs]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -792,6 +842,10 @@ jobs:
           fi
           if [ "${{ needs.nextflow-stub.result }}" != "success" ]; then
             echo "::error::Nextflow stub tests did not pass (result: ${{ needs.nextflow-stub.result }})"
+            exit 1
+          fi
+          if [ "${{ needs.documented-commands.result }}" != "success" ]; then
+            echo "::error::The documented-command launch leg did not pass (result: ${{ needs.documented-commands.result }})"
             exit 1
           fi
           if [ "${{ needs.nf-test-stub.result }}" != "success" ]; then

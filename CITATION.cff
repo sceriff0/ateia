@@ -2,13 +2,19 @@ cff-version: 1.2.0
 message: "If you use MIRAGE, please cite it as below."
 title: "MIRAGE: a Nextflow pipeline for multiplex whole-slide image processing"
 version: 1.0.0
-date-released: 2026-07-29
+date-released: 2026-09-04
 license: MIT
 repository-code: "https://github.com/sceriff0/mirage"
 url: "https://mirage-pipeline.readthedocs.io/"
 type: software
 authors:
-  # TODO(author): replace with the real author(s). Use family-names/given-names for
-  # people, or `name:` for an organization. Add `orcid:` where available.
-  - name: "TODO(author)"
-# TODO(release): add `doi:` here once the tagged release is archived (e.g. via Zenodo).
+  - family-names: "Fassi"
+    given-names: "Valerio"
+    affiliation: "Istituto Europeo di Oncologia"
+  - family-names: "Zhan"
+    given-names: "Yinxiu"
+    affiliation: "Istituto Europeo di Oncologia"
+# No DOI is registered for this release: cite `version` and `repository-code`
+# above. If a Zenodo deposition is made later, add its CONCEPT DOI here as
+# `doi:` (Zenodo's "Cite all versions" -- it resolves to the newest version
+# and never needs updating) in a docs-only commit; the tag does not move.

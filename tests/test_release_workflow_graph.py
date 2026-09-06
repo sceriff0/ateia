@@ -704,6 +704,11 @@ BLOCKING_CHECKS = [
     # nowhere. It ran nowhere -- it was named in the developer notes as "the
     # behavioural resume check" and appeared in no workflow file.
     ("resume determinism (behavioural)", "tests/resume_check.sh"),
+    # Added 2026-09-06. Same class again: whether a cleanup_level pin REACHES the
+    # publish gates is an evaluation-order outcome that `nextflow config` reports
+    # wrongly (it prints the pinned value while the gates are already frozen), so
+    # only a run can observe it.
+    ("cleanup_level pin reaches the gates (behavioural)", "tests/cleanup_level_pin.sh"),
     ("shipped-defaults stub run", "-profile shipped_defaults_test"),
     ("DEEPCELL token-leak guard", "tests/modules/segment_deepcell_token.nf.test"),
     ("token-guard collection assertion", "--dry-run"),
@@ -736,6 +741,15 @@ BLOCKING_CHECKS = [
     # mkdocs.yml. `--strict` is the whole point of the needle -- `mkdocs build`
     # without it exits 0 on every warning this check exists to catch.
     ("mkdocs strict site build", "mkdocs build --strict"),
+    # Added 2026-09-04. The execution counterpart to the documented-command
+    # static guard: every `nextflow run` a doc page shows is actually launched
+    # under --dry_run. It ran as the last step of nextflow-stub from plan 12 and
+    # now has its own job, so a deleted step would otherwise have no symptom
+    # beyond a faster build.
+    (
+        "documented commands launch (execution leg)",
+        "tests/documented_commands_launch.sh",
+    ),
 ]
 
 
@@ -1496,6 +1510,9 @@ GATE_MEMBERSHIP = {
     "_test-suite.yml": {
         "python-tests",
         "nextflow-stub",
+        # Split out of nextflow-stub on 2026-09-04: 31 serial `nextflow run`
+        # launches were ~400 s of that job and made it the gate's long pole.
+        "documented-commands",
         "nf-test-stub",
         "security-tests",
         "format-tests",

@@ -707,4 +707,29 @@
 # (v1.0.0 release prep, plans 01-12). `pytest --collect-only -q` reports 1936 =
 # dev's 1934 + the two test_release_workflow_graph.py cases parametrised over
 # .github/workflows/benchmarks.yml, which exists on this branch and no other.
-1936
+#
+# RE-MEASURED 2026-09-04, release 1.0.0 plan 14 Task 2 (collapse the two 1.0.0
+# CHANGELOG.md sections into one dated release). Four new cases, all in the new
+# tests/test_changelog_is_release_shaped.py (test_no_version_has_two_sections,
+# test_the_manifest_version_has_a_dated_section, test_an_unreleased_section_exists,
+# test_every_heading_has_a_link_definition); no deletions, no other test count
+# moved. Measured after generating the fixtures, with the suite's standard
+# exclusions: `pytest --collect-only -q` reports "1938 tests collected", and a
+# full run with MIRAGE_STRICT_SKIPS=1 gives 1921 passed, 17 skipped, 0 failed --
+# 1921 + 17 = 1938. 1934 + 4 = 1938.
+# RE-MEASURED 2026-09-04 on release/p14-release after rebasing onto dev@8a0801e
+# (the documented-commands leg became its own CI job, adding one
+# BLOCKING_CHECKS parametrisation in tests/test_release_workflow_graph.py):
+# 1938 + 1 = 1939.
+# RE-MEASURED 2026-09-04, release 1.0.0 plan 03 Task 2 (tests/test_no_todo_author_markers.py,
+# four cases: the tree-wide placeholder scan, its scope floor, a detector self-test
+# and the TODO(release) exclusion). 1926 passed + 17 skipped = 1943 = 1939 + 4.
+# RE-MEASURED 2026-09-04, release 1.0.0 plan 14 Task 3
+# (tests/test_citation_metadata_matches_the_manifest.py, three cases). 1943 + 3 = 1946.
+# RE-MEASURED 2026-09-06 (cleanup_level gate made lazy: one BLOCKING_CHECKS
+# parametrisation in tests/test_release_workflow_graph.py for tests/cleanup_level_pin.sh).
+# 1946 + 1 = 1947.
+# RE-MEASURED 2026-09-06 on benchmarking after merging dev@82754a6e (the eight
+# identity commits from plans 03/14 plus the lazy cleanup_level gate): dev's 1947
+# + the two benchmarks.yml parametrisations that exist only on this branch = 1949.
+1949
